@@ -18,10 +18,13 @@ namespace Shared.Icp.DTOs.Projects
         [StringLength(1000, ErrorMessage = "توضیحات نباید بیشتر از 1000 کاراکتر باشد")]
         public string? Description { get; set; }
 
+        [StringLength(500, ErrorMessage = "نام فایل نباید بیشتر از 500 کاراکتر باشد")]
+        public string? SourceFileName { get; set; }
+
         public DateTime? EndDate { get; set; }
 
         [Required(ErrorMessage = "وضعیت الزامی است")]
         [StringLength(50, ErrorMessage = "وضعیت نباید بیشتر از 50 کاراکتر باشد")]
-        public ProjectStatus Status { get; set; }
+        public string? Status { get; set; }
     }
 }

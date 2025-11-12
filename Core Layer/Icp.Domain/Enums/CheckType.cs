@@ -1,37 +1,37 @@
 ﻿namespace Core.Icp.Domain.Enums
 {
     /// <summary>
-    /// نوع کنترل کیفیت
+    /// Defines the different types of quality control checks that can be performed.
     /// </summary>
     public enum CheckType
     {
         /// <summary>
-        /// بررسی وزن
+        /// A check of the sample's weight.
         /// </summary>
         WeightCheck = 1,
 
         /// <summary>
-        /// بررسی حجم
+        /// A check of the sample's volume.
         /// </summary>
         VolumeCheck = 2,
 
         /// <summary>
-        /// بررسی ضریب رقت
+        /// A check of the sample's dilution factor.
         /// </summary>
         DilutionFactorCheck = 3,
 
         /// <summary>
-        /// بررسی سطرهای خالی
+        /// A check for empty or blank values in the sample data.
         /// </summary>
         EmptyCheck = 4,
 
         /// <summary>
-        /// بررسی CRM
+        /// A check against a Certified Reference Material (CRM).
         /// </summary>
         CRMCheck = 5,
 
         /// <summary>
-        /// کالیبراسیون Drift
+        /// A check for instrument drift using a calibration standard.
         /// </summary>
         DriftCalibration = 6
     }

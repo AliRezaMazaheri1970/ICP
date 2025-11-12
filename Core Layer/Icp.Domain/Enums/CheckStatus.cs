@@ -1,27 +1,27 @@
 ﻿namespace Core.Icp.Domain.Enums
 {
     /// <summary>
-    /// وضعیت نتیجه کنترل کیفیت
+    /// Represents the status of a quality control check result.
     /// </summary>
     public enum CheckStatus
     {
         /// <summary>
-        /// قبول
+        /// The check passed successfully.
         /// </summary>
         Pass = 1,
 
         /// <summary>
-        /// رد
+        /// The check failed.
         /// </summary>
         Fail = 2,
 
         /// <summary>
-        /// هشدار
+        /// The check resulted in a warning.
         /// </summary>
         Warning = 3,
 
         /// <summary>
-        /// در انتظار
+        /// The check is pending and has not been performed yet.
         /// </summary>
         Pending = 4
     }

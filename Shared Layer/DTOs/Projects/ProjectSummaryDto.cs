@@ -21,7 +21,7 @@ namespace Shared.Icp.DTOs.Projects
         /// <summary>
         /// وضعیت پروژه
         /// </summary>
-        public ProjectStatus Status { get; set; }
+        public string? Status { get; set; }
 
         /// <summary>
         /// تاریخ شروع

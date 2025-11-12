@@ -1,44 +1,47 @@
 ﻿namespace Core.Icp.Domain.Enums
 {
+    /// <summary>
+    /// Defines the possible statuses of a project.
+    /// </summary>
     public enum ProjectStatus
     {
         /// <summary>
-        /// پروژه جدید ایجاد شده
+        /// The project has been newly created but not yet processed.
         /// </summary>
         Created = 0,
 
         /// <summary>
-        /// در حال پردازش
+        /// The project data is currently being processed.
         /// </summary>
         Processing = 1,
 
         /// <summary>
-        /// پردازش کامل شده
+        /// The initial data processing for the project is complete.
         /// </summary>
         Processed = 2,
 
         /// <summary>
-        /// در حال بررسی کیفیت
+        /// The project is undergoing quality control checks.
         /// </summary>
         UnderQualityCheck = 3,
 
         /// <summary>
-        /// تایید شده
+        /// The project has been reviewed and approved.
         /// </summary>
         Approved = 4,
 
         /// <summary>
-        /// رد شده
+        /// The project has been reviewed and rejected.
         /// </summary>
         Rejected = 5,
 
         /// <summary>
-        /// بایگانی شده
+        /// The project is archived and is no longer active.
         /// </summary>
         Archived = 6,
 
         /// <summary>
-        /// در حال ویرایش
+        /// The project is in a draft state and can be edited.
         /// </summary>
         Draft = 7
     }

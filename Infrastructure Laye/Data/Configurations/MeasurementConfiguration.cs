@@ -4,14 +4,24 @@ using Core.Icp.Domain.Entities.Samples;
 
 namespace Infrastructure.Icp.Data.Configurations
 {
+    /// <summary>
+    ///     Configures the entity type <see cref="Measurement" /> for Entity Framework Core.
+    /// </summary>
     public class MeasurementConfiguration : IEntityTypeConfiguration<Measurement>
     {
+        /// <summary>
+        ///     Configures the entity of type <see cref="Measurement" />.
+        /// </summary>
+        /// <param name="builder">The builder to be used to configure the entity type.</param>
         public void Configure(EntityTypeBuilder<Measurement> builder)
         {
+            // Table
             builder.ToTable("Measurements");
 
+            // Key
             builder.HasKey(m => m.Id);
 
+            // Properties
             builder.Property(m => m.Notes)
                 .HasMaxLength(1000);
 
@@ -21,7 +31,7 @@ namespace Infrastructure.Icp.Data.Configurations
             builder.Property(m => m.UpdatedBy)
                 .HasMaxLength(100);
 
-            // Index ها
+            // Indexes
             builder.HasIndex(m => m.SampleId)
                 .HasDatabaseName("IX_Measurement_SampleId");
 
@@ -31,7 +41,7 @@ namespace Infrastructure.Icp.Data.Configurations
             builder.HasIndex(m => new { m.SampleId, m.ElementId })
                 .HasDatabaseName("IX_Measurement_Sample_Element");
 
-            // روابط
+            // Relationships
             builder.HasOne(m => m.Sample)
                 .WithMany(s => s.Measurements)
                 .HasForeignKey(m => m.SampleId)

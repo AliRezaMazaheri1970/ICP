@@ -5,12 +5,20 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Infrastructure.Icp.Data.Repositories
 {
+    /// <summary>
+    ///     Repository for Element entities, extending the base repository.
+    /// </summary>
     public class ElementRepository : BaseRepository<Element>, IElementRepository
     {
+        /// <summary>
+        ///     Initializes a new instance of the <see cref="ElementRepository" /> class.
+        /// </summary>
+        /// <param name="context">The database context.</param>
         public ElementRepository(ICPDbContext context) : base(context)
         {
         }
 
+        /// <inheritdoc />
         public async Task<IEnumerable<Element>> GetActiveElementsAsync(
             CancellationToken cancellationToken = default)
         {
@@ -20,6 +28,7 @@ namespace Infrastructure.Icp.Data.Repositories
                 .ToListAsync(cancellationToken);
         }
 
+        /// <inheritdoc />
         public async Task<Element?> GetBySymbolAsync(
             string symbol,
             CancellationToken cancellationToken = default)
@@ -28,6 +37,7 @@ namespace Infrastructure.Icp.Data.Repositories
                 .FirstOrDefaultAsync(e => !e.IsDeleted && e.Symbol == symbol, cancellationToken);
         }
 
+        /// <inheritdoc />
         public async Task<IEnumerable<Element>> GetBySymbolsAsync(
             IEnumerable<string> symbols,
             CancellationToken cancellationToken = default)
@@ -37,6 +47,7 @@ namespace Infrastructure.Icp.Data.Repositories
                 .ToListAsync(cancellationToken);
         }
 
+        /// <inheritdoc />
         public async Task<Element?> GetWithIsotopesAsync(
             Guid id,
             CancellationToken cancellationToken = default)
