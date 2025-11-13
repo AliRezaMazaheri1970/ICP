@@ -83,25 +83,3 @@ public class PdfPageSettings
     /// </summary>
     public bool CompressPdf { get; set; } = true;
 }
-
-/// <summary>
-/// محل نمایش شماره صفحه
-/// </summary>
-public enum PageNumberPosition
-{
-    TopLeft,
-    TopCenter,
-    TopRight,
-    BottomLeft,
-    BottomCenter,
-    BottomRight
-}
-
-/// <summary>
-/// جهت متن
-/// </summary>
-public enum TextDirection
-{
-    LeftToRight,
-    RightToLeft
-}

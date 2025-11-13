@@ -11,21 +11,4 @@
         public bool IsVisible { get; set; } = true;
         public Dictionary<string, object> Data { get; set; } = new();
     }
-
-    /// <summary>
-    /// انواع بخش‌های گزارش
-    /// </summary>
-    public enum ReportSectionType
-    {
-        Header,
-        ExecutiveSummary,
-        SampleDetails,
-        QualityControl,
-        ElementStatistics,
-        CRMAnalysis,
-        RMAnalysis,
-        Charts,
-        Conclusions,
-        Footer
-    }
 }

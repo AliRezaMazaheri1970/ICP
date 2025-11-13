@@ -1,4 +1,6 @@
-﻿namespace Infrastructure.Icp.Reports.Models
+﻿using Core.Icp.Domain.Entities.Samples;
+
+namespace Infrastructure.Icp.Reports.Models
 {
     /// <summary>
     /// داده‌های اندازه‌گیری برای گزارش

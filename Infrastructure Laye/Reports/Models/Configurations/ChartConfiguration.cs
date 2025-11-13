@@ -1,5 +1,4 @@
 ﻿using Core.Icp.Domain.Enums;
-using Shared.Icp.DTOs.Reports;
 
 namespace Infrastructure.Icp.Reports.Models.Configurations
 {
@@ -101,17 +100,5 @@ namespace Infrastructure.Icp.Reports.Models.Configurations
         /// قابل تعامل (Interactive)
         /// </summary>
         public bool IsInteractive { get; set; } = false;
-    }
-
-    /// <summary>
-    /// محل نمایش راهنما
-    /// </summary>
-    public enum LegendPosition
-    {
-        Top,
-        Bottom,
-        Left,
-        Right,
-        None
     }
 }
