@@ -12,7 +12,7 @@ namespace Infrastructure.Icp.Reports.Models
         public DateTime RunDate { get; set; }
         public decimal Weight { get; set; }
         public decimal Volume { get; set; }
-        public int DilutionFactor { get; set; }
+        public decimal DilutionFactor { get; set; }
         public string Status { get; set; } = string.Empty;
         public List<MeasurementReportData> Measurements { get; set; } = new();
         public Dictionary<string, string> Metadata { get; set; } = new();

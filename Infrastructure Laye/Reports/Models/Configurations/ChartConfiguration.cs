@@ -102,4 +102,16 @@ namespace Infrastructure.Icp.Reports.Models.Configurations
         /// </summary>
         public bool IsInteractive { get; set; } = false;
     }
+
+    /// <summary>
+    /// محل نمایش راهنما
+    /// </summary>
+    public enum LegendPosition
+    {
+        Top,
+        Bottom,
+        Left,
+        Right,
+        None
+    }
 }

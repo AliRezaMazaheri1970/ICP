@@ -1,6 +1,4 @@
-﻿using Core.Icp.Domain.Entities.Samples;
-
-namespace Infrastructure.Icp.Reports.Models
+﻿namespace Infrastructure.Icp.Reports.Models
 {
     /// <summary>
     /// داده‌های اندازه‌گیری برای گزارش
@@ -8,7 +6,7 @@ namespace Infrastructure.Icp.Reports.Models
     public class MeasurementReportData
     {
         public string ElementSymbol { get; set; } = string.Empty;
-        public int Isotope { get; set; }
+        public int? Isotope { get; set; }
         public decimal NetIntensity { get; set; }
         public decimal? Concentration { get; set; }
         public decimal? FinalConcentration { get; set; }
@@ -24,7 +22,7 @@ namespace Infrastructure.Icp.Reports.Models
                 NetIntensity = measurement.NetIntensity,
                 Concentration = measurement.Concentration,
                 FinalConcentration = measurement.FinalConcentration,
-                Unit = measurement.ConcentrationUnit,
+                Unit = "ppm",
                 IsValid = measurement.IsValid
             };
         }
