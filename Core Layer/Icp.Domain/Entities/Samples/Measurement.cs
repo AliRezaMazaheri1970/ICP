@@ -1,5 +1,6 @@
 ﻿using Core.Icp.Domain.Base;
 using Core.Icp.Domain.Entities.Elements;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Core.Icp.Domain.Entities.Samples
 {

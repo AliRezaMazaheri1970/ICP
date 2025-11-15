@@ -1,4 +1,5 @@
 ﻿using Core.Icp.Domain.Base;
+using Core.Icp.Domain.Entities.Samples;
 
 namespace Core.Icp.Domain.Entities.Elements
 {
@@ -53,5 +54,6 @@ namespace Core.Icp.Domain.Entities.Elements
         /// Gets or sets the collection of isotopes associated with this element.
         /// </summary>
         public ICollection<Isotope> Isotopes { get; set; } = new List<Isotope>();
+        public ICollection<Measurement> Measurements { get; set; } = new List<Measurement>();
     }
 }

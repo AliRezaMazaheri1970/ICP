@@ -1,56 +1,56 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Core.Icp.Domain.Entities.Samples;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using Core.Icp.Domain.Entities.Samples;
 
-namespace Infrastructure.Icp.Data.Configurations
+namespace Infrastructure.Icp.Data.Configurations;
+
+public class MeasurementConfiguration : IEntityTypeConfiguration<Measurement>
 {
-    /// <summary>
-    ///     Configures the entity type <see cref="Measurement" /> for Entity Framework Core.
-    /// </summary>
-    public class MeasurementConfiguration : IEntityTypeConfiguration<Measurement>
+    public void Configure(EntityTypeBuilder<Measurement> builder)
     {
-        /// <summary>
-        ///     Configures the entity of type <see cref="Measurement" />.
-        /// </summary>
-        /// <param name="builder">The builder to be used to configure the entity type.</param>
-        public void Configure(EntityTypeBuilder<Measurement> builder)
-        {
-            // Table
-            builder.ToTable("Measurements");
+        builder.ToTable("Measurements");
 
-            // Key
-            builder.HasKey(m => m.Id);
+        // Key از BaseEntity می‌آید (مثلاً Id)
+        builder.HasKey(m => m.Id);
 
-            // Properties
-            builder.Property(m => m.Notes)
-                .HasMaxLength(1000);
+        // FKs
+        builder.HasOne(m => m.Sample)
+               .WithMany(s => s.Measurements)
+               .HasForeignKey(m => m.SampleId)
+               .OnDelete(DeleteBehavior.Cascade);
 
-            builder.Property(m => m.CreatedBy)
-                .HasMaxLength(100);
+        builder.HasOne(m => m.Element)
+               .WithMany(e => e.Measurements)
+               .HasForeignKey(m => m.ElementId)
+               .OnDelete(DeleteBehavior.Restrict);
 
-            builder.Property(m => m.UpdatedBy)
-                .HasMaxLength(100);
+        // ElementSymbol
+        builder.Property(m => m.ElementSymbol)
+               .IsRequired()
+               .HasMaxLength(10);
 
-            // Indexes
-            builder.HasIndex(m => m.SampleId)
-                .HasDatabaseName("IX_Measurement_SampleId");
+        // Isotope
+        builder.Property(m => m.Isotope)
+               .IsRequired(false);
 
-            builder.HasIndex(m => m.ElementId)
-                .HasDatabaseName("IX_Measurement_ElementId");
+        // شدت‌ها و غلظت‌ها – حواست به Precision باشه
+        builder.Property(m => m.RawIntensity)
+               .HasColumnType("decimal(18,6)");
 
-            builder.HasIndex(m => new { m.SampleId, m.ElementId })
-                .HasDatabaseName("IX_Measurement_Sample_Element");
+        builder.Property(m => m.NetIntensity)
+               .HasColumnType("decimal(18,6)");
 
-            // Relationships
-            builder.HasOne(m => m.Sample)
-                .WithMany(s => s.Measurements)
-                .HasForeignKey(m => m.SampleId)
-                .OnDelete(DeleteBehavior.Cascade);
+        builder.Property(m => m.Concentration)
+               .HasColumnType("decimal(18,6)");
 
-            builder.HasOne(m => m.Element)
-                .WithMany()
-                .HasForeignKey(m => m.ElementId)
-                .OnDelete(DeleteBehavior.Restrict);
-        }
+        builder.Property(m => m.FinalConcentration)
+               .HasColumnType("decimal(18,6)")
+               .IsRequired(false);
+
+        builder.Property(m => m.IsValid)
+               .HasDefaultValue(true);
+
+        builder.Property(m => m.Notes)
+               .HasMaxLength(500);
     }
 }

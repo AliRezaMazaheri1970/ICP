@@ -14,9 +14,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Core Layer\Icp.Domain\Domain.csproj" />
-    <ProjectReference Include="..\..\Shared Layer\Constants\Constants.csproj" />
-    <ProjectReference Include="..\..\Shared Layer\DTOs\DTOs.csproj" />
+    <ProjectReference Include="..\..\Presentation Layer\API\API.csproj" />
+    <ProjectReference Include="..\..\Infrastructure Laye\Data\Data.csproj" />
   </ItemGroup>
 
 </Project>

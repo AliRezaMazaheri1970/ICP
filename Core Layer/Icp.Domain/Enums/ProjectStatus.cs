@@ -43,6 +43,11 @@
         /// <summary>
         /// The project is in a draft state and can be edited.
         /// </summary>
-        Draft = 7
+        Draft = 7,
+        
+        /// <summary>
+        /// The project is currently active.
+        /// </summary>
+        Active = 8
     }
 }
