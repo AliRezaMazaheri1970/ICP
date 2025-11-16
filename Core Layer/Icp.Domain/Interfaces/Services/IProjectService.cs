@@ -9,12 +9,13 @@ namespace Core.Icp.Domain.Interfaces.Services;
 public interface IProjectService
 {
     /// <summary>
-    /// همه پروژه‌ها.
+    /// همه پروژه‌ها (برای گزارش‌ها و دیباگ).
     /// </summary>
     Task<IEnumerable<Project>> GetAllProjectsAsync();
 
     /// <summary>
-    /// پروژه (در پیاده‌سازی می‌توان شامل Samples هم باشد).
+    /// دریافت یک پروژه بر اساس Id.
+    /// در پیاده‌سازی می‌تواند شامل Samples هم باشد.
     /// </summary>
     Task<Project?> GetProjectByIdAsync(Guid id);
 

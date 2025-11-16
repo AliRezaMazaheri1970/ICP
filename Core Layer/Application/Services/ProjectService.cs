@@ -16,22 +16,26 @@ public class ProjectService : IProjectService
         _unitOfWork = unitOfWork;
     }
 
+    /// <inheritdoc />
     public async Task<IEnumerable<Project>> GetAllProjectsAsync()
     {
         return await _unitOfWork.Projects.GetAllAsync();
     }
 
+    /// <inheritdoc />
     public async Task<Project?> GetProjectByIdAsync(Guid id)
     {
         // برای خواندن پروژه همراه با Samples از متد مخصوص استفاده می‌کنیم
         return await _unitOfWork.Projects.GetWithSamplesAsync(id);
     }
 
+    /// <inheritdoc />
     public async Task<IEnumerable<Project>> GetRecentProjectsAsync(int count)
     {
         return await _unitOfWork.Projects.GetRecentProjectsAsync(count);
     }
 
+    /// <inheritdoc />
     public async Task<Project> CreateProjectAsync(Project project)
     {
         await _unitOfWork.Projects.AddAsync(project);
@@ -39,6 +43,7 @@ public class ProjectService : IProjectService
         return project;
     }
 
+    /// <inheritdoc />
     public async Task<Project> UpdateProjectAsync(Project project)
     {
         await _unitOfWork.Projects.UpdateAsync(project);
@@ -46,6 +51,7 @@ public class ProjectService : IProjectService
         return project;
     }
 
+    /// <inheritdoc />
     public async Task<bool> DeleteProjectAsync(Guid id)
     {
         var project = await _unitOfWork.Projects.GetByIdAsync(id);
@@ -57,12 +63,14 @@ public class ProjectService : IProjectService
         return true;
     }
 
+    /// <inheritdoc />
     public Task<string> SaveProjectToFileAsync(Guid projectId, string filePath)
     {
         // TODO: در فازهای بعدی با لایه Files پیاده‌سازی می‌شود
         throw new NotImplementedException();
     }
 
+    /// <inheritdoc />
     public Task<Project> LoadProjectFromFileAsync(string filePath)
     {
         // TODO: در فازهای بعدی با لایه Files پیاده‌سازی می‌شود
