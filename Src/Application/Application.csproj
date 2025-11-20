@@ -18,9 +18,7 @@
     <Folder Include="Features\Projects\Commands\" />
     <Folder Include="Features\Projects\DTOs\" />
     <Folder Include="Features\Projects\Queries\" />
-    <Folder Include="Features\QualityControl\DTOs\" />
     <Folder Include="Features\QualityControl\Interface\" />
-    <Folder Include="Features\QualityControl\Queries\" />
     <Folder Include="Features\QualityControl\Services\" />
     <Folder Include="Features\Reports\Commands\" />
     <Folder Include="Features\Reports\DTOs\" />
