@@ -1,6 +1,9 @@
-﻿namespace Core.Icp.Domain.Interfaces;
+﻿using Domain.Common;
 
-public interface IUnitOfWork
+namespace Domain.Interfaces;
+
+public interface IUnitOfWork : IDisposable
 {
-    Task<int> SaveChangesAsync(CancellationToken ct = default);
+    IGenericRepository<T> Repository<T>() where T : BaseEntity;
+    Task<int> CommitAsync(CancellationToken cancellationToken);
 }

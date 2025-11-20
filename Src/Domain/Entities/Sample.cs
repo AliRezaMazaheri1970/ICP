@@ -1,29 +1,21 @@
-﻿using Core.Icp.Domain.Common;
-using Core.Icp.Domain.ValueObjects;
-using System.Diagnostics.Metrics;
+﻿using Domain.Common;
+using Domain.Enums;
 
-namespace Core.Icp.Domain.Entities;
+namespace Domain.Entities;
 
-public class Sample : AuditableEntity
+public class Sample : BaseEntity
 {
-    public Guid Id { get; set; }
-    public string SampleId { get; private set; } = null!;
-    public string SampleName { get; private set; } = null!;
-    public DateTime? RunDate { get; private set; }
-    public double? Weight { get; private set; }           // گرم
-    public double? Volume { get; private set; }           // میلی‌لیتر
-    public DilutionFactor DilutionFactor { get; private set; } = DilutionFactor.Default;
+    // نام یا لیبل محلول
+    public required string SolutionLabel { get; set; }
 
-    public ICollection<Measurement> Measurements { get; private set; } = new List<Measurement>();
+    public SampleType Type { get; set; }
 
-    // برای QC
-    public bool IsDeleted { get; private set; }
-    public string? DeletionReason { get; private set; }
+    public double Weight { get; set; }
 
-    // متدهای QC در Application می‌آیند، اینجا فقط propertyها
-    public void MarkAsDeleted(string reason)
-    {
-        IsDeleted = true;
-        DeletionReason = reason;
-    }
+    public double Volume { get; set; }
+
+    public double DilutionFactor { get; set; }
+
+    // رابطه One-to-Many با اندازه‌گیری‌ها
+    public virtual ICollection<Measurement> Measurements { get; set; } = new List<Measurement>();
 }

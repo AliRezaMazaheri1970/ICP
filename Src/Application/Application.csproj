@@ -12,26 +12,33 @@
     <Folder Include="Features\Calibration\Commands\" />
     <Folder Include="Features\Calibration\DTOs\" />
     <Folder Include="Features\Calibration\Queries\" />
+    <Folder Include="Features\CRM\DTOs\" />
+    <Folder Include="Features\CRM\Interface\" />
+    <Folder Include="Features\CRM\Services\" />
     <Folder Include="Features\Projects\Commands\" />
     <Folder Include="Features\Projects\DTOs\" />
     <Folder Include="Features\Projects\Queries\" />
     <Folder Include="Features\QualityControl\Commands\" />
+    <Folder Include="Features\QualityControl\DTOs\" />
+    <Folder Include="Features\QualityControl\Interface\" />
     <Folder Include="Features\QualityControl\Queries\" />
+    <Folder Include="Features\QualityControl\Services\" />
     <Folder Include="Features\Reports\Commands\" />
     <Folder Include="Features\Reports\DTOs\" />
     <Folder Include="Features\Reports\Queries\" />
-    <Folder Include="Features\Samples\Commands\" />
     <Folder Include="Features\Samples\DTOs\" />
     <Folder Include="Features\Samples\Queries\" />
-    <Folder Include="Services\" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="MathNet.Numerics" Version="5.0.0" />
+    <PackageReference Include="MediatR" Version="13.1.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Domain\Domain.csproj" />
+    <ProjectReference Include="..\Shared\Shared.csproj" />
   </ItemGroup>
 
 </Project>
