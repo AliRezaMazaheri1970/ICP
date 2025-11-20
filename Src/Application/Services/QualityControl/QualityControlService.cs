@@ -1,8 +1,8 @@
-﻿using Core.Icp.Domain.Interfaces.Services;
-using Domain.Entities;
+﻿using Domain.Entities;
 using Domain.Enums;
-using Domain.Interfaces; // برای IUnitOfWork
-using Domain.Models; // برای ProjectSettings و Summary
+using Domain.Interfaces; // IUnitOfWork
+using Domain.Interfaces.Services;
+using Domain.Models; // ProjectSettings, ProjectQualitySummary
 
 namespace Application.Services.QualityControl;
 
@@ -11,6 +11,7 @@ public class QualityControlService(IUnitOfWork unitOfWork) : IQualityControlServ
     public async Task<int> RunAllChecksAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         int totalFailures = 0;
+        // ترتیب اجرای چک‌ها
         totalFailures += await RunCheckAsync(projectId, CheckType.WeightCheck, cancellationToken);
         totalFailures += await RunCheckAsync(projectId, CheckType.VolumeCheck, cancellationToken);
         totalFailures += await RunCheckAsync(projectId, CheckType.DilutionFactorCheck, cancellationToken);
@@ -25,13 +26,11 @@ public class QualityControlService(IUnitOfWork unitOfWork) : IQualityControlServ
 
         if (project == null) throw new Exception("Project not found");
 
-        // استفاده از متد GetSettings که به Project اضافه کردیم
         var settings = project.GetSettings<ProjectSettings>() ?? new ProjectSettings();
 
         if (!settings.AutoQualityControl) return 0;
 
         var sampleRepo = unitOfWork.Repository<Sample>();
-        // نکته: نام اینکلودها باید دقیق باشد
         var samples = await sampleRepo.GetAsync(s => s.ProjectId == projectId, includeProperties: "QualityChecks,Measurements");
         var qualityCheckRepo = unitOfWork.Repository<QualityCheck>();
 
@@ -41,6 +40,7 @@ public class QualityControlService(IUnitOfWork unitOfWork) : IQualityControlServ
         {
             var (status, message) = EvaluateSample(sample, checkType, settings);
 
+            // آپدیت یا ایجاد رکورد QC
             var qcEntry = sample.QualityChecks.FirstOrDefault(q => q.CheckType == checkType);
             if (qcEntry == null)
             {
@@ -55,7 +55,6 @@ public class QualityControlService(IUnitOfWork unitOfWork) : IQualityControlServ
 
             qcEntry.Status = status;
             qcEntry.Message = message;
-            // qcEntry.LastModified = DateTime.UtcNow; // اگر در BaseEntity دارید
 
             if (status == CheckStatus.Fail) failedCount++;
         }
@@ -67,7 +66,7 @@ public class QualityControlService(IUnitOfWork unitOfWork) : IQualityControlServ
     public async Task<ProjectQualitySummary> GetSummaryAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         var checks = await unitOfWork.Repository<QualityCheck>()
-            .GetAsync(q => q.Sample.ProjectId == projectId);
+            .GetAsync(q => q.ProjectId == projectId);
 
         return new ProjectQualitySummary
         {
@@ -79,6 +78,8 @@ public class QualityControlService(IUnitOfWork unitOfWork) : IQualityControlServ
         };
     }
 
+    // --- منطق بررسی‌ها ---
+
     private static (CheckStatus Status, string Message) EvaluateSample(Sample sample, CheckType type, ProjectSettings settings)
     {
         return type switch
@@ -87,25 +88,24 @@ public class QualityControlService(IUnitOfWork unitOfWork) : IQualityControlServ
             CheckType.VolumeCheck => ValidateRange(sample.Volume, settings.MinAcceptableVolume, settings.MaxAcceptableVolume, "Volume", "mL"),
             CheckType.DilutionFactorCheck => ValidateRange(sample.DilutionFactor, settings.MinDilutionFactor, settings.MaxDilutionFactor, "DF", ""),
             CheckType.EmptyCheck => ValidateEmpty(sample),
-            _ => (CheckStatus.Pending, "Check logic not implemented")
+            _ => (CheckStatus.Pending, "Not Implemented")
         };
     }
 
     private static (CheckStatus, string) ValidateRange(double value, double? min, double? max, string name, string unit)
     {
-        if (value <= 0) return (CheckStatus.Fail, $"{name} is invalid (<= 0).");
-        if (min.HasValue && value < min.Value) return (CheckStatus.Fail, $"{name} < Min ({min}).");
-        if (max.HasValue && value > max.Value) return (CheckStatus.Fail, $"{name} > Max ({max}).");
+        if (value <= 0) return (CheckStatus.Fail, $"{name} Invalid (<=0)");
+        if (min.HasValue && value < min.Value) return (CheckStatus.Fail, $"{name} < Min ({min})");
+        if (max.HasValue && value > max.Value) return (CheckStatus.Fail, $"{name} > Max ({max})");
         return (CheckStatus.Pass, "OK");
     }
 
     private static (CheckStatus, string) ValidateEmpty(Sample sample)
     {
         if (sample.Measurements == null || !sample.Measurements.Any())
-            return (CheckStatus.Fail, "No measurements.");
+            return (CheckStatus.Fail, "No Measurements");
 
-        // مثال: اگر همه مقادیر ۰ باشند
         bool hasData = sample.Measurements.Any(m => m.Value != 0);
-        return hasData ? (CheckStatus.Pass, "OK") : (CheckStatus.Fail, "Empty measurements.");
+        return hasData ? (CheckStatus.Pass, "OK") : (CheckStatus.Fail, "All Zero");
     }
 }

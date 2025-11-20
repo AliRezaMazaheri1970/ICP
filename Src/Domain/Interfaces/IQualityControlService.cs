@@ -1,7 +1,7 @@
 ﻿using Domain.Enums;
 using Domain.Models;
 
-namespace Application.Services.Interfaces;
+namespace Domain.Interfaces.Services;
 
 public interface IQualityControlService
 {

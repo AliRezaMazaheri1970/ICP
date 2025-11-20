@@ -1,4 +1,4 @@
-﻿namespace Domain.Models; // یا Domain.Entities اگر راحت‌ترید
+﻿namespace Domain.Models;
 
 public class ProjectSettings
 {

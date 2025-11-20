@@ -1,4 +1,6 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using Application.Services.QualityControl;
+using Domain.Interfaces.Services;
+using Microsoft.Extensions.DependencyInjection;
 using System.Reflection;
 
 namespace Application;
@@ -9,6 +11,8 @@ public static class DependencyInjection
     {
         // ثبت تمام Commandها و Queryهای موجود در این پروژه
         services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(Assembly.GetExecutingAssembly()));
+
+        services.AddScoped<IQualityControlService, QualityControlService>();
 
         return services;
     }

@@ -16,6 +16,6 @@ public class Sample : BaseEntity
 
     public virtual ICollection<Measurement> Measurements { get; set; } = new List<Measurement>();
 
-    // --- اضافه شده برای QC ---
+    // --- اضافه شده برای فاز ۳ (QC) ---
     public virtual ICollection<QualityCheck> QualityChecks { get; set; } = new List<QualityCheck>();
 }

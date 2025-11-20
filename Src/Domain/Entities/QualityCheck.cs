@@ -5,7 +5,7 @@ namespace Domain.Entities;
 
 public class QualityCheck : BaseEntity
 {
-    public Guid ProjectId { get; set; } // اختیاری: برای سرعت بیشتر در کوئری‌ها
+    public Guid ProjectId { get; set; }
     public Guid SampleId { get; set; }
     public virtual Sample Sample { get; set; } = null!;
 
