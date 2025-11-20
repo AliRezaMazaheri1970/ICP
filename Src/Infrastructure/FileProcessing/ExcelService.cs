@@ -1,7 +1,10 @@
-﻿using Application.Services.Interfaces;
+﻿// مسیر فایل: Infrastructure/FileProcessing/ExcelService.cs
+
+using Application.Services.Interfaces;
 using ClosedXML.Excel;
 using Domain.Entities;
 using Domain.Enums;
+using System.Text.RegularExpressions;
 
 namespace Infrastructure.FileProcessing;
 
@@ -13,89 +16,73 @@ public class ExcelService : IExcelService
 
         try
         {
-            // باز کردن فایل اکسل از روی رم (Stream)
             using var workbook = new XLWorkbook(fileStream);
-
-            // گرفتن اولین شیت
             var worksheet = workbook.Worksheet(1);
-
-            // بررسی محدوده داده‌ها (اگر شیت خالی باشد، نال برمی‌گرداند)
             var range = worksheet.RangeUsed();
-            if (range == null)
-            {
-                return samples; // لیست خالی برمی‌گرداند
-            }
 
-            // ردیف اول را به عنوان هدر نگه می‌داریم تا نام عناصر را بخوانیم
+            if (range == null) return samples;
+
             var headerRow = range.Row(1);
-
-            // ردیف‌های داده (از ردیف دوم شروع می‌کنیم)
             var dataRows = range.RowsUsed().Skip(1);
+
+            // نگاشت ستون‌ها برای انعطاف‌پذیری در برابر تغییر جای ستون‌ها
+            var colMap = new Dictionary<string, int>();
+            foreach (var cell in headerRow.CellsUsed())
+            {
+                colMap[cell.GetValue<string>().Trim().ToLower()] = cell.Address.ColumnNumber;
+            }
 
             foreach (var row in dataRows)
             {
-                // بررسی درخواست لغو عملیات
                 cancellationToken.ThrowIfCancellationRequested();
 
-                // 1. خواندن ستون‌های ثابت (ستون 1 تا 5)
-                // A: Solution Label
-                var label = row.Cell(1).GetValue<string>();
+                // خواندن ستون‌های ثابت (با پشتیبانی از نام‌های مختلف)
+                var label = GetCellValue(row, colMap, "sampleid", "sample id", "label", "id")
+                            ?? row.Cell(1).GetValue<string>(); // Fallback
 
-                // اگر لیبل خالی بود، این ردیف را نادیده می‌گیریم
                 if (string.IsNullOrWhiteSpace(label)) continue;
 
-                // B: Type
-                var typeStr = row.Cell(2).GetValue<string>();
-                if (!Enum.TryParse(typeStr, true, out SampleType type))
-                {
-                    type = SampleType.Sample; // مقدار پیش‌فرض
-                }
+                // تشخیص نوع نمونه
+                var typeStr = GetCellValue(row, colMap, "type") ?? row.Cell(2).GetValue<string>();
+                if (!Enum.TryParse(typeStr, true, out SampleType type)) type = SampleType.Sample;
 
-                // C, D, E: Weight, Volume, DF (استفاده از TryGetValue برای امنیت بیشتر)
-                // اگر سلول خالی یا متنی بود، مقادیر پیش‌فرض 0 یا 1 در نظر گرفته می‌شود
-                var weight = row.Cell(3).TryGetValue(out double w) ? w : 0;
-                var volume = row.Cell(4).TryGetValue(out double v) ? v : 0;
-                var dilutionFactor = row.Cell(5).TryGetValue(out double df) ? df : 1;
+                // خواندن مقادیر عددی با مدیریت خطا
+                var weight = ParseDouble(GetCellValue(row, colMap, "weight", "wt", "sample_weight"));
+                var volume = ParseDouble(GetCellValue(row, colMap, "volume", "vol", "sample_volume"));
+                var df = ParseDouble(GetCellValue(row, colMap, "dilution", "df", "dilutionfactor"));
+                if (df == 0) df = 1; // پیش‌فرض ضریب رقت
 
                 var sample = new Sample
                 {
+                    Id = Guid.NewGuid(),
                     SolutionLabel = label,
                     Type = type,
                     Weight = weight,
                     Volume = volume,
-                    DilutionFactor = dilutionFactor
+                    DilutionFactor = df,
+                    Measurements = new List<Measurement>()
                 };
 
-                // 2. خواندن ستون‌های داینامیک (عناصر) از ستون 6 تا آخر
-                int colIndex = 6;
-                int lastColumn = range.ColumnCount(); // آخرین ستونی که داده دارد
-
-                while (colIndex <= lastColumn)
+                // خواندن ستون‌های عنصری (Dynamic Columns)
+                foreach (var cell in headerRow.CellsUsed())
                 {
-                    // نام عنصر را از ردیف هدر می‌خوانیم (مثلا "Cu", "Zn")
-                    var elementName = headerRow.Cell(colIndex).GetValue<string>();
+                    var header = cell.GetValue<string>();
 
-                    // اگر هدر خالی بود، یعنی ستون معتبری نیست
-                    if (string.IsNullOrWhiteSpace(elementName))
+                    // استفاده از منطق هوشمند برای تشخیص نام عنصر
+                    if (IsElementColumn(header, out string cleanName))
                     {
-                        colIndex++;
-                        continue;
-                    }
-
-                    // مقدار اندازه‌گیری شده را از ردیف جاری می‌خوانیم
-                    var cell = row.Cell(colIndex);
-
-                    // فقط اگر مقدار عددی بود اضافه می‌کنیم
-                    if (cell.TryGetValue(out double measuredValue))
-                    {
-                        sample.Measurements.Add(new Measurement
+                        var valueCell = row.Cell(cell.Address.ColumnNumber);
+                        if (valueCell.TryGetValue(out double measuredValue))
                         {
-                            ElementName = elementName,
-                            Value = measuredValue
-                        });
+                            sample.Measurements.Add(new Measurement
+                            {
+                                Id = Guid.NewGuid(),
+                                ElementName = cleanName, // نام تمیز شده (مثلاً "Li 7")
+                                Value = measuredValue,
+                                Unit = "ppm"
+                            });
+                        }
                     }
-
-                    colIndex++;
                 }
 
                 samples.Add(sample);
@@ -103,11 +90,61 @@ public class ExcelService : IExcelService
         }
         catch (Exception ex)
         {
-            // در محیط واقعی بهتر است از ILogger استفاده کنید
-            throw new Exception("Error processing Excel file.", ex);
+            throw new Exception($"Error processing Excel file: {ex.Message}", ex);
         }
 
-        // چون ClosedXML متد Async واقعی ندارد، خروجی را در Task می‌پیچیم
         return await Task.FromResult(samples);
+    }
+
+    // --- Helper Methods ---
+
+    private string? GetCellValue(IXLRangeRow row, Dictionary<string, int> map, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (map.TryGetValue(key, out int colIndex))
+            {
+                return row.Cell(colIndex).GetValue<string>();
+            }
+        }
+        return null;
+    }
+
+    private double ParseDouble(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return 0;
+        // حذف کاما برای اعداد فرمت شده مثل "1,234.56"
+        value = value.Replace(",", "");
+        if (double.TryParse(value, out var result)) return result;
+        return 0;
+    }
+
+    private bool IsElementColumn(string header, out string cleanName)
+    {
+        cleanName = string.Empty;
+        if (string.IsNullOrWhiteSpace(header)) return false;
+
+        // ستون‌های ثابت را نادیده بگیر
+        var fixedCols = new[] { "sampleid", "sample id", "type", "weight", "wt", "volume", "vol", "dilution", "df", "date", "time" };
+        if (fixedCols.Contains(header.ToLower())) return false;
+
+        // Regex برای تشخیص عنصر و ایزوتوپ (مثال: Li7, U-238, Cu)
+        var match = Regex.Match(header.Trim(), @"^([A-Z][a-z]?)[\s-]?(\d+)?$");
+
+        if (match.Success)
+        {
+            var symbol = match.Groups[1].Value;
+            if (match.Groups[2].Success)
+            {
+                // جدا کردن عدد ایزوتوپ با فاصله (استاندارد پروژه)
+                cleanName = $"{symbol} {match.Groups[2].Value}";
+            }
+            else
+            {
+                cleanName = symbol;
+            }
+            return true;
+        }
+        return false;
     }
 }

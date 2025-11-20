@@ -11,10 +11,11 @@ public class Sample : BaseEntity
     public double Volume { get; set; }
     public double DilutionFactor { get; set; }
 
-    // --- اضافه شده ---
-    public Guid ProjectId { get; set; } // کلید خارجی
-    public virtual Project? Project { get; set; } // نویگیشن
-    // ----------------
+    public Guid ProjectId { get; set; }
+    public virtual Project? Project { get; set; }
 
     public virtual ICollection<Measurement> Measurements { get; set; } = new List<Measurement>();
+
+    // --- اضافه شده برای QC ---
+    public virtual ICollection<QualityCheck> QualityChecks { get; set; } = new List<QualityCheck>();
 }

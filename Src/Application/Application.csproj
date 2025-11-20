@@ -9,22 +9,6 @@
   <ItemGroup>
     <Folder Include="Common\Behaviors\" />
     <Folder Include="Common\Interfaces\" />
-    <Folder Include="Features\Calibration\Commands\" />
-    <Folder Include="Features\Calibration\DTOs\" />
-    <Folder Include="Features\Calibration\Queries\" />
-    <Folder Include="Features\CRM\DTOs\" />
-    <Folder Include="Features\CRM\Interface\" />
-    <Folder Include="Features\CRM\Services\" />
-    <Folder Include="Features\Projects\Commands\" />
-    <Folder Include="Features\Projects\DTOs\" />
-    <Folder Include="Features\Projects\Queries\" />
-    <Folder Include="Features\QualityControl\Interface\" />
-    <Folder Include="Features\QualityControl\Services\" />
-    <Folder Include="Features\Reports\Commands\" />
-    <Folder Include="Features\Reports\DTOs\" />
-    <Folder Include="Features\Reports\Queries\" />
-    <Folder Include="Features\Samples\DTOs\" />
-    <Folder Include="Features\Samples\Queries\" />
   </ItemGroup>
 
   <ItemGroup>
