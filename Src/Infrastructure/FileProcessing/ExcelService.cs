@@ -1,5 +1,5 @@
 ﻿using Application.Services.Interfaces;
-using ClosedXML.Excel; // <--- استفاده از پکیج نصب شده
+using ClosedXML.Excel;
 using Domain.Entities;
 using Domain.Enums;
 
@@ -11,52 +11,103 @@ public class ExcelService : IExcelService
     {
         var samples = new List<Sample>();
 
-        // باز کردن فایل اکسل از روی رم (Stream)
-        using var workbook = new XLWorkbook(fileStream);
-        var worksheet = workbook.Worksheet(1); // شیت اول
-
-        // فرض می‌کنیم ردیف اول هدر است
-        var rows = worksheet.RangeUsed().RowsUsed().Skip(1);
-
-        foreach (var row in rows)
+        try
         {
-            // خواندن سلول‌ها
-            var label = row.Cell(1).GetValue<string>();
-            var typeStr = row.Cell(2).GetValue<string>();
+            // باز کردن فایل اکسل از روی رم (Stream)
+            using var workbook = new XLWorkbook(fileStream);
 
-            // تبدیل Enum
-            if (!Enum.TryParse(typeStr, true, out SampleType type))
-                type = SampleType.Sample;
+            // گرفتن اولین شیت
+            var worksheet = workbook.Worksheet(1);
 
-            var sample = new Sample
+            // بررسی محدوده داده‌ها (اگر شیت خالی باشد، نال برمی‌گرداند)
+            var range = worksheet.RangeUsed();
+            if (range == null)
             {
-                SolutionLabel = label,
-                Type = type,
-                Weight = row.Cell(3).GetValue<double>(),
-                Volume = row.Cell(4).GetValue<double>(),
-                DilutionFactor = row.Cell(5).GetValue<double>()
-            };
-
-            // خواندن ستون‌های داینامیک (عناصر) از ستون 6 به بعد
-            int colIndex = 6;
-            while (!row.Cell(colIndex).IsEmpty())
-            {
-                var elementName = worksheet.Row(1).Cell(colIndex).GetValue<string>();
-                var value = row.Cell(colIndex).GetValue<double>();
-
-                sample.Measurements.Add(new Measurement
-                {
-                    ElementName = elementName,
-                    Value = value
-                });
-
-                colIndex++;
+                return samples; // لیست خالی برمی‌گرداند
             }
 
-            samples.Add(sample);
+            // ردیف اول را به عنوان هدر نگه می‌داریم تا نام عناصر را بخوانیم
+            var headerRow = range.Row(1);
+
+            // ردیف‌های داده (از ردیف دوم شروع می‌کنیم)
+            var dataRows = range.RowsUsed().Skip(1);
+
+            foreach (var row in dataRows)
+            {
+                // بررسی درخواست لغو عملیات
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // 1. خواندن ستون‌های ثابت (ستون 1 تا 5)
+                // A: Solution Label
+                var label = row.Cell(1).GetValue<string>();
+
+                // اگر لیبل خالی بود، این ردیف را نادیده می‌گیریم
+                if (string.IsNullOrWhiteSpace(label)) continue;
+
+                // B: Type
+                var typeStr = row.Cell(2).GetValue<string>();
+                if (!Enum.TryParse(typeStr, true, out SampleType type))
+                {
+                    type = SampleType.Sample; // مقدار پیش‌فرض
+                }
+
+                // C, D, E: Weight, Volume, DF (استفاده از TryGetValue برای امنیت بیشتر)
+                // اگر سلول خالی یا متنی بود، مقادیر پیش‌فرض 0 یا 1 در نظر گرفته می‌شود
+                var weight = row.Cell(3).TryGetValue(out double w) ? w : 0;
+                var volume = row.Cell(4).TryGetValue(out double v) ? v : 0;
+                var dilutionFactor = row.Cell(5).TryGetValue(out double df) ? df : 1;
+
+                var sample = new Sample
+                {
+                    SolutionLabel = label,
+                    Type = type,
+                    Weight = weight,
+                    Volume = volume,
+                    DilutionFactor = dilutionFactor
+                };
+
+                // 2. خواندن ستون‌های داینامیک (عناصر) از ستون 6 تا آخر
+                int colIndex = 6;
+                int lastColumn = range.ColumnCount(); // آخرین ستونی که داده دارد
+
+                while (colIndex <= lastColumn)
+                {
+                    // نام عنصر را از ردیف هدر می‌خوانیم (مثلا "Cu", "Zn")
+                    var elementName = headerRow.Cell(colIndex).GetValue<string>();
+
+                    // اگر هدر خالی بود، یعنی ستون معتبری نیست
+                    if (string.IsNullOrWhiteSpace(elementName))
+                    {
+                        colIndex++;
+                        continue;
+                    }
+
+                    // مقدار اندازه‌گیری شده را از ردیف جاری می‌خوانیم
+                    var cell = row.Cell(colIndex);
+
+                    // فقط اگر مقدار عددی بود اضافه می‌کنیم
+                    if (cell.TryGetValue(out double measuredValue))
+                    {
+                        sample.Measurements.Add(new Measurement
+                        {
+                            ElementName = elementName,
+                            Value = measuredValue
+                        });
+                    }
+
+                    colIndex++;
+                }
+
+                samples.Add(sample);
+            }
+        }
+        catch (Exception ex)
+        {
+            // در محیط واقعی بهتر است از ILogger استفاده کنید
+            throw new Exception("Error processing Excel file.", ex);
         }
 
-        // چون ClosedXML عملیات Async واقعی ندارد، نتیجه را در یک Task برمی‌گردانیم
+        // چون ClosedXML متد Async واقعی ندارد، خروجی را در Task می‌پیچیم
         return await Task.FromResult(samples);
     }
 }

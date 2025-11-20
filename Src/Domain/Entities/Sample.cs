@@ -5,17 +5,16 @@ namespace Domain.Entities;
 
 public class Sample : BaseEntity
 {
-    // نام یا لیبل محلول
     public required string SolutionLabel { get; set; }
-
     public SampleType Type { get; set; }
-
     public double Weight { get; set; }
-
     public double Volume { get; set; }
-
     public double DilutionFactor { get; set; }
 
-    // رابطه One-to-Many با اندازه‌گیری‌ها
+    // --- اضافه شده ---
+    public Guid ProjectId { get; set; } // کلید خارجی
+    public virtual Project? Project { get; set; } // نویگیشن
+    // ----------------
+
     public virtual ICollection<Measurement> Measurements { get; set; } = new List<Measurement>();
 }

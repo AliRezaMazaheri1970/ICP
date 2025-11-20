@@ -27,5 +27,10 @@ public class SampleConfiguration : IEntityTypeConfiguration<Sample>
             .WithOne(m => m.Sample)
             .HasForeignKey(m => m.SampleId)
             .OnDelete(DeleteBehavior.Cascade); // اگر نمونه پاک شد، اندازه‌گیری‌هایش هم پاک شوند
+
+        builder.HasOne(s => s.Project)
+            .WithMany(p => p.Samples)
+            .HasForeignKey(s => s.ProjectId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
