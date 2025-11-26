@@ -1,5 +1,4 @@
-using Client.Client.Pages;
-using Client.Components;
+using Ui.Components;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,6 +23,6 @@ app.UseAntiforgery();
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveWebAssemblyRenderMode()
-    .AddAdditionalAssemblies(typeof(Client.Client._Imports).Assembly);
+    .AddAdditionalAssemblies(typeof(Ui.Client._Imports).Assembly);
 
 app.Run();

@@ -8,8 +8,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Client.Client\Client.Client.csproj" />
+    <ProjectReference Include="..\Ui.Client\Ui.Client.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.0" />
+	<PackageReference Include="Telerik.UI.for.Blazor" Version="9.0.0" />
   </ItemGroup>
 
 </Project>
