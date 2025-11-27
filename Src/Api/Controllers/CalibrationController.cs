@@ -1,48 +1,67 @@
-﻿using Application.Features.Calibration.Commands.ApplyCrmCorrection; // اضافه شد
-using Domain.Interfaces.Services;
+﻿using Application.Features.Calibration.Commands.ApplyCrmCorrection;
+using Application.Features.Calibration.Commands.CalculateConcentrations; // 👈 دستور جدید محاسبه غلظت
+using Application.Features.Calibration.Commands.CalculateCurve;
+using Application.Features.Calibration.DTOs; // برای CalibrationCurveDto
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
 using Shared.Wrapper;
 
-namespace Api.Controllers;
+namespace Isatis.Api.Controllers;
 
-[ApiController]
 [Route("api/projects/{projectId}/calibration")]
-public class CalibrationController(ISender mediator, ICrmService crmService) : ControllerBase
+[ApiController]
+public class CalibrationController(IMediator mediator) : ControllerBase
 {
-    // ... (متد CalculateCurve قبلی شما اینجا بود) ...
-
     /// <summary>
-    /// گام ۱: پیشنهاد فاکتورهای اصلاح (فقط محاسبه می‌کند، تغییری نمی‌دهد)
+    /// محاسبه منحنی کالیبراسیون برای یک عنصر خاص
     /// </summary>
-    [HttpGet("crm-factors/{elementName}")]
-    public async Task<ActionResult<Result<object>>> GetCrmCorrectionFactors(Guid projectId, string elementName)
+    /// <param name="projectId">شناسه پروژه</param>
+    /// <param name="element">نام عنصر (مثلاً Li 7)</param>
+    [HttpPost("calculate/{element}")]
+    public async Task<ActionResult<Result<CalibrationCurveDto>>> CalculateCurve(Guid projectId, string element)
     {
-        // این سرویس را قبلاً ساخته‌اید، اینجا فراخوانی می‌شود تا به UI پیشنهاد بدهد
-        var (blank, scale) = await crmService.CalculateCorrectionFactorsAsync(projectId, elementName);
+        var command = new CalculateCurveCommand(projectId, element);
 
-        return Ok(Result<object>.Success(new { Blank = blank, Scale = scale }, "Factors calculated."));
-    }
-
-    /// <summary>
-    /// گام ۲: اعمال نهایی اصلاحات روی دیتابیس
-    /// </summary>
-    [HttpPost("apply-crm/{elementName}")]
-    public async Task<ActionResult<Result<int>>> ApplyCrmCorrection(
-        Guid projectId,
-        string elementName,
-        [FromBody] ApplyCrmCorrectionDto dto) // یک DTO ساده برای بادی
-    {
-        var command = new ApplyCrmCorrectionCommand(projectId, elementName, dto.Blank, dto.Scale, dto.ApplyToStandards);
         var result = await mediator.Send(command);
-        return Ok(result);
-    }
-}
 
-// DTO موقت برای ورودی کنترلر (می‌توانید در لایه Application هم تعریف کنید)
-public class ApplyCrmCorrectionDto
-{
-    public double Blank { get; set; }
-    public double Scale { get; set; }
-    public bool ApplyToStandards { get; set; } = false;
+        if (result.Succeeded)
+            return Ok(result);
+
+        return BadRequest(result);
+    }
+
+    /// <summary>
+    /// اعمال دستی اصلاحیه CRM روی داده‌های خام
+    /// </summary>
+    [HttpPost("apply-crm")]
+    public async Task<ActionResult<Result<int>>> ApplyCrmCorrection(Guid projectId, [FromBody] ApplyCrmCorrectionCommand command)
+    {
+        // اطمینان از یکی بودن ProjectId در URL و Body
+        if (command.ProjectId != Guid.Empty && command.ProjectId != projectId)
+            return BadRequest("Project ID mismatch.");
+
+        var finalCommand = command with { ProjectId = projectId };
+        var result = await mediator.Send(finalCommand);
+
+        if (result.Succeeded)
+            return Ok(result);
+
+        return BadRequest(result);
+    }
+
+    /// <summary>
+    /// ✅ متد جدید: محاسبه غلظت نهایی تمام نمونه‌های پروژه
+    /// این متد منحنی‌های فعال را روی شدت‌ها اعمال کرده و غلظت (ppm) را حساب می‌کند.
+    /// </summary>
+    [HttpPost("calculate-concentrations")]
+    public async Task<ActionResult<Result<int>>> CalculateConcentrations(Guid projectId)
+    {
+        var command = new CalculateConcentrationsCommand(projectId);
+        var result = await mediator.Send(command);
+
+        if (result.Succeeded)
+            return Ok(result);
+
+        return BadRequest(result);
+    }
 }

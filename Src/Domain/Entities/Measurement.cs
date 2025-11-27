@@ -13,6 +13,8 @@ public class Measurement : BaseEntity
     // مقدار خوانده شده (Int یا Corr Con)
     public double Value { get; set; }
 
+    public double? Concentration { get; set; }
+
     public string Unit { get; set; } = "ppm";
 
     // Property برای Navigation (اختیاری ولی در EF Core مفید است)
