@@ -1,4 +1,5 @@
-﻿using Domain.Interfaces;
+﻿using Application.Services.Interfaces;
+using Domain.Interfaces;
 using Domain.Interfaces.Services;
 using Infrastructure.FileProcessing;
 using Infrastructure.Persistence;
@@ -25,8 +26,8 @@ public static class DependencyInjection
 
         // 2. ثبت سرویس‌های فایل (ClosedXML Implementation)
         // این خط پیاده‌سازی ExcelService را به اینترفیس IExcelService متصل می‌کند
-        services.AddScoped<IExcelService, ExcelService>();
-
+        services.AddScoped<IFileImportService, ExcelService>();
+        services.AddScoped<IFileImportService, CsvFileService>();
 
         // 3. ثبت ریپازیتوری‌ها (Generic Repository & Unit of Work)
         // ثبت به صورت Generic برای اینکه بتوانید برای هر Entity از آن استفاده کنید

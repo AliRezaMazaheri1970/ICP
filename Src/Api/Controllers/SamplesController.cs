@@ -1,27 +1,37 @@
-﻿// مسیر فایل: Api/Controllers/SamplesController.cs
-
-using Application.Features.Samples.Commands.ImportSamples;
+﻿using Application.Features.Samples.Commands.ImportSamples;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
+using Shared.Wrapper;
 
-namespace Api.Controllers;
+namespace Isatis.Api.Controllers; // اصلاح Namespace برای هماهنگی با سایر کنترلرها
 
+[Route("api/projects/{projectId}/samples")]
 [ApiController]
-[Route("api/projects/{projectId}/samples")] // مسیر RESTful و سلسله‌مراتبی
-public class SamplesController(ISender mediator) : ControllerBase
+public class SamplesController(IMediator mediator) : ControllerBase
 {
     [HttpPost("import")]
-    public async Task<IActionResult> Import(Guid projectId, IFormFile file)
+    public async Task<ActionResult<Result<int>>> Import(Guid projectId, IFormFile file)
     {
         if (file == null || file.Length == 0)
-            return BadRequest("No file uploaded.");
+            return BadRequest(Result<int>.Fail("لطفاً یک فایل معتبر انتخاب کنید."));
 
+        // تبدیل فایل ورودی به استریم
+        // نکته: با پایان متد، استریم بسته می‌شود که چون Send را await می‌کنیم، مشکلی پیش نمی‌آید.
         using var stream = file.OpenReadStream();
 
-        var command = new ImportSamplesCommand(projectId, stream, file.FileName);
+        // استفاده از Object Initializer (روش استاندارد برای کلاس‌های Command)
+        var command = new ImportSamplesCommand
+        {
+            ProjectId = projectId,
+            FileName = file.FileName,
+            FileStream = stream
+        };
 
         var result = await mediator.Send(command);
 
-        return result.Succeeded ? Ok(result) : BadRequest(result);
+        if (result.Succeeded)
+            return Ok(result);
+
+        return BadRequest(result);
     }
 }

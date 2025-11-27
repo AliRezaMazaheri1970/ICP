@@ -66,4 +66,9 @@ public class GenericRepository<T>(ApplicationDbContext context) : IGenericReposi
         _dbSet.Remove(entity);
         return Task.CompletedTask;
     }
+
+    public async Task AddRangeAsync(IEnumerable<T> entities)
+    {
+        await _dbSet.AddRangeAsync(entities);
+    }
 }

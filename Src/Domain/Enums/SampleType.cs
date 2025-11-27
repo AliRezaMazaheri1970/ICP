@@ -2,6 +2,7 @@
 
 public enum SampleType
 {
+    Unknown,
     Sample,
     Standard,
     Blank

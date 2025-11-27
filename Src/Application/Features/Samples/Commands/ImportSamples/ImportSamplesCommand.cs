@@ -1,9 +1,11 @@
-﻿// مسیر فایل: Application/Features/Samples/Commands/ImportSamples/ImportSamplesCommand.cs
-
-using MediatR;
+﻿using MediatR;
 using Shared.Wrapper;
-using System.IO;
 
 namespace Application.Features.Samples.Commands.ImportSamples;
 
-public record ImportSamplesCommand(Guid ProjectId, Stream FileStream, string FileName) : IRequest<Result<int>>;
+public class ImportSamplesCommand : IRequest<Result<int>>
+{
+    public Guid ProjectId { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public Stream FileStream { get; set; } = default!;
+}

@@ -5,15 +5,19 @@ using Shared.Wrapper;
 
 namespace Application.Features.Roles.Commands.CreateRole;
 
-public record CreateRoleCommand(Role RoleDto) : IRequest<Result<Guid>>;
+public class CreateRoleCommand : IRequest<Result<Guid>>
+{
+    public required string Name { get; set; }
+    public string? DisplayName { get; set; }
+    public string? Description { get; set; }
+}
 
 public class CreateRoleCommandHandler(IUnitOfWork unitOfWork) : IRequestHandler<CreateRoleCommand, Result<Guid>>
 {
     public async Task<Result<Guid>> Handle(CreateRoleCommand request, CancellationToken cancellationToken)
     {
-        // بررسی تکراری نبودن نام نقش
         var existingRoles = await unitOfWork.Repository<Role>()
-            .GetAsync(r => r.Name == request.RoleDto.Name);
+            .GetAsync(r => r.Name == request.Name);
 
         if (existingRoles.Any())
         {
@@ -22,9 +26,9 @@ public class CreateRoleCommandHandler(IUnitOfWork unitOfWork) : IRequestHandler<
 
         var role = new Role
         {
-            Name = request.RoleDto.Name,
-            DisplayName = request.RoleDto.DisplayName,
-            Description = request.RoleDto.Description,
+            Name = request.Name,
+            DisplayName = request.DisplayName,
+            Description = request.Description,
             IsActive = true
         };
 

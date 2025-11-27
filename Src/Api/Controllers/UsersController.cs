@@ -8,12 +8,13 @@ using MediatR;
 using Microsoft.AspNetCore.Mvc;
 using Shared.Wrapper;
 
-namespace Isatis.Api.Controllers;
+namespace Api.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
 public class UsersController(IMediator mediator) : ControllerBase
 {
+    // دریافت لیست همه کاربران
     [HttpGet]
     public async Task<ActionResult<Result<List<User>>>> GetAll()
     {
@@ -21,15 +22,16 @@ public class UsersController(IMediator mediator) : ControllerBase
         return Ok(result);
     }
 
-    [HttpGet("{id}")]
+    // دریافت یک کاربر با شناسه
+    [HttpGet("{id:guid}")]
     public async Task<ActionResult<Result<User>>> GetById(Guid id)
     {
         var result = await mediator.Send(new GetUserByIdQuery(id));
         return Ok(result);
     }
 
-    // POST: api/users
-    // ورودی مستقیم: CreateUserCommand
+    // ایجاد کاربر جدید
+    // ورودی: JSON شامل UserName, Email, Password, ConfirmPassword و ...
     [HttpPost]
     public async Task<ActionResult<Result<Guid>>> Create([FromBody] CreateUserCommand command)
     {
@@ -41,8 +43,8 @@ public class UsersController(IMediator mediator) : ControllerBase
         return BadRequest(result);
     }
 
-    // PUT: api/users
-    // ورودی مستقیم: UpdateUserCommand (User + NewPassword)
+    // ویرایش کاربر
+    // ورودی: JSON شامل Id, FullName, Email و ...
     [HttpPut]
     public async Task<ActionResult<Result<Guid>>> Update([FromBody] UpdateUserCommand command)
     {
@@ -54,10 +56,15 @@ public class UsersController(IMediator mediator) : ControllerBase
         return BadRequest(result);
     }
 
-    [HttpDelete("{id}")]
+    // حذف کاربر
+    [HttpDelete("{id:guid}")]
     public async Task<ActionResult<Result<Guid>>> Delete(Guid id)
     {
         var result = await mediator.Send(new DeleteUserCommand(id));
-        return Ok(result);
+
+        if (result.Succeeded)
+            return Ok(result);
+
+        return BadRequest(result);
     }
 }

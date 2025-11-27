@@ -5,22 +5,28 @@ using Shared.Wrapper;
 
 namespace Application.Features.Roles.Commands.UpdateRole;
 
-public record UpdateRoleCommand(Role Role) : IRequest<Result<Guid>>;
+public class UpdateRoleCommand : IRequest<Result<Guid>>
+{
+    public Guid Id { get; set; }
+    public required string Name { get; set; }
+    public string? DisplayName { get; set; }
+    public string? Description { get; set; }
+    public bool IsActive { get; set; }
+}
 
 public class UpdateRoleCommandHandler(IUnitOfWork unitOfWork) : IRequestHandler<UpdateRoleCommand, Result<Guid>>
 {
     public async Task<Result<Guid>> Handle(UpdateRoleCommand request, CancellationToken cancellationToken)
     {
-        var role = await unitOfWork.Repository<Role>().GetByIdAsync(request.Role.Id);
+        var role = await unitOfWork.Repository<Role>().GetByIdAsync(request.Id);
 
         if (role == null)
             return await Result<Guid>.FailAsync("نقش یافت نشد.");
 
-        // آپدیت فیلدها
-        role.Name = request.Role.Name;
-        role.DisplayName = request.Role.DisplayName;
-        role.Description = request.Role.Description;
-        role.IsActive = request.Role.IsActive;
+        role.Name = request.Name;
+        role.DisplayName = request.DisplayName;
+        role.Description = request.Description;
+        role.IsActive = request.IsActive;
 
         await unitOfWork.Repository<Role>().UpdateAsync(role);
         await unitOfWork.CommitAsync(cancellationToken);
