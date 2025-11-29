@@ -1,8 +1,12 @@
-﻿namespace Domain.Entities;
+﻿using System.ComponentModel.DataAnnotations;
+
+namespace Domain.Entities;
 
 public class RawDataRow
 {
+    [Key]
     public int DataId { get; set; }
+
     public Guid ProjectId { get; set; }
 
     // Store a single raw row as JSON (flexible) or plain CSV/text

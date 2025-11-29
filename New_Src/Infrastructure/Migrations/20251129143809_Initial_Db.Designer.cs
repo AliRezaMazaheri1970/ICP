@@ -12,8 +12,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Infrastructure.Migrations
 {
     [DbContext(typeof(IsatisDbContext))]
-    [Migration("20251129090002_InitialProjectSchema")]
-    partial class InitialProjectSchema
+    [Migration("20251129143809_Initial_Db")]
+    partial class Initial_Db
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -27,32 +27,38 @@ namespace Infrastructure.Migrations
 
             modelBuilder.Entity("Domain.Entities.ProcessedData", b =>
                 {
-                    b.Property<int>("ProcessedId")
+                    b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int");
 
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("ProcessedId"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("AnalysisType")
                         .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("GETUTCDATE()");
 
                     b.Property<string>("Data")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int>("ProcessedId")
+                        .HasColumnType("int");
+
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.HasKey("ProcessedId");
+                    b.HasKey("Id");
 
-                    b.HasIndex("ProjectId");
+                    b.HasIndex("ProjectId", "ProcessedId")
+                        .HasDatabaseName("IX_ProcessedData_Project_ProcessedId");
 
-                    b.ToTable("ProcessedDatas");
+                    b.ToTable("ProcessedData", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Project", b =>
@@ -78,7 +84,53 @@ namespace Infrastructure.Migrations
 
                     b.HasKey("ProjectId");
 
-                    b.ToTable("Projects");
+                    b.ToTable("Projects", (string)null);
+                });
+
+            modelBuilder.Entity("Domain.Entities.ProjectImportJob", b =>
+                {
+                    b.Property<Guid>("JobId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("GETUTCDATE()");
+
+                    b.Property<string>("Message")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<int>("Percent")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ProcessedRows")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ProjectName")
+                        .HasMaxLength(250)
+                        .HasColumnType("nvarchar(250)");
+
+                    b.Property<Guid?>("ResultProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("State")
+                        .HasColumnType("int");
+
+                    b.Property<string>("TempFilePath")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<int>("TotalRows")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("JobId");
+
+                    b.ToTable("ProjectImportJobs", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.ProjectState", b =>
@@ -101,13 +153,15 @@ namespace Infrastructure.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("Timestamp")
-                        .HasColumnType("datetime2");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("GETUTCDATE()");
 
                     b.HasKey("StateId");
 
-                    b.HasIndex("ProjectId", "Timestamp");
+                    b.HasIndex("ProjectId");
 
-                    b.ToTable("ProjectStates");
+                    b.ToTable("ProjectStates", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.RawDataRow", b =>
@@ -133,7 +187,7 @@ namespace Infrastructure.Migrations
 
                     b.HasIndex("ProjectId");
 
-                    b.ToTable("RawDataRows");
+                    b.ToTable("RawDataRows", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.ProcessedData", b =>

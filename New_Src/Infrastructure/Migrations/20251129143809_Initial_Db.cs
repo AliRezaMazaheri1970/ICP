@@ -6,20 +6,41 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialProjectSchema : Migration
+    public partial class Initial_Db : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.CreateTable(
+                name: "ProjectImportJobs",
+                columns: table => new
+                {
+                    JobId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    ResultProjectId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                    ProjectName = table.Column<string>(type: "nvarchar(250)", maxLength: 250, nullable: true),
+                    State = table.Column<int>(type: "int", nullable: false),
+                    TotalRows = table.Column<int>(type: "int", nullable: false),
+                    ProcessedRows = table.Column<int>(type: "int", nullable: false),
+                    Percent = table.Column<int>(type: "int", nullable: false),
+                    Message = table.Column<string>(type: "nvarchar(2000)", maxLength: 2000, nullable: true),
+                    TempFilePath = table.Column<string>(type: "nvarchar(2000)", maxLength: 2000, nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false, defaultValueSql: "GETUTCDATE()"),
+                    UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_ProjectImportJobs", x => x.JobId);
+                });
+
             migrationBuilder.CreateTable(
                 name: "Projects",
                 columns: table => new
                 {
                     ProjectId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                     ProjectName = table.Column<string>(type: "nvarchar(250)", maxLength: 250, nullable: false),
+                    Owner = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true),
                     CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    LastModifiedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    Owner = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: true)
+                    LastModifiedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -27,21 +48,22 @@ namespace Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "ProcessedDatas",
+                name: "ProcessedData",
                 columns: table => new
                 {
-                    ProcessedId = table.Column<int>(type: "int", nullable: false)
+                    Id = table.Column<int>(type: "int", nullable: false)
                         .Annotation("SqlServer:Identity", "1, 1"),
+                    ProcessedId = table.Column<int>(type: "int", nullable: false),
                     ProjectId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    AnalysisType = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
+                    AnalysisType = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
                     Data = table.Column<string>(type: "nvarchar(max)", nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false, defaultValueSql: "GETUTCDATE()")
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_ProcessedDatas", x => x.ProcessedId);
+                    table.PrimaryKey("PK_ProcessedData", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_ProcessedDatas_Projects_ProjectId",
+                        name: "FK_ProcessedData_Projects_ProjectId",
                         column: x => x.ProjectId,
                         principalTable: "Projects",
                         principalColumn: "ProjectId",
@@ -56,7 +78,7 @@ namespace Infrastructure.Migrations
                         .Annotation("SqlServer:Identity", "1, 1"),
                     ProjectId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                     Data = table.Column<string>(type: "nvarchar(max)", nullable: false),
-                    Timestamp = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    Timestamp = table.Column<DateTime>(type: "datetime2", nullable: false, defaultValueSql: "GETUTCDATE()"),
                     Description = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: true)
                 },
                 constraints: table =>
@@ -92,14 +114,14 @@ namespace Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateIndex(
-                name: "IX_ProcessedDatas_ProjectId",
-                table: "ProcessedDatas",
-                column: "ProjectId");
+                name: "IX_ProcessedData_Project_ProcessedId",
+                table: "ProcessedData",
+                columns: new[] { "ProjectId", "ProcessedId" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_ProjectStates_ProjectId_Timestamp",
+                name: "IX_ProjectStates_ProjectId",
                 table: "ProjectStates",
-                columns: new[] { "ProjectId", "Timestamp" });
+                column: "ProjectId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_RawDataRows_ProjectId",
@@ -111,7 +133,10 @@ namespace Infrastructure.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropTable(
-                name: "ProcessedDatas");
+                name: "ProcessedData");
+
+            migrationBuilder.DropTable(
+                name: "ProjectImportJobs");
 
             migrationBuilder.DropTable(
                 name: "ProjectStates");

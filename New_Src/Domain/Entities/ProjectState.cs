@@ -1,8 +1,12 @@
-﻿namespace Domain.Entities;
+﻿using System.ComponentModel.DataAnnotations;
+
+namespace Domain.Entities;
 
 public class ProjectState
 {
+    [Key]
     public int StateId { get; set; }
+
     public Guid ProjectId { get; set; }
 
     // Full serialized project state (JSON)

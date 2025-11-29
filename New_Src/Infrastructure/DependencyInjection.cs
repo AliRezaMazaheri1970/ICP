@@ -1,32 +1,42 @@
 ﻿using Application.Services;
-using Infrastructure.Services;
 using Infrastructure.Persistence;
+using Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 
 namespace Infrastructure;
 
+/// <summary>
+/// Registers infrastructure services, persistence and hosted/background services.
+/// Keep registrations here minimal and infrastructure-specific.
+/// </summary>
 public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructureServices(this IServiceCollection services, IConfiguration configuration)
     {
+        // Database
         var connectionString = configuration.GetConnectionString("DefaultConnection");
         services.AddDbContext<IsatisDbContext>(options => options.UseSqlServer(connectionString));
 
-        // persistence implementation
-        services.AddScoped<Application.Services.IProjectPersistenceService, Infrastructure.Services.ProjectPersistenceService>();
+        // Persistence implementations
+        services.AddScoped<IProjectPersistenceService, ProjectPersistenceService>();
 
-        // import service (sync)
-        services.AddScoped<Application.Services.IImportService, Infrastructure.Services.ImportService>();
+        // Import service (scoped because it uses DbContext)
+        services.AddScoped<IImportService, ImportService>();
 
-        // Background import queue:
-        // Register the BackgroundImportQueueService as a singleton, expose it as IImportQueueService,
-        // and also register it as a hosted service so the background worker runs.
+        // Background import queue - singleton hosted service that creates scopes for scoped services
         services.AddSingleton<BackgroundImportQueueService>();
-        services.AddSingleton<Application.Services.IImportQueueService>(sp => sp.GetRequiredService<BackgroundImportQueueService>());
+        services.AddSingleton<IImportQueueService>(sp => sp.GetRequiredService<BackgroundImportQueueService>());
         services.AddHostedService(sp => sp.GetRequiredService<BackgroundImportQueueService>());
+
+        // Processing services and processors (scoped)
+        services.AddScoped<IProcessingService, ProcessingService>();
+        services.AddScoped<IRowProcessor, Infrastructure.Services.Processors.ComputeStatisticsProcessor>(); // add more processors as needed
+
+        // Cleanup hosted service for old jobs/temp files
+        services.AddSingleton<CleanupHostedService>();
+        services.AddHostedService(sp => sp.GetRequiredService<CleanupHostedService>());
 
         return services;
     }
