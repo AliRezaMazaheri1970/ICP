@@ -33,7 +33,6 @@ public class HealthController : ControllerBase
         }
     }
 
-    // Debug: return DB connection info (DataSource and Database name)
     [HttpGet("dbinfo")]
     public ActionResult<object> DbInfo()
     {
@@ -44,26 +43,12 @@ public class HealthController : ControllerBase
             {
                 DataSource = conn.DataSource,
                 Database = conn.Database,
-                ConnectionString = "***masked***" // avoid exposing password
+                ConnectionString = "***masked***"
             });
         }
         catch (Exception ex)
         {
             return Problem(detail: ex.Message);
         }
-    }
-
-    [HttpGet("projects/count")]
-    public async Task<ActionResult<int>> ProjectCount()
-    {
-        var count = await _db.Projects.CountAsync();
-        return Ok(count);
-    }
-
-    [HttpGet("projects/{projectId:guid}/exists")]
-    public async Task<ActionResult<bool>> ProjectExists(Guid projectId)
-    {
-        var exists = await _db.Projects.AnyAsync(p => p.ProjectId == projectId);
-        return exists ? Ok(true) : NotFound(false);
     }
 }

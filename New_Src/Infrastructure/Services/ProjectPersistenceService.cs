@@ -7,7 +7,6 @@ using Shared.Wrapper;
 namespace Infrastructure.Services;
 
 // EF Core implementation that persists projects to SQL Server using IsatisDbContext.
-// Register this implementation in DI when you want real persistence.
 public class ProjectPersistenceService : IProjectPersistenceService
 {
     private readonly IsatisDbContext _db;
@@ -48,7 +47,6 @@ public class ProjectPersistenceService : IProjectPersistenceService
 
             if (rawRows != null && rawRows.Count > 0)
             {
-                // append raw rows (if you want replace semantics, remove existing rows first)
                 foreach (var r in rawRows)
                 {
                     _db.RawDataRows.Add(new RawDataRow
@@ -78,7 +76,7 @@ public class ProjectPersistenceService : IProjectPersistenceService
         }
         catch (Exception ex)
         {
-            await tx.RollbackAsync();
+            try { await tx.RollbackAsync(); } catch { /* ignore */ }
             return Result<ProjectSaveResult>.Fail($"Save failed: {ex.Message}");
         }
     }
@@ -109,6 +107,61 @@ public class ProjectPersistenceService : IProjectPersistenceService
         catch (Exception ex)
         {
             return Result<ProjectLoadDto>.Fail($"Load failed: {ex.Message}");
+        }
+    }
+
+    // new: list projects with pagination
+    public async Task<Result<List<ProjectListItemDto>>> ListProjectsAsync(int page = 1, int pageSize = 20)
+    {
+        try
+        {
+            if (page <= 0) page = 1;
+            if (pageSize <= 0) pageSize = 20;
+
+            var skip = (page - 1) * pageSize;
+
+            var items = await _db.Projects
+                .AsNoTracking()
+                .OrderByDescending(p => p.CreatedAt)
+                .Skip(skip)
+                .Take(pageSize)
+                .Select(p => new ProjectListItemDto(
+                    p.ProjectId,
+                    p.ProjectName,
+                    p.CreatedAt,
+                    p.LastModifiedAt,
+                    p.Owner,
+                    p.RawDataRows.Count
+                ))
+                .ToListAsync();
+
+            return Result<List<ProjectListItemDto>>.Success(items);
+        }
+        catch (Exception ex)
+        {
+            return Result<List<ProjectListItemDto>>.Fail($"List failed: {ex.Message}");
+        }
+    }
+
+    // new: delete project and its related data (cascade)
+    public async Task<Result<bool>> DeleteProjectAsync(Guid projectId)
+    {
+        using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            var project = await _db.Projects.FirstOrDefaultAsync(p => p.ProjectId == projectId);
+            if (project == null)
+                return Result<bool>.Fail("Project not found.");
+
+            _db.Projects.Remove(project);
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+            return Result<bool>.Success(true);
+        }
+        catch (Exception ex)
+        {
+            try { await tx.RollbackAsync(); } catch { /* ignore */ }
+            return Result<bool>.Fail($"Delete failed: {ex.Message}");
         }
     }
 }

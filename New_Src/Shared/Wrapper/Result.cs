@@ -9,7 +9,7 @@ public class Result
     internal Result(bool succeeded, IEnumerable<string> messages)
     {
         Succeeded = succeeded;
-        Messages = messages as string[] ?? Array.Empty<string>();
+        Messages = messages as string[] ?? messages.ToArray();
     }
 
     public static Result Success() => new Result(true, Array.Empty<string>());

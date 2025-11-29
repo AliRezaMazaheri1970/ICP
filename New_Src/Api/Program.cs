@@ -1,6 +1,5 @@
 using Infrastructure;
 using Application;
-using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,6 +10,9 @@ builder.Services.AddOpenApi();
 // Register application and infrastructure services
 builder.Services.AddApplicationServices();
 builder.Services.AddInfrastructureServices(builder.Configuration);
+
+// Optional explicit override (safe): ensure EF impl is used
+builder.Services.AddScoped<Application.Services.IProjectPersistenceService, Infrastructure.Services.ProjectPersistenceService>();
 
 var app = builder.Build();
 
