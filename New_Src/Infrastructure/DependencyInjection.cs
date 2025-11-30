@@ -36,6 +36,11 @@ public static class DependencyInjection
         // Pivot Service
         services.AddScoped<IPivotService, PivotService>();
 
+        services.AddScoped<IRmCheckService, RmCheckService>();
+
+        // Report Service
+        services.AddScoped<IReportService, ReportService>();
+
         // Cleanup hosted service
         services.AddSingleton<CleanupHostedService>();
         services.AddHostedService(sp => sp.GetRequiredService<CleanupHostedService>());
