@@ -81,7 +81,6 @@ public class CrmController : ControllerBase
     /// <summary>
     /// Calculate differences between project data and CRM values
     /// POST /api/crm/diff
-    /// Body: { "projectId": "guid", "minDiffPercent": -12, "maxDiffPercent": 12, "crmPatterns": ["258", "252"] }
     /// </summary>
     [HttpPost("diff")]
     public async Task<ActionResult> CalculateDiff([FromBody] CrmDiffRequest request)
@@ -99,7 +98,6 @@ public class CrmController : ControllerBase
     /// <summary>
     /// Add or update a CRM record
     /// POST /api/crm
-    /// Body: { "crmId": "OREAS 258", "analysisMethod": "4-Acid", "elements": {"Fe": 45.2, "Cu": 0.12} }
     /// </summary>
     [HttpPost]
     public async Task<ActionResult> UpsertCrm([FromBody] CrmUpsertRequest request)
@@ -131,7 +129,6 @@ public class CrmController : ControllerBase
     /// <summary>
     /// Import CRMs from CSV file
     /// POST /api/crm/import
-    /// Form: file (CSV)
     /// </summary>
     [HttpPost("import")]
     [RequestSizeLimit(10 * 1024 * 1024)] // 10 MB
