@@ -13,24 +13,26 @@ using Microsoft.Extensions.Logging;
 namespace Infrastructure.Services
 {
     /// <summary>
-    /// پیاده‌سازی IProcessingService در لایهٔ Infrastructure.
-    /// - EnqueueProcessProjectAsync: ایجاد یک رکورد job در ProjectImportJobs با JobType = "process"
-    /// - ProcessProjectAsync: اجرای محاسبات و ذخیره‌ی ProcessedData + ProjectState (همان منطق موجود)
+    /// Implementation of IProcessingService.
+    /// - EnqueueProcessProjectAsync: create a process job via IImportQueueService so it's both persisted and enqueued.
+    /// - ProcessProjectAsync: run the processing logic (compute summary, persist ProcessedData + ProjectState).
     /// </summary>
     public class ProcessingService : IProcessingService
     {
         private readonly IsatisDbContext _db;
+        private readonly IImportQueueService _queue;
         private readonly ILogger<ProcessingService> _logger;
 
-        public ProcessingService(IsatisDbContext db, ILogger<ProcessingService> logger)
+        public ProcessingService(IsatisDbContext db, IImportQueueService queue, ILogger<ProcessingService> logger)
         {
             _db = db ?? throw new ArgumentNullException(nameof(db));
+            _queue = queue ?? throw new ArgumentNullException(nameof(queue));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         /// <summary>
-        /// Enqueue processing: create a job row and return its jobId.
-        /// Background worker (BackgroundImportQueueService) will pick it up.
+        /// Enqueue processing: create a job row via the queue service so it's both persisted and enqueued into the in-memory channel.
+        /// Returns ProcessingResult with Data = jobId (Guid) on success.
         /// </summary>
         public async Task<ProcessingResult> EnqueueProcessProjectAsync(Guid projectId, CancellationToken cancellationToken = default)
         {
@@ -39,40 +41,8 @@ namespace Infrastructure.Services
 
             try
             {
-                // Optional idempotency: check if a pending process job for this project already exists.
-                var existing = await _db.ProjectImportJobs
-                                        .AsNoTracking()
-                                        .FirstOrDefaultAsync(j => j.JobType == "process" && j.ProjectId == projectId && j.State == (int)Shared.Models.ImportJobState.Pending, cancellationToken);
-
-                if (existing != null)
-                {
-                    // return the existing job id
-                    return ProcessingResult.Success(existing.JobId, Array.Empty<string>());
-                }
-
-                var jobId = Guid.NewGuid();
-                var job = new ProjectImportJob
-                {
-                    JobId = jobId,
-                    ProjectId = projectId,
-                    ProjectName = null,
-                    JobType = "process",
-                    State = (int)Shared.Models.ImportJobState.Pending,
-                    Percent = 0,
-                    ProcessedRows = 0,
-                    TotalRows = 0,
-                    Message = "Queued",
-                    OperationId = Guid.NewGuid(),
-                    Attempts = 0,
-                    LastError = null,
-                    NextAttemptAt = null,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                };
-
-                await _db.ProjectImportJobs.AddAsync(job, cancellationToken);
-                await _db.SaveChangesAsync(cancellationToken);
-
+                // Use the central queue service to create+enqueue the process job
+                var jobId = await _queue.EnqueueProcessJobAsync(projectId);
                 return ProcessingResult.Success(jobId, Array.Empty<string>());
             }
             catch (Exception ex)
@@ -83,7 +53,8 @@ namespace Infrastructure.Services
         }
 
         /// <summary>
-        /// پردازش هم‌زمان پروژه: همان منطق سابق با بازگرداندن numeric projectStateId.
+        /// Process a project synchronously (used by background worker).
+        /// Returns ProcessingResult with Data = numeric projectStateId (int) on success.
         /// </summary>
         public async Task<ProcessingResult> ProcessProjectAsync(Guid projectId, bool overwriteLatestState = true, CancellationToken cancellationToken = default)
         {

@@ -1,22 +1,21 @@
-﻿using Application.Services;
-using Domain.Entities;
-using Infrastructure.Persistence;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using System.Collections.Concurrent;
+﻿using System;
+using System.IO;
+using System.Threading;
 using System.Threading.Channels;
+using System.Threading.Tasks;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Infrastructure.Persistence;
+using Application.Services;
+using Domain.Entities;
 
 namespace Infrastructure.Services
 {
-    /// <summary>
-    /// Background service that processes import jobs enqueued by the API.
-    /// - Persists ProjectImportJobs records in DB (created when enqueued).
-    /// - Maintains an in-memory status map (_statuses) for quick reads.
-    /// - Uses IImportService to perform the actual import and reports progress back to DB.
-    /// 
-    /// Implements Application.Services.IImportQueueService so it can be registered and resolved by DI.
-    /// </summary>
     public class BackgroundImportQueueService : BackgroundService, IImportQueueService, IDisposable
     {
         private readonly Channel<ImportRequest> _channel;
@@ -32,39 +31,36 @@ namespace Infrastructure.Services
             _statuses = new ConcurrentDictionary<Guid, Shared.Models.ImportJobStatusDto>();
         }
 
-        /// <summary>
-        /// Enqueue a stream containing CSV content for import.
-        /// The implementation copies the provided stream into a MemoryStream so the caller can dispose theirs.
-        /// Returns the created jobId.
-        /// </summary>
         public async Task<Guid> EnqueueImportAsync(Stream csvStream, string projectName, string? owner = null, string? stateJson = null)
         {
+            if (string.IsNullOrWhiteSpace(projectName)) throw new ArgumentException("projectName is required", nameof(projectName));
             if (csvStream == null) throw new ArgumentNullException(nameof(csvStream));
+
             var jobId = Guid.NewGuid();
 
-            // Persist job record in DB
             try
             {
-                using var scope = _serviceProvider.CreateScope();
+                using var scope = CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<IsatisDbContext>();
 
                 var entity = new ProjectImportJob
                 {
                     JobId = jobId,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow,
-                    ProjectName = projectName ?? "ImportedProject",
+                    ProjectId = null,
+                    ResultProjectId = null,
+                    JobType = "import",
                     State = (int)Shared.Models.ImportJobState.Pending,
-                    Percent = 0,
-                    ProcessedRows = 0,
-                    TotalRows = 0,
                     Message = "Queued",
-
-                    // Initialize idempotency/retry fields (migration must exist)
-                    OperationId = Guid.NewGuid(),
+                    Percent = 0,
                     Attempts = 0,
                     LastError = null,
-                    NextAttemptAt = null
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                    ProjectName = projectName,
+                    TempFilePath = null,
+                    TotalRows = 0,
+                    ProcessedRows = 0,
+                    OperationId = Guid.NewGuid()
                 };
 
                 db.ProjectImportJobs.Add(entity);
@@ -72,271 +68,421 @@ namespace Infrastructure.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to persist enqueue job {JobId}", jobId);
+                _logger.LogError(ex, "Failed to persist import job {JobId}", jobId);
                 throw;
             }
 
-            // copy Stream to a MemoryStream so we own the lifetime and can dispose later
             var copy = new MemoryStream();
-            try
-            {
-                if (csvStream.CanSeek) csvStream.Position = 0;
-            }
-            catch
-            {
-                // ignore if stream is not seekable
-            }
-
+            try { if (csvStream.CanSeek) csvStream.Position = 0; } catch { }
             await csvStream.CopyToAsync(copy);
             copy.Position = 0;
 
             var req = new ImportRequest
             {
                 JobId = jobId,
+                JobType = "import",
                 Stream = copy,
                 ProjectName = projectName,
                 Owner = owner,
-                StateJson = stateJson
+                StateJson = stateJson,
+                ProjectId = null
             };
 
-            // initial in-memory status
             _statuses[jobId] = new Shared.Models.ImportJobStatusDto(jobId, Shared.Models.ImportJobState.Pending, 0, 0, "Queued", null, 0);
 
-            // enqueue
+            _logger.LogInformation("EnqueueImportAsync: enqueuing import job {JobId} projectName={ProjectName}", jobId, projectName);
             await _channel.Writer.WriteAsync(req);
 
             return jobId;
         }
 
-        /// <summary>
-        /// Get status for a job (in-memory quick lookup; falls back to DB if missing).
-        /// </summary>
+        public async Task<Guid> EnqueueProcessJobAsync(Guid projectId)
+        {
+            if (projectId == Guid.Empty) throw new ArgumentException("projectId is required", nameof(projectId));
+
+            // validate project exists
+            using (var scopeVal = CreateScope())
+            {
+                var dbVal = scopeVal.ServiceProvider.GetRequiredService<IsatisDbContext>();
+                var exists = await dbVal.Projects.FindAsync(projectId);
+                if (exists == null) throw new InvalidOperationException($"Project {projectId} not found.");
+            }
+
+            var jobId = Guid.NewGuid();
+            try
+            {
+                using var scope = CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<IsatisDbContext>();
+
+                var entity = new ProjectImportJob
+                {
+                    JobId = jobId,
+                    JobType = "process",
+                    ProjectId = projectId,
+                    ResultProjectId = null,
+                    State = (int)Shared.Models.ImportJobState.Pending,
+                    Message = "Queued",
+                    Percent = 0,
+                    Attempts = 0,
+                    LastError = null,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                    ProjectName = null,
+                    TempFilePath = null,
+                    TotalRows = 0,
+                    ProcessedRows = 0,
+                    OperationId = Guid.NewGuid()
+                };
+
+                db.ProjectImportJobs.Add(entity);
+                await db.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to persist process job {JobId} for project {ProjectId}", jobId, projectId);
+                throw;
+            }
+
+            var req = new ImportRequest
+            {
+                JobId = jobId,
+                JobType = "process",
+                ProjectId = projectId
+            };
+
+            _statuses[jobId] = new Shared.Models.ImportJobStatusDto(jobId, Shared.Models.ImportJobState.Pending, 0, 0, "Queued", null, 0);
+
+            _logger.LogInformation("EnqueueProcessJobAsync: enqueuing process job {JobId} for project {ProjectId}", jobId, projectId);
+            await _channel.Writer.WriteAsync(req);
+
+            return jobId;
+        }
+
+        private IServiceScope CreateScope() => _serviceProvider.CreateScope();
+
         public async Task<Shared.Models.ImportJobStatusDto?> GetStatusAsync(Guid jobId)
         {
-            if (_statuses.TryGetValue(jobId, out var status)) return status;
+            if (_statuses.TryGetValue(jobId, out var st)) return st;
 
             try
             {
-                using var scope = _serviceProvider.CreateScope();
+                using var scope = CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<IsatisDbContext>();
                 var entity = await db.ProjectImportJobs.FindAsync(jobId);
                 if (entity == null) return null;
 
-                var st = Shared.Models.ImportJobState.Pending;
-                if (entity.State == (int)Shared.Models.ImportJobState.Running) st = Shared.Models.ImportJobState.Running;
-                else if (entity.State == (int)Shared.Models.ImportJobState.Completed) st = Shared.Models.ImportJobState.Completed;
-                else if (entity.State == (int)Shared.Models.ImportJobState.Failed) st = Shared.Models.ImportJobState.Failed;
+                var state = Shared.Models.ImportJobState.Pending;
+                if (entity.State == (int)Shared.Models.ImportJobState.Running) state = Shared.Models.ImportJobState.Running;
+                else if (entity.State == (int)Shared.Models.ImportJobState.Completed) state = Shared.Models.ImportJobState.Completed;
+                else if (entity.State == (int)Shared.Models.ImportJobState.Failed) state = Shared.Models.ImportJobState.Failed;
 
-                var dto = new Shared.Models.ImportJobStatusDto(entity.JobId, st, entity.TotalRows, entity.ProcessedRows, entity.Message, entity.ResultProjectId, entity.Percent);
+                var dto = new Shared.Models.ImportJobStatusDto(entity.JobId, state, entity.TotalRows, entity.ProcessedRows, entity.Message, entity.ResultProjectId, entity.Percent);
                 _statuses[jobId] = dto;
                 return dto;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to read job status from DB for {JobId}", jobId);
+                _logger.LogWarning(ex, "GetStatusAsync: fallback read failed for job {JobId}", jobId);
                 return null;
             }
         }
 
-        /// <summary>
-        /// Background worker loop: consumes queued import requests and processes them sequentially.
-        /// </summary>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             _logger.LogInformation("BackgroundImportQueueService started.");
-            await foreach (var req in _channel.Reader.ReadAllAsync(stoppingToken))
-            {
-                if (stoppingToken.IsCancellationRequested) break;
-                try
-                {
-                    await ProcessRequestAsync(req, stoppingToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    _logger.LogWarning("Processing cancelled for job {JobId}", req.JobId);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Unhandled exception while processing import job {JobId}", req.JobId);
+            _logger.LogDebug("BackgroundImportQueueService: channel reader starting.");
 
-                    // persist failed state
-                    try
-                    {
-                        using var scope2 = _serviceProvider.CreateScope();
-                        var db2 = scope2.ServiceProvider.GetRequiredService<IsatisDbContext>();
-                        var entity2 = await db2.ProjectImportJobs.FindAsync(req.JobId);
-                        if (entity2 != null)
-                        {
-                            entity2.State = (int)Shared.Models.ImportJobState.Failed;
-                            entity2.Message = ex.Message;
-                            entity2.UpdatedAt = DateTime.UtcNow;
-                            entity2.Attempts += 1;
-                            entity2.LastError = ex.Message;
-                            db2.ProjectImportJobs.Update(entity2);
-                            await db2.SaveChangesAsync();
-                        }
-                    }
-                    catch (Exception inner)
-                    {
-                        _logger.LogWarning(inner, "Failed to persist failure for job {JobId} after exception", req.JobId);
-                    }
-
-                    _statuses[req.JobId] = new Shared.Models.ImportJobStatusDto(req.JobId, Shared.Models.ImportJobState.Failed, 0, 0, ex.Message, null, 0);
-                }
-                finally
-                {
-                    // ensure stream disposed
-                    try { req.Stream.Dispose(); } catch { }
-                }
-            }
-
-            _logger.LogInformation("BackgroundImportQueueService stopping.");
-        }
-
-        private async Task ProcessRequestAsync(ImportRequest req, CancellationToken cancellationToken)
-        {
-            _logger.LogInformation("Processing import job {JobId} (Project: {ProjectName})", req.JobId, req.ProjectName);
-
-            // update DB to Running
-            ProjectImportJob? entity0 = null;
             try
             {
-                using var scope0 = _serviceProvider.CreateScope();
-                var db0 = scope0.ServiceProvider.GetRequiredService<IsatisDbContext>();
-                entity0 = await db0.ProjectImportJobs.FindAsync(req.JobId);
-                if (entity0 != null)
+                while (await _channel.Reader.WaitToReadAsync(stoppingToken))
                 {
-                    entity0.State = (int)Shared.Models.ImportJobState.Running;
-                    entity0.UpdatedAt = DateTime.UtcNow;
-                    entity0.Message = "Running";
-                    db0.ProjectImportJobs.Update(entity0);
-                    await db0.SaveChangesAsync();
-                }
+                    while (_channel.Reader.TryRead(out var req))
+                    {
+                        if (stoppingToken.IsCancellationRequested)
+                        {
+                            _logger.LogInformation("Stopping requested - aborting processing of job {JobId}", req.JobId);
+                            break;
+                        }
 
-                _statuses[req.JobId] = new Shared.Models.ImportJobStatusDto(req.JobId, Shared.Models.ImportJobState.Running, entity0?.TotalRows ?? 0, entity0?.ProcessedRows ?? 0, "Running", null, entity0?.Percent ?? 0);
+                        // mark running in-memory and DB (best-effort)
+                        _statuses[req.JobId] = new Shared.Models.ImportJobStatusDto(req.JobId, Shared.Models.ImportJobState.Running, 0, 0, "Running", null, 0);
+                        try
+                        {
+                            using var scopeDbRun = CreateScope();
+                            var dbRun = scopeDbRun.ServiceProvider.GetRequiredService<IsatisDbContext>();
+                            var row = await dbRun.ProjectImportJobs.FindAsync(req.JobId);
+                            if (row != null)
+                            {
+                                row.State = (int)Shared.Models.ImportJobState.Running;
+                                row.Message = "Running";
+                                row.UpdatedAt = DateTime.UtcNow;
+                                dbRun.ProjectImportJobs.Update(row);
+                                await dbRun.SaveChangesAsync();
+                            }
+                        }
+                        catch (Exception exSaveRun)
+                        {
+                            _logger.LogWarning(exSaveRun, "Failed to update job {JobId} to Running in DB", req.JobId);
+                        }
+
+                        _logger.LogInformation("Channel reader picked job {JobId} (type={JobType}, projectId={ProjectId})", req.JobId, req.JobType, req.ProjectId);
+
+                        try
+                        {
+                            var resultProjectId = await ProcessRequestAsync(req, stoppingToken);
+
+                            // persist completion
+                            try
+                            {
+                                using var scopeDb = CreateScope();
+                                var db = scopeDb.ServiceProvider.GetRequiredService<IsatisDbContext>();
+                                var jobEntity = await db.ProjectImportJobs.FindAsync(req.JobId);
+                                if (jobEntity != null)
+                                {
+                                    jobEntity.State = (int)Shared.Models.ImportJobState.Completed;
+                                    jobEntity.Message = "Completed";
+                                    jobEntity.Percent = 100;
+                                    jobEntity.UpdatedAt = DateTime.UtcNow;
+                                    if (resultProjectId.HasValue) jobEntity.ResultProjectId = resultProjectId.Value;
+                                    db.ProjectImportJobs.Update(jobEntity);
+                                    await db.SaveChangesAsync();
+                                }
+                            }
+                            catch (Exception exSaveCompleted)
+                            {
+                                _logger.LogWarning(exSaveCompleted, "Failed to persist completion for job {JobId}", req.JobId);
+                            }
+
+                            _statuses[req.JobId] = new Shared.Models.ImportJobStatusDto(req.JobId, Shared.Models.ImportJobState.Completed, 0, 0, "Completed", resultProjectId, 100);
+                            _logger.LogInformation("Processing job {JobId} completed. ResultProjectId={ResultProjectId}", req.JobId, resultProjectId);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            _logger.LogInformation("Processing cancelled for job {JobId}", req.JobId);
+                            try
+                            {
+                                using var scopeCancel = CreateScope();
+                                var dbCancel = scopeCancel.ServiceProvider.GetRequiredService<IsatisDbContext>();
+                                var e = await dbCancel.ProjectImportJobs.FindAsync(req.JobId);
+                                if (e != null)
+                                {
+                                    e.State = (int)Shared.Models.ImportJobState.Failed;
+                                    e.Message = "Cancelled";
+                                    e.UpdatedAt = DateTime.UtcNow;
+                                    dbCancel.ProjectImportJobs.Update(e);
+                                    await dbCancel.SaveChangesAsync();
+                                }
+                            }
+                            catch { /* swallow */ }
+
+                            _statuses[req.JobId] = new Shared.Models.ImportJobStatusDto(req.JobId, Shared.Models.ImportJobState.Failed, 0, 0, "Cancelled", null, 0);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Unhandled exception while processing job {JobId}", req.JobId);
+
+                            try
+                            {
+                                using var scopeFail = CreateScope();
+                                var dbFail = scopeFail.ServiceProvider.GetRequiredService<IsatisDbContext>();
+                                var e = await dbFail.ProjectImportJobs.FindAsync(req.JobId);
+                                if (e != null)
+                                {
+                                    e.State = (int)Shared.Models.ImportJobState.Failed;
+                                    e.Message = ex.Message;
+                                    e.LastError = ex.ToString();
+                                    e.Attempts += 1;
+                                    e.UpdatedAt = DateTime.UtcNow;
+                                    dbFail.ProjectImportJobs.Update(e);
+                                    await dbFail.SaveChangesAsync();
+                                }
+                            }
+                            catch (Exception innerFail)
+                            {
+                                _logger.LogWarning(innerFail, "Failed to persist failure for job {JobId}", req.JobId);
+                            }
+
+                            _statuses[req.JobId] = new Shared.Models.ImportJobStatusDto(req.JobId, Shared.Models.ImportJobState.Failed, 0, 0, ex.Message, null, 0);
+                        }
+                        finally
+                        {
+                            try { req.Stream?.Dispose(); } catch { }
+                        }
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("BackgroundImportQueueService cancellation requested - exiting ExecuteAsync.");
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to persist job state=Running for job {JobId}", req.JobId);
+                _logger.LogError(ex, "Unexpected exception in BackgroundImportQueueService.ExecuteAsync.");
+            }
+            finally
+            {
+                _logger.LogInformation("BackgroundImportQueueService stopping.");
+            }
+        }
+
+        private static string? ExtractMessageFromResult(object? result)
+        {
+            if (result == null) return null;
+
+            // Try common property names in order
+            var t = result.GetType();
+
+            // Messages: IEnumerable<string>
+            var prop = t.GetProperty("Messages") ?? t.GetProperty("Errors");
+            if (prop != null)
+            {
+                var val = prop.GetValue(result) as System.Collections.IEnumerable;
+                if (val != null)
+                {
+                    var items = new List<string>();
+                    foreach (var o in val) items.Add(o?.ToString() ?? string.Empty);
+                    if (items.Count > 0) return string.Join("; ", items);
+                }
             }
 
-            // Use ImportService from scoped provider
-            using var scope = _serviceProvider.CreateScope();
-            var importService = scope.ServiceProvider.GetRequiredService<IImportService>();
-            var db = scope.ServiceProvider.GetRequiredService<IsatisDbContext>();
-
-            // Progress reporter: persist periodic progress back to DB and update in-memory status
-            var progress = new Progress<(int total, int processed)>(async t =>
+            // Message (single string)
+            prop = t.GetProperty("Message") ?? t.GetProperty("Error");
+            if (prop != null)
             {
-                try
-                {
-                    var (totalRows, processedRows) = t;
-                    var percent = totalRows == 0 ? 0 : (int)Math.Round((processedRows / (double)totalRows) * 100.0);
-
-                    using var scopeP = _serviceProvider.CreateScope();
-                    var dbP = scopeP.ServiceProvider.GetRequiredService<IsatisDbContext>();
-                    var entityP = await dbP.ProjectImportJobs.FindAsync(req.JobId);
-                    if (entityP != null)
-                    {
-                        entityP.ProcessedRows = processedRows;
-                        entityP.TotalRows = totalRows;
-                        entityP.Percent = percent;
-                        entityP.UpdatedAt = DateTime.UtcNow;
-                        entityP.Message = "Running";
-                        entityP.Attempts = Math.Max(entityP.Attempts, 0);
-                        dbP.ProjectImportJobs.Update(entityP);
-                        await dbP.SaveChangesAsync();
-                    }
-
-                    _statuses[req.JobId] = new Shared.Models.ImportJobStatusDto(req.JobId, Shared.Models.ImportJobState.Running, totalRows, processedRows, "Running", null, percent);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to persist progress for job {JobId}", req.JobId);
-                }
-            });
-
-            // Ensure stream position at start
-            try { req.Stream.Position = 0; } catch { }
-
-            // Call import service using stream
-            var result = await importService.ImportCsvAsync(req.Stream, req.ProjectName ?? "ImportedProject", req.Owner, req.StateJson, progress);
-
-            if (result.Succeeded)
-            {
-                var projectId = result.Data?.ProjectId;
-
-                // update DB record final state
-                try
-                {
-                    var entity = await db.ProjectImportJobs.FindAsync(req.JobId);
-                    if (entity != null)
-                    {
-                        entity.ResultProjectId = projectId;
-                        entity.State = (int)Shared.Models.ImportJobState.Completed;
-                        entity.Percent = 100;
-                        entity.ProcessedRows = entity.TotalRows; // best-effort
-                        entity.UpdatedAt = DateTime.UtcNow;
-                        entity.Message = "Completed";
-                        db.ProjectImportJobs.Update(entity);
-                        await db.SaveChangesAsync();
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to persist completion for job {JobId}", req.JobId);
-                }
-
-                _statuses[req.JobId] = new Shared.Models.ImportJobStatusDto(req.JobId, Shared.Models.ImportJobState.Completed, _statuses[req.JobId].TotalRows, _statuses[req.JobId].ProcessedRows, "Completed", projectId, 100);
-                _logger.LogInformation("Import job {JobId} completed. ProjectId: {ProjectId}", req.JobId, projectId);
+                var v = prop.GetValue(result);
+                if (v != null) return v.ToString();
             }
-            else
+
+            // Fallback: ToString()
+            return result.ToString();
+        }
+
+        /// <summary>
+        /// Process a single request.
+        /// Returns optional resultProjectId (for import).
+        /// </summary>
+        private async Task<Guid?> ProcessRequestAsync(ImportRequest req, CancellationToken cancellationToken)
+        {
+            if (req == null) throw new ArgumentNullException(nameof(req));
+
+            if (string.Equals(req.JobType, "process", StringComparison.OrdinalIgnoreCase))
             {
-                // SAFE access to result.Messages (coalesce to avoid null-ref warnings)
-                var msg = (result.Messages ?? Array.Empty<string>()).FirstOrDefault() ?? "Import failed";
+                if (!req.ProjectId.HasValue || req.ProjectId == Guid.Empty) throw new InvalidOperationException("Process job missing ProjectId");
 
-                // persist failure
-                try
+                using var scope = CreateScope();
+                var processing = scope.ServiceProvider.GetRequiredService<IProcessingService>();
+
+                _logger.LogInformation("Starting processing for job {JobId} project {ProjectId}", req.JobId, req.ProjectId);
+
+                var result = await processing.ProcessProjectAsync(req.ProjectId.Value, overwriteLatestState: true, cancellationToken: cancellationToken);
+
+                // Expect result to have Succeeded and possibly Messages/Errors
+                var succeededProp = result?.GetType().GetProperty("Succeeded");
+                var succeeded = succeededProp != null && (bool?)succeededProp.GetValue(result) == true;
+
+                if (!succeeded)
                 {
-                    var entity = await db.ProjectImportJobs.FindAsync(req.JobId);
-                    if (entity != null)
-                    {
-                        entity.State = (int)Shared.Models.ImportJobState.Failed;
-                        entity.Message = msg;
-                        entity.UpdatedAt = DateTime.UtcNow;
-                        entity.Attempts += 1;
-                        entity.LastError = msg;
-                        db.ProjectImportJobs.Update(entity);
-                        await db.SaveChangesAsync();
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to persist failure for job {JobId}", req.JobId);
+                    var msg = ExtractMessageFromResult(result) ?? "Processing failed";
+                    throw new InvalidOperationException(msg);
                 }
 
-                _statuses[req.JobId] = new Shared.Models.ImportJobStatusDto(req.JobId, Shared.Models.ImportJobState.Failed, _statuses[req.JobId].TotalRows, _statuses[req.JobId].ProcessedRows, msg, null, _statuses[req.JobId].Percent);
-                _logger.LogWarning("Import job {JobId} failed: {Msg}", req.JobId, msg);
+                // return the project id as the result
+                return req.ProjectId;
             }
+            else if (string.Equals(req.JobType, "import", StringComparison.OrdinalIgnoreCase))
+            {
+                using var scope = CreateScope();
+                var importServiceObj = scope.ServiceProvider.GetService(typeof(Application.Services.IImportService));
+                if (importServiceObj == null)
+                {
+                    throw new NotImplementedException("Import processing not implemented on server. Register an IImportService or implement import handling.");
+                }
+
+                // Try to find an ImportAsync method via reflection (flexible against different signatures)
+                var importType = importServiceObj.GetType();
+                var importMethod = importType.GetMethod("ImportAsync") ?? importType.GetMethod("Import");
+                if (importMethod == null)
+                {
+                    throw new NotImplementedException("IImportService is registered but no ImportAsync/Import method found. Update service contract or BackgroundImportQueueService.");
+                }
+
+                // Prepare parameters: attempt common signatures (Stream, projectName, owner, CancellationToken)
+                var parameters = importMethod.GetParameters();
+                var args = new List<object?>();
+                foreach (var p in parameters)
+                {
+                    if (p.ParameterType == typeof(Stream) || p.ParameterType == typeof(MemoryStream))
+                        args.Add(req.Stream);
+                    else if (p.ParameterType == typeof(string))
+                    {
+                        // prefer projectName then owner
+                        if (args.Count == 0) args.Add(req.ProjectName);
+                        else args.Add(req.Owner);
+                    }
+                    else if (p.ParameterType == typeof(CancellationToken))
+                        args.Add(cancellationToken);
+                    else
+                        args.Add(null); // unknown param -> pass null (may fail)
+                }
+
+                // Invoke
+                var invoked = importMethod.Invoke(importServiceObj, args.ToArray());
+                if (invoked == null) throw new InvalidOperationException("Import method returned null");
+
+                // If returned a Task or Task<T>, await and get Result via reflection
+                object? importResult = null;
+                if (invoked is Task task)
+                {
+                    await task.ConfigureAwait(false);
+                    var resultProp = task.GetType().GetProperty("Result");
+                    importResult = resultProp?.GetValue(task);
+                }
+                else
+                {
+                    importResult = invoked;
+                }
+
+                if (importResult == null) throw new InvalidOperationException("Import returned null result");
+
+                // Check Succeeded
+                var succProp = importResult.GetType().GetProperty("Succeeded");
+                var succeeded = succProp != null && (bool?)succProp.GetValue(importResult) == true;
+                if (!succeeded)
+                {
+                    var msg = ExtractMessageFromResult(importResult) ?? "Import failed";
+                    throw new InvalidOperationException(msg);
+                }
+
+                // Try to extract ProjectId from result
+                var projProp = importResult.GetType().GetProperty("ProjectId") ?? importResult.GetType().GetProperty("ResultProjectId");
+                if (projProp != null)
+                {
+                    var pidVal = projProp.GetValue(importResult);
+                    if (pidVal is Guid g) return g;
+                    if (Guid.TryParse(pidVal?.ToString(), out var parsed)) return parsed;
+                }
+
+                return null;
+            }
+
+            throw new InvalidOperationException($"Unknown job type: {req.JobType}");
         }
 
         public override void Dispose()
         {
-            try
-            {
-                _channel.Writer.Complete();
-            }
-            catch { }
+            try { _channel.Writer.Complete(); } catch { }
             base.Dispose();
         }
 
         private sealed class ImportRequest
         {
             public Guid JobId { get; set; }
-            public MemoryStream Stream { get; set; } = null!;
+            public MemoryStream? Stream { get; set; }
             public string? ProjectName { get; set; }
             public string? Owner { get; set; }
             public string? StateJson { get; set; }
+            public string? JobType { get; set; }
+            public Guid? ProjectId { get; set; }
         }
     }
 }

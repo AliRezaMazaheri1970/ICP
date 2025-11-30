@@ -1,12 +1,18 @@
-﻿using Shared.Models;
+﻿using System;
+using System.IO;
+using System.Threading.Tasks;
 
-namespace Application.Services;
-
-public interface IImportQueueService
+namespace Application.Services
 {
-    /// Enqueue CSV stream for background import. Caller should provide stream content (method will copy it).
-    Task<Guid> EnqueueImportAsync(Stream csvStream, string projectName, string? owner = null, string? stateJson = null);
+    public interface IImportQueueService
+    {
+        // Existing API for enqueuing import streams (if present)
+        Task<Guid> EnqueueImportAsync(Stream csvStream, string projectName, string? owner = null, string? stateJson = null);
 
-    /// Get job status by id. Returns null if not found.
-    Task<ImportJobStatusDto?> GetStatusAsync(Guid jobId);
+        // New: enqueue a processing job for an existing project (background)
+        Task<Guid> EnqueueProcessJobAsync(Guid projectId);
+
+        // Existing API for status lookup
+        Task<Shared.Models.ImportJobStatusDto?> GetStatusAsync(Guid jobId);
+    }
 }
