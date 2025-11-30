@@ -14,6 +14,8 @@ namespace Infrastructure.Services
 {
     /// <summary>
     /// پیاده‌سازی IProcessingService در لایهٔ Infrastructure.
+    /// - EnqueueProcessProjectAsync: ایجاد یک رکورد job در ProjectImportJobs با JobType = "process"
+    /// - ProcessProjectAsync: اجرای محاسبات و ذخیره‌ی ProcessedData + ProjectState (همان منطق موجود)
     /// </summary>
     public class ProcessingService : IProcessingService
     {
@@ -27,25 +29,61 @@ namespace Infrastructure.Services
         }
 
         /// <summary>
-        /// صف‌بندی پردازش پروژه.
-        /// فعلاً به صورت فیل‌بک با اجرای هم‌زمان عمل می‌کند و برای مسیر background می‌تواند jobId یا projectStateId برگرداند.
+        /// Enqueue processing: create a job row and return its jobId.
+        /// Background worker (BackgroundImportQueueService) will pick it up.
         /// </summary>
         public async Task<ProcessingResult> EnqueueProcessProjectAsync(Guid projectId, CancellationToken cancellationToken = default)
         {
-            // ساده‌سازی فعلی: مستقیماً پردازش را اجرا می‌کنیم و projectStateId را برمی‌گردانیم.
-            // در آینده این متد باید job واقعی در DB ایجاد کند و jobId را برگرداند.
-            var result = await ProcessProjectAsync(projectId, overwriteLatestState: true, cancellationToken);
+            if (projectId == Guid.Empty)
+                return ProcessingResult.Failure("Invalid projectId", data: null);
 
-            if (!result.Succeeded)
-                return ProcessingResult.Failure(result.Error ?? "Processing failed", data: null);
+            try
+            {
+                // Optional idempotency: check if a pending process job for this project already exists.
+                var existing = await _db.ProjectImportJobs
+                                        .AsNoTracking()
+                                        .FirstOrDefaultAsync(j => j.JobType == "process" && j.ProjectId == projectId && j.State == (int)Shared.Models.ImportJobState.Pending, cancellationToken);
 
-            // result.Data is expected to be an int (projectStateId) after ProcessProjectAsync fix
-            return ProcessingResult.Success(result.Data, Array.Empty<string>());
+                if (existing != null)
+                {
+                    // return the existing job id
+                    return ProcessingResult.Success(existing.JobId, Array.Empty<string>());
+                }
+
+                var jobId = Guid.NewGuid();
+                var job = new ProjectImportJob
+                {
+                    JobId = jobId,
+                    ProjectId = projectId,
+                    ProjectName = null,
+                    JobType = "process",
+                    State = (int)Shared.Models.ImportJobState.Pending,
+                    Percent = 0,
+                    ProcessedRows = 0,
+                    TotalRows = 0,
+                    Message = "Queued",
+                    OperationId = Guid.NewGuid(),
+                    Attempts = 0,
+                    LastError = null,
+                    NextAttemptAt = null,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+
+                await _db.ProjectImportJobs.AddAsync(job, cancellationToken);
+                await _db.SaveChangesAsync(cancellationToken);
+
+                return ProcessingResult.Success(jobId, Array.Empty<string>());
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to enqueue processing job for project {ProjectId}", projectId);
+                return ProcessingResult.Failure($"Failed to enqueue job: {ex.Message}");
+            }
         }
 
         /// <summary>
-        /// پردازش هم‌زمان پروژه: خواندن RawDataRows، محاسبه‌ی summary و ذخیره‌ی ProcessedData و ProjectState.
-        /// Data در ProcessingResult به صورت عددی (projectStateId) بازگردانده می‌شود.
+        /// پردازش هم‌زمان پروژه: همان منطق سابق با بازگرداندن numeric projectStateId.
         /// </summary>
         public async Task<ProcessingResult> ProcessProjectAsync(Guid projectId, bool overwriteLatestState = true, CancellationToken cancellationToken = default)
         {
@@ -90,7 +128,7 @@ namespace Infrastructure.Services
                     await _db.Set<ProjectState>().AddAsync(emptyState, cancellationToken);
                     await _db.SaveChangesAsync(cancellationToken);
 
-                    // Return the numeric state id as Data (not an anonymous object)
+                    // Return the numeric state id as Data
                     return ProcessingResult.Success(emptyState.StateId, Array.Empty<string>());
                 }
 
@@ -201,7 +239,7 @@ namespace Infrastructure.Services
                     _logger.LogInformation("Processed project {ProjectId}: ProcessedId={ProcessedId}, ProjectStateId={StateId}",
                         projectId, processed.ProcessedId, state.StateId);
 
-                    // Return the numeric state id as Data (so the controller wraps it as { projectStateId: <number> })
+                    // Return the numeric state id as Data
                     return ProcessingResult.Success(state.StateId, Array.Empty<string>());
                 }
                 catch (Exception ex)

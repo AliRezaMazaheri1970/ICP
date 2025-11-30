@@ -3,7 +3,7 @@
 namespace Domain.Entities;
 
 /// <summary>
-/// Persists import job status so it survives restarts.
+/// Persists import/processing job status so it survives restarts.
 /// Primary key is JobId (Guid).
 /// </summary>
 public class ProjectImportJob
@@ -11,11 +11,17 @@ public class ProjectImportJob
     [Key]
     public Guid JobId { get; set; }
 
+    // For processing jobs: which project to process
+    public Guid? ProjectId { get; set; }
+
     // Optional: the project that will be created/associated by import
     public Guid? ResultProjectId { get; set; }
 
     // The project name requested by the user (optional, useful for listing)
     public string? ProjectName { get; set; }
+
+    // Job type: "import" or "process" (could be made enum)
+    public string? JobType { get; set; }
 
     // State stored as int (map to Shared.Models.ImportJobState)
     public int State { get; set; }
@@ -26,7 +32,7 @@ public class ProjectImportJob
 
     public string? Message { get; set; }
 
-    // NEW: path to temporary uploaded file on disk (already existed)
+    // NEW: path to temporary uploaded file on disk (optional)
     public string? TempFilePath { get; set; }
 
     public DateTime CreatedAt { get; set; }
