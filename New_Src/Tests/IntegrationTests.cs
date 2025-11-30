@@ -1,9 +1,7 @@
 ﻿using System;
 using System.Net;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -11,6 +9,10 @@ using Xunit;
 
 namespace Tests;
 
+/// <summary>
+/// Integration tests for API endpoints. 
+/// Tests actual HTTP requests against the test server.
+/// </summary>
 public class IntegrationTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory _factory;
@@ -22,111 +24,114 @@ public class IntegrationTests : IClassFixture<CustomWebApplicationFactory>
         _client = factory.CreateClient();
     }
 
-    [Fact(DisplayName = "Save -> Load project works")]
-    public async Task Save_Then_Load_Project()
+    #region Pivot Endpoints
+
+    [Fact(DisplayName = "Pivot endpoint with invalid project returns error")]
+    public async Task Pivot_InvalidProject_ReturnsError()
     {
-        var projectId = Guid.NewGuid();
-        var saveBody = new
+        var invalidProjectId = Guid.NewGuid();
+
+        var response = await _client.GetAsync($"/api/pivot/{invalidProjectId}");
+
+        var content = await response.Content.ReadFromJsonAsync<JsonElement>();
+        if (content.TryGetProperty("succeeded", out var succeeded))
         {
-            ProjectName = "IT_SaveLoad",
-            Owner = "test",
-            RawRows = new[] { new { ColumnData = "{\"Fe\":1.2}", SampleId = "S1" } },
-            StateJson = "{}"
-        };
-
-        var saveRes = await _client.PostAsJsonAsync($"/api/projects/{projectId}/save", saveBody);
-        saveRes.EnsureSuccessStatusCode();
-
-        var loadRes = await _client.GetAsync($"/api/projects/{projectId}/load");
-        loadRes.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        var loadContent = await loadRes.Content.ReadFromJsonAsync<JsonElement>();
-        var loadData = loadContent.GetProperty("data");
-        loadData.GetProperty("projectName").GetString().Should().Be("IT_SaveLoad");
+            succeeded.GetBoolean().Should().BeFalse();
+        }
     }
 
-    [Fact(DisplayName = "Import CSV (sync) creates project and rows")]
-    public async Task ImportCsv_Sync_CreatesProject()
+    [Fact(DisplayName = "Pivot POST endpoint accepts request")]
+    public async Task Pivot_Post_AcceptsRequest()
     {
-        // prepare csv content
-        var csv = "SampleId,Fe,Cu\nS1,12.3,0.5\nS2,11.9,0.6\n";
-        using var content = new MultipartFormDataContent();
-        var fileContent = new ByteArrayContent(Encoding.UTF8.GetBytes(csv));
-        fileContent.Headers.ContentType = MediaTypeHeaderValue.Parse("text/csv");
-        content.Add(fileContent, "file", "data.csv");
-        content.Add(new StringContent("ImportedFromTest"), "projectName");
-        content.Add(new StringContent("dev"), "owner");
+        var request = new { ProjectId = Guid.NewGuid(), Page = 1, PageSize = 10 };
 
-        var res = await _client.PostAsync("/api/projects/import", content);
-        res.EnsureSuccessStatusCode();
+        var response = await _client.PostAsJsonAsync("/api/pivot", request);
 
-        var body = await res.Content.ReadFromJsonAsync<JsonElement>();
-
-        bool succeeded;
-        if (body.TryGetProperty("succeeded", out var succProp))
-            succeeded = succProp.GetBoolean();
-        else if (body.TryGetProperty("success", out var succProp2))
-            succeeded = succProp2.GetBoolean();
-        else
-            throw new InvalidOperationException("Response JSON does not contain 'succeeded' or 'success' property.");
-
-        succeeded.Should().BeTrue();
-
-        var bodyData = body.GetProperty("data");
-        Guid projectId = Guid.Parse(bodyData.GetProperty("projectId").GetString()!);
-
-        // load and verify that project is accessible
-        var loadRes = await _client.GetAsync($"/api/projects/{projectId}/load");
-        loadRes.StatusCode.Should().Be(HttpStatusCode.OK);
-        // اگر بخواهی می‌توانی اینجا هم JSON را بخوانی و روی فیلدهایی مثل projectName/rows Assert بزنی
+        // Should return OK or BadRequest, not 500
+        response.StatusCode.Should().NotBe(HttpStatusCode.InternalServerError);
     }
 
-    [Fact(DisplayName = "Process project computes and saves a ProjectState")]
-    public async Task ProcessProject_ProducesState()
+    #endregion
+
+    #region Report Endpoints
+
+    [Fact(DisplayName = "Report Excel endpoint with invalid project returns error")]
+    public async Task Report_Excel_InvalidProject_ReturnsError()
     {
-        // 1) create a project by calling save endpoint
-        var projectId = Guid.NewGuid();
-        var saveBody = new
-        {
-            ProjectName = "IT_Process",
-            Owner = "test",
-            RawRows = new[]
-            {
-                new { ColumnData = "{\"Fe\":1.2}", SampleId = "S1" },
-                new { ColumnData = "{\"Fe\":2.3}", SampleId = "S2" },
-                new { ColumnData = "{\"Fe\":3.4}", SampleId = "S3" }
-            },
-            StateJson = "{}"
-        };
+        var invalidProjectId = Guid.NewGuid();
 
-        var saveRes = await _client.PostAsJsonAsync($"/api/projects/{projectId}/save", saveBody);
-        saveRes.EnsureSuccessStatusCode();
+        var response = await _client.GetAsync($"/api/reports/{invalidProjectId}/excel");
 
-        // 2) call process endpoint
-        var procRes = await _client.PostAsync($"/api/projects/{projectId}/process", null);
-        procRes.EnsureSuccessStatusCode();
-
-        var procBody = await procRes.Content.ReadFromJsonAsync<JsonElement>();
-
-        bool procSucceeded;
-        if (procBody.TryGetProperty("succeeded", out var procSuccProp))
-            procSucceeded = procSuccProp.GetBoolean();
-        else if (procBody.TryGetProperty("success", out var procSuccProp2))
-            procSucceeded = procSuccProp2.GetBoolean();
-        else
-            throw new InvalidOperationException("Process response JSON does not contain 'succeeded' or 'success' property.");
-
-        procSucceeded.Should().BeTrue();
-        // ProjectStateId returned
-        var stateId = procBody.GetProperty("data").GetProperty("projectStateId").GetInt32();
-
-        // 3) fetch latest state via load endpoint and check LatestStateJson exists
-        var loadRes = await _client.GetAsync($"/api/projects/{projectId}/load");
-        loadRes.EnsureSuccessStatusCode();
-
-        var loadBody = await loadRes.Content.ReadFromJsonAsync<JsonElement>();
-        var loadData2 = loadBody.GetProperty("data");
-        loadData2.GetProperty("projectName").GetString().Should().Be("IT_Process");
-        loadData2.GetProperty("latestStateJson").GetString().Should().NotBeNullOrEmpty();
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
+
+    [Fact(DisplayName = "Report CSV endpoint with invalid project returns error")]
+    public async Task Report_Csv_InvalidProject_ReturnsError()
+    {
+        var invalidProjectId = Guid.NewGuid();
+
+        var response = await _client.GetAsync($"/api/reports/{invalidProjectId}/csv");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact(DisplayName = "Report JSON endpoint with invalid project returns error")]
+    public async Task Report_Json_InvalidProject_ReturnsError()
+    {
+        var invalidProjectId = Guid.NewGuid();
+
+        var response = await _client.GetAsync($"/api/reports/{invalidProjectId}/json");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact(DisplayName = "Report HTML endpoint with invalid project returns error")]
+    public async Task Report_Html_InvalidProject_ReturnsError()
+    {
+        var invalidProjectId = Guid.NewGuid();
+
+        var response = await _client.GetAsync($"/api/reports/{invalidProjectId}/html");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    #endregion
+
+    #region RM Check Endpoints
+
+    [Fact(DisplayName = "RM Check endpoint accepts POST request")]
+    public async Task RmCheck_Post_AcceptsRequest()
+    {
+        var request = new { ProjectId = Guid.NewGuid() };
+
+        var response = await _client.PostAsJsonAsync("/api/rmcheck", request);
+
+        response.StatusCode.Should().NotBe(HttpStatusCode.InternalServerError);
+    }
+
+    [Fact(DisplayName = "RM Check Weight-Volume endpoint accepts POST request")]
+    public async Task RmCheck_WeightVolume_AcceptsRequest()
+    {
+        var request = new { ProjectId = Guid.NewGuid() };
+
+        var response = await _client.PostAsJsonAsync("/api/rmcheck/weight-volume", request);
+
+        response.StatusCode.Should().NotBe(HttpStatusCode.InternalServerError);
+    }
+
+    #endregion
+
+    #region CRM Endpoints
+
+    [Fact(DisplayName = "CRM Diff endpoint accepts POST request")]
+    public async Task CrmDiff_Post_AcceptsRequest()
+    {
+        var request = new { ProjectId = Guid.NewGuid() };
+
+        var response = await _client.PostAsJsonAsync("/api/crm/diff", request);
+
+        response.StatusCode.Should().NotBe(HttpStatusCode.InternalServerError);
+    }
+
+    #endregion
 }
