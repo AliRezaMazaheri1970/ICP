@@ -9,8 +9,9 @@ public record BlankScaleOptimizationRequest(
     decimal MinDiffPercent = -10m,
     decimal MaxDiffPercent = 10m,
     int MaxIterations = 100,
-    int PopulationSize = 50,
-    bool UseMultiModel = true
+    int PopulationSize = 20,
+    bool UseMultiModel = true,
+    int? Seed = null  // ✅ اضافه شد - برای تکرارپذیری نتایج
 );
 
 /// <summary>

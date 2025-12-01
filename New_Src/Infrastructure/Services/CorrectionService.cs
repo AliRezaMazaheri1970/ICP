@@ -164,7 +164,7 @@ public class CorrectionService : ICorrectionService
 
     #endregion
 
-    #region Find Empty Rows (NEW - Based on Python empty_check. py)
+    #region Find Empty Rows (Based on Python empty_check.py)
 
     /// <summary>
     /// Find empty/outlier rows based on element averages
@@ -172,6 +172,10 @@ public class CorrectionService : ICorrectionService
     /// - Calculate mean for each element column
     /// - If ALL (or most) elements in a row are less than threshold% of their column mean,
     ///   mark the row as "empty" or "outlier"
+    /// 
+    /// Python equivalent (empty_check.py line 500-502):
+    ///   below_threshold = df_numeric < threshold_values
+    ///   empty_rows_mask = below_threshold.all(axis=1)
     /// </summary>
     public async Task<Result<List<EmptyRowDto>>> FindEmptyRowsAsync(FindEmptyRowsRequest request)
     {
@@ -241,9 +245,11 @@ public class CorrectionService : ICorrectionService
                 return Result<List<EmptyRowDto>>.Success(new List<EmptyRowDto>());
 
             // Filter elements to check if specified
+            // Python default: {'Na', 'Ca', 'Al', 'Mg', 'K'}
             var elementsToCheck = request.ElementsToCheck?.ToHashSet() ?? allElements;
 
             // Step 2: Calculate mean for each element column
+            // Python equivalent: column_means = df_numeric.mean()
             var elementMeans = new Dictionary<string, decimal>();
             foreach (var element in elementsToCheck)
             {
@@ -262,6 +268,7 @@ public class CorrectionService : ICorrectionService
                 return Result<List<EmptyRowDto>>.Success(new List<EmptyRowDto>());
 
             // Step 3: Check each row against the threshold
+            // Python equivalent: threshold_values = column_means * (1 - self.mean_percentage_threshold / 100)
             var emptyRows = new List<EmptyRowDto>();
             var thresholdFactor = (100m - request.ThresholdPercent) / 100m;
 
@@ -284,19 +291,36 @@ public class CorrectionService : ICorrectionService
                     percentOfAverage[element] = percent;
 
                     // Check if value is below threshold of mean
+                    // Python: below_threshold = df_numeric < threshold_values
                     if (value.Value < mean * thresholdFactor)
                     {
                         elementsBelowThreshold++;
                     }
                 }
 
-                // If most elements are below threshold, mark as empty
+                // Determine if row is empty based on mode
                 if (totalChecked > 0)
                 {
                     var overallScore = (decimal)elementsBelowThreshold / totalChecked * 100m;
 
-                    // Mark as empty if more than 50% of elements are below threshold
-                    if (elementsBelowThreshold > 0 && overallScore >= 50)
+                    // ✅ اصلاح شده: پشتیبانی از هر دو حالت
+                    // RequireAllElements = true  → مثل پایتون: همه عناصر باید زیر آستانه باشند
+                    // RequireAllElements = false → حالت قبلی: بیش از 50% کافیه
+                    bool isEmptyRow;
+
+                    if (request.RequireAllElements)
+                    {
+                        // Python-compatible: ALL elements must be below threshold
+                        // Python equivalent (empty_check.py line 502): empty_rows_mask = below_threshold.all(axis=1)
+                        isEmptyRow = elementsBelowThreshold == totalChecked && totalChecked > 0;
+                    }
+                    else
+                    {
+                        // Flexible mode: More than 50% below threshold
+                        isEmptyRow = elementsBelowThreshold > 0 && overallScore >= 50;
+                    }
+
+                    if (isEmptyRow)
                     {
                         emptyRows.Add(new EmptyRowDto(
                             solutionLabel,
@@ -315,8 +339,8 @@ public class CorrectionService : ICorrectionService
             // Sort by score (most "empty" first)
             var result = emptyRows.OrderByDescending(e => e.OverallScore).ToList();
 
-            _logger.LogInformation("Found {Count} empty/outlier rows in project {ProjectId}",
-                result.Count, request.ProjectId);
+            _logger.LogInformation("Found {Count} empty/outlier rows in project {ProjectId} (RequireAllElements={RequireAll})",
+                result.Count, request.ProjectId, request.RequireAllElements);
 
             return Result<List<EmptyRowDto>>.Success(result);
         }

@@ -1,84 +1,80 @@
 ﻿namespace Application.DTOs;
 
+// ============================================
+// Request DTOs
+// ============================================
+
 /// <summary>
-/// Request for weight correction
+/// Request to find samples with bad weights (outside expected range)
+/// </summary>
+public record FindBadWeightsRequest(
+    Guid ProjectId,
+    decimal WeightMin = 0.09m,
+    decimal WeightMax = 0.11m
+);
+
+/// <summary>
+/// Request to find samples with bad volumes
+/// </summary>
+public record FindBadVolumesRequest(
+    Guid ProjectId,
+    decimal ExpectedVolume = 10m
+);
+
+/// <summary>
+/// Request to find empty/outlier rows based on element averages
+/// مشابه empty_check.py در پایتون
+/// </summary>
+public record FindEmptyRowsRequest(
+    Guid ProjectId,
+    decimal ThresholdPercent = 70m,
+    List<string>? ElementsToCheck = null,
+    bool RequireAllElements = true  // ✅ اضافه شد - true = مثل پایتون (همه عناصر باید زیر آستانه باشند)
+);
+
+/// <summary>
+/// Request to apply weight correction
 /// </summary>
 public record WeightCorrectionRequest(
     Guid ProjectId,
     List<string> SolutionLabels,
     decimal NewWeight,
-    decimal? WeightMin = 0.190m,
-    decimal? WeightMax = 0.210m,
-    string? ChangedBy = null  // اضافه شد
+    string? ChangedBy = null
 );
 
 /// <summary>
-/// Request for volume correction
+/// Request to apply volume correction
 /// </summary>
 public record VolumeCorrectionRequest(
     Guid ProjectId,
     List<string> SolutionLabels,
     decimal NewVolume,
-    decimal? ExpectedVolume = 50m,
-    string? ChangedBy = null  // اضافه شد
+    string? ChangedBy = null
 );
 
 /// <summary>
-/// Request to apply blank and scale optimization results
+/// Request to apply optimization (Blank & Scale)
 /// </summary>
 public record ApplyOptimizationRequest(
     Guid ProjectId,
-    Dictionary<string, BlankScaleSettings> ElementSettings,
-    string? ChangedBy = null  // اضافه شد
+    Dictionary<string, ElementSettings> ElementSettings,
+    string? ChangedBy = null
 );
 
 /// <summary>
-/// Element-specific blank and scale settings for correction
+/// Element-specific Blank and Scale settings
 /// </summary>
-public record BlankScaleSettings(
+public record ElementSettings(
     decimal Blank,
     decimal Scale
 );
 
-/// <summary>
-/// Result of correction operation
-/// </summary>
-public record CorrectionResultDto(
-    int TotalRows,
-    int CorrectedRows,
-    List<CorrectedSampleInfo> Samples
-);
+// ============================================
+// Response DTOs
+// ============================================
 
 /// <summary>
-/// Information about a corrected sample
-/// </summary>
-public record CorrectedSampleInfo(
-    string SolutionLabel,
-    decimal OldValue,
-    decimal NewValue,
-    decimal OldCorrCon,
-    decimal NewCorrCon
-);
-
-/// <summary>
-/// Request to find bad weights
-/// </summary>
-public record FindBadWeightsRequest(
-    Guid ProjectId,
-    decimal WeightMin = 0.190m,
-    decimal WeightMax = 0.210m
-);
-
-/// <summary>
-/// Request to find bad volumes
-/// </summary>
-public record FindBadVolumesRequest(
-    Guid ProjectId,
-    decimal ExpectedVolume = 50m
-);
-
-/// <summary>
-/// Bad weight/volume sample info
+/// Information about a sample with bad weight or volume
 /// </summary>
 public record BadSampleDto(
     string SolutionLabel,
@@ -86,16 +82,6 @@ public record BadSampleDto(
     decimal CorrCon,
     decimal ExpectedValue,
     decimal Deviation
-);
-
-/// <summary>
-/// Request to find empty/outlier rows based on element averages
-/// مشابه empty_check. py در پایتون
-/// </summary>
-public record FindEmptyRowsRequest(
-    Guid ProjectId,
-    decimal ThresholdPercent = 70m,
-    List<string>? ElementsToCheck = null
 );
 
 /// <summary>
@@ -109,4 +95,24 @@ public record EmptyRowDto(
     int ElementsBelowThreshold,
     int TotalElementsChecked,
     decimal OverallScore
+);
+
+/// <summary>
+/// Result of applying a correction
+/// </summary>
+public record CorrectionResultDto(
+    int TotalRows,
+    int CorrectedRows,
+    List<CorrectedSampleInfo> CorrectedSamples
+);
+
+/// <summary>
+/// Information about a corrected sample
+/// </summary>
+public record CorrectedSampleInfo(
+    string SolutionLabel,
+    decimal OldValue,
+    decimal NewValue,
+    decimal OldCorrCon,
+    decimal NewCorrCon
 );

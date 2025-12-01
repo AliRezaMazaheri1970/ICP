@@ -13,33 +13,44 @@ namespace Infrastructure.Services;
 /// <summary>
 /// Advanced file parser supporting multiple ICP-MS file formats. 
 /// Equivalent to load_file. py logic in Python code.
+/// 
+/// Improvements:
+/// - Fallback detection with Try-Catch (like Python)
+/// - More flexible element patterns
+/// - Enhanced sample type detection matching Python logic
 /// </summary>
 public class AdvancedFileParser
 {
     private readonly ILogger _logger;
 
-    // Patterns for format detection
-    private static readonly Regex SampleIdPattern = new(@"^Sample\s*ID\s*:", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex MethodFilePattern = new(@"^Method\s*File\s*:", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex CalibrationPattern = new(@"^Calibration\s*File\s*:", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex ElementPattern = new(@"^([A-Za-z]{1,2})(\d+\. ?\d*)$", RegexOptions.Compiled);
+    // Patterns for format detection - more flexible
+    private static readonly Regex SampleIdPattern = new(@"^Sample\s*ID\s*:? ", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex MethodFilePattern = new(@"^Method\s*File\s*:?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex CalibrationPattern = new(@"^Calibration\s*File\s*:?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // More flexible element pattern - allows dash, space, or no separator
+    private static readonly Regex ElementPattern = new(@"^([A-Za-z]{1,2})[\s\-_]?(\d+\. ?\d*)$", RegexOptions.Compiled);
+
+    // Alternative element patterns for fallback
+    private static readonly Regex ElementPatternAlt1 = new(@"^(\d+\.?\d*)\s*([A-Za-z]{1,2})$", RegexOptions.Compiled); // "326.068 Na"
+    private static readonly Regex ElementPatternAlt2 = new(@"^([A-Za-z]{1,2})(\d+)$", RegexOptions.Compiled); // "Na326"
 
     // Known column names
-    private static readonly string[] SolutionLabelColumns = { "Solution Label", "SolutionLabel", "Sample ID", "SampleId", "Sample" };
-    private static readonly string[] ElementColumns = { "Element", "Analyte", "Mass" };
-    private static readonly string[] IntensityColumns = { "Int", "Intensity", "Net Intensity", "CPS", "Counts" };
-    private static readonly string[] ConcentrationColumns = { "Corr Con", "CorrCon", "Concentration", "Conc", "Calibrated Conc" };
-    private static readonly string[] TypeColumns = { "Type", "Sample Type", "SampleType" };
+    private static readonly string[] SolutionLabelColumns = { "Solution Label", "SolutionLabel", "Sample ID", "SampleId", "Sample", "Label", "Name" };
+    private static readonly string[] ElementColumns = { "Element", "Analyte", "Mass", "Isotope" };
+    private static readonly string[] IntensityColumns = { "Int", "Intensity", "Net Intensity", "CPS", "Counts", "Signal" };
+    private static readonly string[] ConcentrationColumns = { "Corr Con", "CorrCon", "Concentration", "Conc", "Calibrated Conc", "Result" };
+    private static readonly string[] TypeColumns = { "Type", "Sample Type", "SampleType", "Category" };
 
     public AdvancedFileParser(ILogger logger)
     {
         _logger = logger;
     }
 
-    #region Format Detection
+    #region Format Detection with Fallback
 
     /// <summary>
-    /// Detect file format from stream
+    /// Detect file format from stream with fallback mechanisms (like Python try-catch approach)
     /// </summary>
     public async Task<FileFormatDetectionResult> DetectFormatAsync(Stream stream, string fileName)
     {
@@ -50,27 +61,43 @@ public class AdvancedFileParser
 
             if (isExcel)
             {
-                return DetectExcelFormat(stream);
+                // Try Excel detection with fallback
+                try
+                {
+                    return DetectExcelFormat(stream);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Excel detection failed, trying as CSV");
+                    // Fallback: maybe it's a CSV with wrong extension
+                    stream.Position = 0;
+                    return await DetectCsvFormatWithFallbackAsync(stream);
+                }
             }
             else
             {
-                return await DetectCsvFormatAsync(stream);
+                return await DetectCsvFormatWithFallbackAsync(stream);
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to detect file format for {FileName}", fileName);
+
+            // Ultimate fallback: assume simple tabular CSV
             return new FileFormatDetectionResult(
-                FileFormat.Unknown,
-                null,
-                null,
+                FileFormat.TabularCsv,
+                ",",
+                0,
                 new List<string>(),
-                $"Failed to detect format: {ex.Message}"
+                $"Fallback detection used: {ex.Message}"
             );
         }
     }
 
-    private async Task<FileFormatDetectionResult> DetectCsvFormatAsync(Stream stream)
+    /// <summary>
+    /// CSV format detection with multiple fallback strategies (like Python)
+    /// </summary>
+    private async Task<FileFormatDetectionResult> DetectCsvFormatWithFallbackAsync(Stream stream)
     {
         stream.Position = 0;
         using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
@@ -78,7 +105,7 @@ public class AdvancedFileParser
         var previewLines = new List<string>();
         string? line;
         int lineCount = 0;
-        while ((line = await reader.ReadLineAsync()) != null && lineCount < 20)
+        while ((line = await reader.ReadLineAsync()) != null && lineCount < 30)
         {
             previewLines.Add(line);
             lineCount++;
@@ -91,12 +118,14 @@ public class AdvancedFileParser
             return new FileFormatDetectionResult(FileFormat.Unknown, null, null, new List<string>(), "File is empty");
         }
 
-        // Check for Sample ID-based format
-        bool hasSampleIdMarker = previewLines.Any(l => SampleIdPattern.IsMatch(l));
+        // Strategy 1: Check for Sample ID-based format markers
+        bool hasSampleIdMarker = previewLines.Any(l => SampleIdPattern.IsMatch(l.Trim()));
         bool hasNetIntensity = previewLines.Any(l => l.Contains("Net Intensity", StringComparison.OrdinalIgnoreCase));
+        bool hasMethodFile = previewLines.Any(l => MethodFilePattern.IsMatch(l.Trim()));
 
-        if (hasSampleIdMarker || hasNetIntensity)
+        if (hasSampleIdMarker || (hasNetIntensity && hasMethodFile))
         {
+            _logger.LogDebug("Detected Sample ID-based format");
             return new FileFormatDetectionResult(
                 FileFormat.SampleIdBasedCsv,
                 ",",
@@ -106,59 +135,89 @@ public class AdvancedFileParser
             );
         }
 
-        // Detect delimiter
-        var delimiter = DetectDelimiter(previewLines.First());
+        // Strategy 2: Detect delimiter
+        var delimiter = DetectDelimiterAdvanced(previewLines);
 
-        // Check for tabular format
-        var firstLine = previewLines.First();
-        var headers = firstLine.Split(new[] { delimiter }, StringSplitOptions.None)
-            .Select(h => h.Trim().Trim('"'))
-            .ToList();
-
-        bool hasRequiredColumns = headers.Any(h => SolutionLabelColumns.Contains(h, StringComparer.OrdinalIgnoreCase)) &&
-                                   headers.Any(h => ElementColumns.Contains(h, StringComparer.OrdinalIgnoreCase));
-
-        if (hasRequiredColumns)
+        // Strategy 3: Try to find header row
+        for (int headerRow = 0; headerRow < Math.Min(5, previewLines.Count); headerRow++)
         {
+            var headers = previewLines[headerRow].Split(new[] { delimiter }, StringSplitOptions.None)
+                .Select(h => h.Trim().Trim('"'))
+                .ToList();
+
+            bool hasLabelColumn = headers.Any(h => SolutionLabelColumns.Contains(h, StringComparer.OrdinalIgnoreCase));
+            bool hasElementColumn = headers.Any(h => ElementColumns.Contains(h, StringComparer.OrdinalIgnoreCase));
+            bool hasDataColumn = headers.Any(h => IntensityColumns.Concat(ConcentrationColumns).Contains(h, StringComparer.OrdinalIgnoreCase));
+
+            if (hasLabelColumn && (hasElementColumn || hasDataColumn))
+            {
+                _logger.LogDebug("Detected tabular format with header at row {Row}", headerRow);
+                return new FileFormatDetectionResult(
+                    FileFormat.TabularCsv,
+                    delimiter.ToString(),
+                    headerRow,
+                    headers,
+                    $"Detected tabular CSV format (header on row {headerRow + 1})"
+                );
+            }
+        }
+
+        // Strategy 4: Heuristic - check if data looks numeric
+        var firstDataLine = previewLines.Skip(1).FirstOrDefault() ?? "";
+        var parts = firstDataLine.Split(new[] { delimiter }, StringSplitOptions.None);
+        int numericCount = parts.Count(p => decimal.TryParse(p.Trim().Trim('"'), out _));
+
+        if (numericCount > parts.Length / 2)
+        {
+            _logger.LogDebug("Detected tabular format by numeric heuristic");
+            var headers = previewLines.First().Split(new[] { delimiter }, StringSplitOptions.None)
+                .Select(h => h.Trim().Trim('"'))
+                .ToList();
+
             return new FileFormatDetectionResult(
                 FileFormat.TabularCsv,
                 delimiter.ToString(),
                 0,
                 headers,
-                "Detected tabular CSV format"
+                "Detected tabular CSV format (numeric heuristic)"
             );
         }
 
-        // Check if second row is header
-        if (previewLines.Count > 1)
+        // Fallback: assume tabular with first row as header
+        _logger.LogWarning("Could not definitively determine format, assuming tabular CSV");
+        return new FileFormatDetectionResult(
+            FileFormat.TabularCsv,
+            delimiter.ToString(),
+            0,
+            previewLines.First().Split(new[] { delimiter }, StringSplitOptions.None)
+                .Select(h => h.Trim().Trim('"')).ToList(),
+            "Assumed tabular CSV format (fallback)"
+        );
+    }
+
+    /// <summary>
+    /// Advanced delimiter detection considering multiple lines
+    /// </summary>
+    private char DetectDelimiterAdvanced(List<string> lines)
+    {
+        var delimiters = new[] { ',', ';', '\t', '|' };
+        var scores = new Dictionary<char, int>();
+
+        foreach (var delim in delimiters)
         {
-            var secondLine = previewLines[1];
-            var secondHeaders = secondLine.Split(new[] { delimiter }, StringSplitOptions.None)
-                .Select(h => h.Trim().Trim('"'))
-                .ToList();
-
-            hasRequiredColumns = secondHeaders.Any(h => SolutionLabelColumns.Contains(h, StringComparer.OrdinalIgnoreCase)) &&
-                                  secondHeaders.Any(h => ElementColumns.Contains(h, StringComparer.OrdinalIgnoreCase));
-
-            if (hasRequiredColumns)
+            // Check consistency across lines
+            var counts = lines.Take(10).Select(l => l.Count(c => c == delim)).ToList();
+            if (counts.All(c => c == counts.First()) && counts.First() > 0)
             {
-                return new FileFormatDetectionResult(
-                    FileFormat.TabularCsv,
-                    delimiter.ToString(),
-                    1,
-                    secondHeaders,
-                    "Detected tabular CSV format (header on row 2)"
-                );
+                scores[delim] = counts.First() * 10; // Bonus for consistency
+            }
+            else
+            {
+                scores[delim] = counts.Sum();
             }
         }
 
-        return new FileFormatDetectionResult(
-            FileFormat.Unknown,
-            delimiter.ToString(),
-            null,
-            headers,
-            "Could not determine file format"
-        );
+        return scores.OrderByDescending(kv => kv.Value).First().Key;
     }
 
     private FileFormatDetectionResult DetectExcelFormat(Stream stream)
@@ -176,7 +235,6 @@ public class AdvancedFileParser
                 return new FileFormatDetectionResult(FileFormat.Unknown, null, null, new List<string>(), "Excel file is empty");
             }
 
-            // Read first 20 rows for detection
             int maxRows = Math.Min(20, usedRange.RowCount());
             int maxCols = usedRange.ColumnCount();
 
@@ -205,37 +263,21 @@ public class AdvancedFileParser
                 );
             }
 
-            // Check for tabular format - first row as header
-            var firstRowHeaders = previewRows.FirstOrDefault() ?? new List<string>();
-            bool hasRequiredColumns = firstRowHeaders.Any(h => SolutionLabelColumns.Contains(h, StringComparer.OrdinalIgnoreCase)) &&
-                                       firstRowHeaders.Any(h => ElementColumns.Contains(h, StringComparer.OrdinalIgnoreCase));
-
-            if (hasRequiredColumns)
+            // Try multiple header rows
+            for (int headerRow = 0; headerRow < Math.Min(5, previewRows.Count); headerRow++)
             {
-                return new FileFormatDetectionResult(
-                    FileFormat.TabularExcel,
-                    null,
-                    0,
-                    firstRowHeaders,
-                    "Detected tabular Excel format"
-                );
-            }
+                var headers = previewRows[headerRow];
+                bool hasLabelColumn = headers.Any(h => SolutionLabelColumns.Contains(h, StringComparer.OrdinalIgnoreCase));
+                bool hasElementColumn = headers.Any(h => ElementColumns.Contains(h, StringComparer.OrdinalIgnoreCase));
 
-            // Check second row as header
-            if (previewRows.Count > 1)
-            {
-                var secondRowHeaders = previewRows[1];
-                hasRequiredColumns = secondRowHeaders.Any(h => SolutionLabelColumns.Contains(h, StringComparer.OrdinalIgnoreCase)) &&
-                                      secondRowHeaders.Any(h => ElementColumns.Contains(h, StringComparer.OrdinalIgnoreCase));
-
-                if (hasRequiredColumns)
+                if (hasLabelColumn || hasElementColumn)
                 {
                     return new FileFormatDetectionResult(
                         FileFormat.TabularExcel,
                         null,
-                        1,
-                        secondRowHeaders,
-                        "Detected tabular Excel format (header on row 2)"
+                        headerRow,
+                        headers,
+                        $"Detected tabular Excel format (header on row {headerRow + 1})"
                     );
                 }
             }
@@ -244,7 +286,7 @@ public class AdvancedFileParser
                 FileFormat.TabularExcel,
                 null,
                 0,
-                firstRowHeaders,
+                previewRows.FirstOrDefault() ?? new List<string>(),
                 "Assumed tabular Excel format"
             );
         }
@@ -253,13 +295,6 @@ public class AdvancedFileParser
             _logger.LogError(ex, "Failed to detect Excel format");
             return new FileFormatDetectionResult(FileFormat.Unknown, null, null, new List<string>(), $"Excel detection failed: {ex.Message}");
         }
-    }
-
-    private char DetectDelimiter(string line)
-    {
-        var delimiters = new[] { ',', ';', '\t', '|' };
-        var counts = delimiters.ToDictionary(d => d, d => line.Count(c => c == d));
-        return counts.OrderByDescending(kv => kv.Value).First().Key;
     }
 
     #endregion
@@ -723,6 +758,95 @@ public class AdvancedFileParser
 
     #endregion
 
+    #region Enhanced Sample Type Detection (matching Python logic)
+
+    /// <summary>
+    /// Enhanced sample type detection matching Python code patterns
+    /// Patterns from Python: load_file. py, pivot_tab.py, empty_check.py
+    /// </summary>
+    private string DetectSampleType(string solutionLabel, AdvancedImportRequest? options)
+    {
+        if (!(options?.AutoDetectType ?? true))
+            return options?.DefaultType ?? "Samp";
+
+        var upper = solutionLabel.ToUpperInvariant().Trim();
+
+        // === BLANK Detection (expanded) ===
+        // Python patterns: "BLANK", "BLK", rinse solutions
+        if (upper.Contains("BLANK") ||
+            upper.Contains("BLK") ||
+            upper.StartsWith("BL1") || upper.StartsWith("BL2") || upper.StartsWith("BL3") ||
+            upper.Contains("RINSE") ||
+            upper.Contains("WASH") ||
+            upper == "B" ||
+            Regex.IsMatch(upper, @"^BL\d+$") ||
+            Regex.IsMatch(upper, @"^BLANK\s*\d*$"))
+        {
+            return "Blk";
+        }
+
+        // === STANDARD Detection (expanded) ===
+        // Python patterns: "STD", "STANDARD", calibration standards
+        if (upper.Contains("STD") ||
+            upper.Contains("STANDARD") ||
+            upper.StartsWith("CAL") ||
+            upper.StartsWith("S1") || upper.StartsWith("S2") || upper.StartsWith("S3") ||
+            upper.StartsWith("S4") || upper.StartsWith("S5") || upper.StartsWith("S6") ||
+            Regex.IsMatch(upper, @"^S\d+$") ||
+            Regex.IsMatch(upper, @"^\d+\s*(PPM|PPB|MG/L|UG/L)$", RegexOptions.IgnoreCase) ||
+            Regex.IsMatch(upper, @"^STD\s*\d+$") ||
+            Regex.IsMatch(upper, @"^\d+\s*STD$"))
+        {
+            return "Std";
+        }
+
+        // === QC Detection (expanded) ===
+        // Python patterns: QC samples, ICV, CCV, continuing calibration
+        if (upper.Contains("QC") ||
+            upper.Contains("CHECK") ||
+            upper.Contains("QUALITY") ||
+            upper.Contains("CONTROL") ||
+            upper.StartsWith("ICV") ||  // Initial Calibration Verification
+            upper.StartsWith("CCV") ||  // Continuing Calibration Verification
+            upper.StartsWith("ICB") ||  // Initial Calibration Blank
+            upper.StartsWith("CCB") ||  // Continuing Calibration Blank
+            upper.Contains("DRIFT") ||
+            upper.Contains("VERIFY") ||
+            Regex.IsMatch(upper, @"^QC\s*\d*$") ||
+            Regex.IsMatch(upper, @"^(ICV|CCV|ICB|CCB)\d*$"))
+        {
+            return "QC";
+        }
+
+        // === Reference Material Detection (expanded) ===
+        // Python patterns: OREAS, SRM, CRM, NIST, BCR, geological standards
+        if (Regex.IsMatch(upper, @"\b(OREAS|SRM|CRM|NIST|BCR|TILL|GBW|AGV|BCR|BHVO|BIR|DNC|DTS|GSP|PCC|RGM|SCO|SDC|STM|W-2|JA|JB|JG|JR)\b") ||
+            Regex.IsMatch(upper, @"^(OREAS|SRM|CRM)\s*\d+", RegexOptions.IgnoreCase) ||
+            upper.Contains("REFERENCE") ||
+            upper.Contains("CERTIFIED") ||
+            Regex.IsMatch(upper, @"^RM[\s\-_]?\d+$"))
+        {
+            return "RM";
+        }
+
+        // === Duplicate/Repeat Detection ===
+        // Python patterns: TEK, RET, DUP for duplicates
+        if (upper.EndsWith("-TEK") || upper.EndsWith(" TEK") || upper.EndsWith("_TEK") ||
+            upper.EndsWith("-RET") || upper.EndsWith(" RET") || upper.EndsWith("_RET") ||
+            upper.EndsWith("-DUP") || upper.EndsWith(" DUP") || upper.EndsWith("_DUP") ||
+            upper.EndsWith("-REP") || upper.EndsWith(" REP") || upper.EndsWith("_REP") ||
+            Regex.IsMatch(upper, @"[-_\s](TEK|RET|DUP|REP|DUPLICATE|REPEAT)\d*$"))
+        {
+            // It's a sample duplicate, still return Samp
+            return "Samp";
+        }
+
+        // === Default: Sample ===
+        return "Samp";
+    }
+
+    #endregion
+
     #region Helper Methods
 
     private string[] ParseCsvLine(string line)
@@ -752,12 +876,31 @@ public class AdvancedFileParser
         return result.ToArray();
     }
 
+    /// <summary>
+    /// Normalize element name with multiple pattern support
+    /// </summary>
     private string NormalizeElementName(string element)
     {
         if (string.IsNullOrWhiteSpace(element)) return element;
 
         element = element.Trim();
+
+        // Try standard pattern: "Na 326. 068" or "Na326.068"
         var match = ElementPattern.Match(element);
+        if (match.Success)
+        {
+            return $"{match.Groups[1].Value} {match.Groups[2].Value}";
+        }
+
+        // Try alternative: "326.068 Na"
+        match = ElementPatternAlt1.Match(element);
+        if (match.Success)
+        {
+            return $"{match.Groups[2].Value} {match.Groups[1].Value}";
+        }
+
+        // Try alternative: "Na326"
+        match = ElementPatternAlt2.Match(element);
         if (match.Success)
         {
             return $"{match.Groups[1].Value} {match.Groups[2].Value}";
@@ -766,32 +909,18 @@ public class AdvancedFileParser
         return element;
     }
 
-    private string DetectSampleType(string solutionLabel, AdvancedImportRequest? options)
-    {
-        if (!(options?.AutoDetectType ?? true))
-            return options?.DefaultType ?? "Samp";
-
-        var upper = solutionLabel.ToUpperInvariant();
-
-        if (upper.Contains("BLANK") || upper.Contains("BLK"))
-            return "Blk";
-
-        if (upper.Contains("STD") || upper.Contains("STANDARD") || upper.Contains("CAL"))
-            return "Std";
-
-        if (upper.Contains("QC") || upper.Contains("CHECK"))
-            return "QC";
-
-        if (Regex.IsMatch(upper, @"\b(OREAS|SRM|CRM)\b"))
-            return "RM";
-
-        return "Samp";
-    }
-
     private decimal? ParseDecimal(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
         value = value.Trim();
+
+        // Handle scientific notation
+        if (value.Contains('E') || value.Contains('e'))
+        {
+            if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var dResult))
+                return (decimal)dResult;
+        }
+
         if (decimal.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var result))
             return result;
         return null;
@@ -827,12 +956,16 @@ public class AdvancedFileParser
             else if (TypeColumns.Contains(header, StringComparer.OrdinalIgnoreCase))
                 map["Type"] = i;
             else if (header.Equals("Act Wgt", StringComparison.OrdinalIgnoreCase) ||
-                     header.Equals("ActWgt", StringComparison.OrdinalIgnoreCase))
+                     header.Equals("ActWgt", StringComparison.OrdinalIgnoreCase) ||
+                     header.Equals("Weight", StringComparison.OrdinalIgnoreCase))
                 map["ActWgt"] = i;
             else if (header.Equals("Act Vol", StringComparison.OrdinalIgnoreCase) ||
-                     header.Equals("ActVol", StringComparison.OrdinalIgnoreCase))
+                     header.Equals("ActVol", StringComparison.OrdinalIgnoreCase) ||
+                     header.Equals("Volume", StringComparison.OrdinalIgnoreCase))
                 map["ActVol"] = i;
-            else if (header.Equals("DF", StringComparison.OrdinalIgnoreCase))
+            else if (header.Equals("DF", StringComparison.OrdinalIgnoreCase) ||
+                     header.Equals("Dilution", StringComparison.OrdinalIgnoreCase) ||
+                     header.Equals("Dilution Factor", StringComparison.OrdinalIgnoreCase))
                 map["DF"] = i;
         }
 

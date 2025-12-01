@@ -12,23 +12,42 @@ namespace Infrastructure.Services;
 /// Implementation of Blank and Scale optimization using Differential Evolution
 /// Based on Python scipy.optimize.differential_evolution
 /// Supports Model A (Pass Count), Model B (Huber), Model C (SSE)
+/// 
+/// Improvements over previous version:
+/// - best1bin strategy (like scipy default)
+/// - Convergence detection with tolerance
+/// - Dithering (variable F between 0. 5-1.0)
+/// - Reproducible results with seed parameter
 /// </summary>
 public class OptimizationService : IOptimizationService
 {
     private readonly IsatisDbContext _db;
     private readonly ILogger<OptimizationService> _logger;
-    private readonly Random _random = new();
+    private Random _random;
+
+    // DE Parameters matching scipy defaults
+    private const double DefaultF = 0.8;      // Mutation factor
+    private const double DefaultCR = 0.7;     // Crossover probability (scipy default)
+    private const double Tolerance = 0.01;    // Convergence tolerance
+    private const int ConvergenceWindow = 10; // Generations without improvement to stop
 
     public OptimizationService(IsatisDbContext db, ILogger<OptimizationService> logger)
     {
         _db = db;
         _logger = logger;
+        _random = new Random();
     }
 
     public async Task<Result<BlankScaleOptimizationResult>> OptimizeBlankScaleAsync(BlankScaleOptimizationRequest request)
     {
         try
         {
+            // Set seed for reproducibility if provided
+            if (request.Seed.HasValue)
+            {
+                _random = new Random(request.Seed.Value);
+            }
+
             var projectData = await GetProjectRmDataAsync(request.ProjectId);
             if (!projectData.Any())
                 return Result<BlankScaleOptimizationResult>.Fail("No RM samples found in project");
@@ -62,7 +81,7 @@ public class OptimizationService : IOptimizationService
                 }
                 else
                 {
-                    (optimalBlank, optimalScale, passedAfter) = OptimizeElement(
+                    (optimalBlank, optimalScale, passedAfter) = OptimizeElementImproved(
                         matchedData, element, request.MinDiffPercent, request.MaxDiffPercent,
                         request.MaxIterations, request.PopulationSize);
                     selectedModel = "A";
@@ -190,16 +209,22 @@ public class OptimizationService : IOptimizationService
         }
     }
 
-    #region Differential Evolution Algorithm - Model A
+    #region Improved Differential Evolution Algorithm (scipy-like)
 
-    private (decimal Blank, decimal Scale, int Passed) OptimizeElement(
+    /// <summary>
+    /// Improved DE algorithm with:
+    /// - best1bin strategy (uses best individual for mutation)
+    /// - Dithering (F varies between 0.5 and 1.0)
+    /// - Convergence detection
+    /// - Similar to scipy.optimize. differential_evolution defaults
+    /// </summary>
+    private (decimal Blank, decimal Scale, int Passed) OptimizeElementImproved(
         List<MatchedSample> data, string element, decimal minDiff, decimal maxDiff, int maxIterations, int populationSize)
     {
-        const double F = 0.8;
-        const double CR = 0.9;
         var blankBounds = (-100.0, 100.0);
         var scaleBounds = (0.5, 2.0);
 
+        // Initialize population
         var population = new List<(double Blank, double Scale)>();
         for (int i = 0; i < populationSize; i++)
         {
@@ -210,33 +235,97 @@ public class OptimizationService : IOptimizationService
 
         var fitness = population.Select(p => EvaluateFitness(data, element, (decimal)p.Blank, (decimal)p.Scale, minDiff, maxDiff)).ToList();
 
+        // Track best for convergence detection
+        double bestFitness = fitness.Max();
+        int generationsWithoutImprovement = 0;
+        double previousBest = bestFitness;
+
         for (int iter = 0; iter < maxIterations; iter++)
         {
+            // Find current best individual for best1bin strategy
+            int bestIdx = fitness.IndexOf(fitness.Max());
+            var best = population[bestIdx];
+
             for (int i = 0; i < populationSize; i++)
             {
-                var candidates = Enumerable.Range(0, populationSize).Where(j => j != i).OrderBy(_ => _random.Next()).Take(3).ToList();
-                var a = population[candidates[0]];
-                var b = population[candidates[1]];
-                var c = population[candidates[2]];
+                // Dithering: vary F between 0. 5 and 1.0
+                double F = 0.5 + _random.NextDouble() * 0.5;
+                double CR = DefaultCR;
 
-                var mutantBlank = Math.Clamp(a.Blank + F * (b.Blank - c.Blank), blankBounds.Item1, blankBounds.Item2);
-                var mutantScale = Math.Clamp(a.Scale + F * (b.Scale - c.Scale), scaleBounds.Item1, scaleBounds.Item2);
+                // best1bin: use best individual instead of random
+                var candidates = Enumerable.Range(0, populationSize)
+                    .Where(j => j != i && j != bestIdx)
+                    .OrderBy(_ => _random.Next())
+                    .Take(2)
+                    .ToList();
 
-                var trialBlank = _random.NextDouble() < CR ? mutantBlank : population[i].Blank;
-                var trialScale = _random.NextDouble() < CR ? mutantScale : population[i].Scale;
+                var r1 = population[candidates[0]];
+                var r2 = population[candidates[1]];
+
+                // Mutation: best + F * (r1 - r2)
+                var mutantBlank = best.Blank + F * (r1.Blank - r2.Blank);
+                var mutantScale = best.Scale + F * (r1.Scale - r2.Scale);
+
+                // Boundary handling (bounce-back like scipy)
+                mutantBlank = BounceBack(mutantBlank, blankBounds.Item1, blankBounds.Item2);
+                mutantScale = BounceBack(mutantScale, scaleBounds.Item1, scaleBounds.Item2);
+
+                // Binomial crossover
+                var current = population[i];
+                int jRand = _random.Next(2); // Ensure at least one parameter from mutant
+
+                var trialBlank = (jRand == 0 || _random.NextDouble() < CR) ? mutantBlank : current.Blank;
+                var trialScale = (jRand == 1 || _random.NextDouble() < CR) ? mutantScale : current.Scale;
 
                 var trialFitness = EvaluateFitness(data, element, (decimal)trialBlank, (decimal)trialScale, minDiff, maxDiff);
-                if (trialFitness > fitness[i])
+
+                // Selection
+                if (trialFitness >= fitness[i])
                 {
                     population[i] = (trialBlank, trialScale);
                     fitness[i] = trialFitness;
                 }
             }
+
+            // Convergence check
+            double currentBest = fitness.Max();
+            if (Math.Abs(currentBest - previousBest) < Tolerance)
+            {
+                generationsWithoutImprovement++;
+                if (generationsWithoutImprovement >= ConvergenceWindow)
+                {
+                    _logger.LogDebug("Converged after {Iterations} iterations for element {Element}", iter, element);
+                    break;
+                }
+            }
+            else
+            {
+                generationsWithoutImprovement = 0;
+            }
+            previousBest = currentBest;
         }
 
-        var bestIdx = fitness.IndexOf(fitness.Max());
-        var best = population[bestIdx];
-        return ((decimal)best.Blank, (decimal)best.Scale, (int)fitness[bestIdx]);
+        var finalBestIdx = fitness.IndexOf(fitness.Max());
+        var finalBest = population[finalBestIdx];
+        return ((decimal)finalBest.Blank, (decimal)finalBest.Scale, (int)fitness[finalBestIdx]);
+    }
+
+    /// <summary>
+    /// Bounce-back boundary handling (similar to scipy)
+    /// </summary>
+    private double BounceBack(double value, double min, double max)
+    {
+        if (value < min)
+        {
+            var diff = min - value;
+            value = min + (diff % (max - min));
+        }
+        else if (value > max)
+        {
+            var diff = value - max;
+            value = max - (diff % (max - min));
+        }
+        return Math.Clamp(value, min, max);
     }
 
     private double EvaluateFitness(List<MatchedSample> data, string element, decimal blank, decimal scale, decimal minDiff, decimal maxDiff)
@@ -260,7 +349,19 @@ public class OptimizationService : IOptimizationService
 
     #endregion
 
-    #region Model B & C - Advanced Objective Functions
+    #region Model B & C - Advanced Objective Functions (Huber Loss)
+
+    /// <summary>
+    /// Huber loss function (same as scipy.special.huber)
+    /// </summary>
+    private double HuberLoss(double delta, double r)
+    {
+        double absR = Math.Abs(r);
+        if (absR <= delta)
+            return 0.5 * r * r;
+        else
+            return delta * (absR - 0.5 * delta);
+    }
 
     private double ObjectiveB_Huber(List<MatchedSample> data, string element, decimal blank, decimal scale, decimal delta = 1.0m)
     {
@@ -277,10 +378,7 @@ public class OptimizationService : IOptimizationService
             var correctedValue = (sampleValue.Value + blank) * scale;
             var error = (double)((correctedValue - crmValue.Value) / crmValue.Value * 100);
 
-            if (Math.Abs(error) <= (double)delta)
-                totalLoss += 0.5 * error * error;
-            else
-                totalLoss += (double)delta * (Math.Abs(error) - 0.5 * (double)delta);
+            totalLoss += HuberLoss((double)delta, error);
             count++;
         }
 
@@ -311,11 +409,14 @@ public class OptimizationService : IOptimizationService
     private (decimal Blank, decimal Scale, int Passed, string SelectedModel) OptimizeElementMultiModel(
         List<MatchedSample> data, string element, decimal minDiff, decimal maxDiff, int maxIterations, int populationSize)
     {
-        var resultA = OptimizeElement(data, element, minDiff, maxDiff, maxIterations, populationSize);
+        // Model A: Maximize pass count
+        var resultA = OptimizeElementImproved(data, element, minDiff, maxDiff, maxIterations, populationSize);
 
+        // Model B: Minimize Huber loss
         var resultB = OptimizeWithObjective(data, element, minDiff, maxDiff, maxIterations, populationSize,
             (d, e, b, s) => -ObjectiveB_Huber(d, e, b, s));
 
+        // Model C: Minimize SSE
         var resultC = OptimizeWithObjective(data, element, minDiff, maxDiff, maxIterations, populationSize,
             (d, e, b, s) => -ObjectiveC_SSE(d, e, b, s));
 
@@ -328,13 +429,14 @@ public class OptimizationService : IOptimizationService
              Huber: ObjectiveB_Huber(data, element, resultA.Blank, resultA.Scale),
              SSE: ObjectiveC_SSE(data, element, resultA. Blank, resultA. Scale)),
             (Model: "B", Blank: resultB. Blank, Scale: resultB.Scale, Passed: passedB,
-             Huber: ObjectiveB_Huber(data, element, resultB.Blank, resultB.Scale),
-             SSE: ObjectiveC_SSE(data, element, resultB. Blank, resultB. Scale)),
+             Huber: ObjectiveB_Huber(data, element, resultB. Blank, resultB. Scale),
+             SSE: ObjectiveC_SSE(data, element, resultB.Blank, resultB.Scale)),
             (Model: "C", Blank: resultC.Blank, Scale: resultC.Scale, Passed: passedC,
-             Huber: ObjectiveB_Huber(data, element, resultC. Blank, resultC. Scale),
+             Huber: ObjectiveB_Huber(data, element, resultC.Blank, resultC.Scale),
              SSE: ObjectiveC_SSE(data, element, resultC.Blank, resultC.Scale))
         };
 
+        // Select best model: prioritize pass count, then SSE, then Huber
         var best = candidates.OrderByDescending(c => c.Passed).ThenBy(c => c.SSE).ThenBy(c => c.Huber).First();
 
         _logger.LogDebug(
@@ -348,8 +450,6 @@ public class OptimizationService : IOptimizationService
         List<MatchedSample> data, string element, decimal minDiff, decimal maxDiff, int maxIterations, int populationSize,
         Func<List<MatchedSample>, string, decimal, decimal, double> objectiveFunc)
     {
-        const double F = 0.8;
-        const double CR = 0.9;
         var blankBounds = (-100.0, 100.0);
         var scaleBounds = (0.5, 2.0);
 
@@ -363,20 +463,36 @@ public class OptimizationService : IOptimizationService
 
         var fitness = population.Select(p => objectiveFunc(data, element, (decimal)p.Blank, (decimal)p.Scale)).ToList();
 
+        double previousBest = fitness.Max();
+        int generationsWithoutImprovement = 0;
+
         for (int iter = 0; iter < maxIterations; iter++)
         {
+            int bestIdx = fitness.IndexOf(fitness.Max());
+            var best = population[bestIdx];
+
             for (int i = 0; i < populationSize; i++)
             {
-                var candidates = Enumerable.Range(0, populationSize).Where(j => j != i).OrderBy(_ => _random.Next()).Take(3).ToList();
-                var a = population[candidates[0]];
-                var b = population[candidates[1]];
-                var c = population[candidates[2]];
+                double F = 0.5 + _random.NextDouble() * 0.5; // Dithering
+                double CR = DefaultCR;
 
-                var mutantBlank = Math.Clamp(a.Blank + F * (b.Blank - c.Blank), blankBounds.Item1, blankBounds.Item2);
-                var mutantScale = Math.Clamp(a.Scale + F * (b.Scale - c.Scale), scaleBounds.Item1, scaleBounds.Item2);
+                var candidates = Enumerable.Range(0, populationSize)
+                    .Where(j => j != i && j != bestIdx)
+                    .OrderBy(_ => _random.Next())
+                    .Take(2)
+                    .ToList();
 
-                var trialBlank = _random.NextDouble() < CR ? mutantBlank : population[i].Blank;
-                var trialScale = _random.NextDouble() < CR ? mutantScale : population[i].Scale;
+                var r1 = population[candidates[0]];
+                var r2 = population[candidates[1]];
+
+                var mutantBlank = BounceBack(best.Blank + F * (r1.Blank - r2.Blank), blankBounds.Item1, blankBounds.Item2);
+                var mutantScale = BounceBack(best.Scale + F * (r1.Scale - r2.Scale), scaleBounds.Item1, scaleBounds.Item2);
+
+                var current = population[i];
+                int jRand = _random.Next(2);
+
+                var trialBlank = (jRand == 0 || _random.NextDouble() < CR) ? mutantBlank : current.Blank;
+                var trialScale = (jRand == 1 || _random.NextDouble() < CR) ? mutantScale : current.Scale;
 
                 var trialFitness = objectiveFunc(data, element, (decimal)trialBlank, (decimal)trialScale);
                 if (trialFitness > fitness[i])
@@ -385,11 +501,24 @@ public class OptimizationService : IOptimizationService
                     fitness[i] = trialFitness;
                 }
             }
+
+            double currentBest = fitness.Max();
+            if (Math.Abs(currentBest - previousBest) < Tolerance)
+            {
+                generationsWithoutImprovement++;
+                if (generationsWithoutImprovement >= ConvergenceWindow)
+                    break;
+            }
+            else
+            {
+                generationsWithoutImprovement = 0;
+            }
+            previousBest = currentBest;
         }
 
-        var bestIdx = fitness.IndexOf(fitness.Max());
-        var best = population[bestIdx];
-        return ((decimal)best.Blank, (decimal)best.Scale);
+        var finalBestIdx = fitness.IndexOf(fitness.Max());
+        var finalBest = population[finalBestIdx];
+        return ((decimal)finalBest.Blank, (decimal)finalBest.Scale);
     }
 
     #endregion
@@ -400,7 +529,7 @@ public class OptimizationService : IOptimizationService
     {
         var rawRows = await _db.RawDataRows.AsNoTracking().Where(r => r.ProjectId == projectId).ToListAsync();
         var result = new List<RmSampleData>();
-        var rmPattern = new System.Text.RegularExpressions.Regex(@"^(OREAS|SRM|CRM)\s*\d*", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var rmPattern = new System.Text.RegularExpressions.Regex(@"^(OREAS|SRM|CRM|NIST|BCR|TILL|GBW)\s*\d*", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
         foreach (var row in rawRows)
         {
