@@ -1,0 +1,46 @@
+﻿<MudNavMenu>
+    <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">
+        داشبورد
+    </MudNavLink>
+    
+    <MudNavLink Href="/projects" Icon="@Icons.Material.Filled.Folder">
+        پروژه‌ها
+    </MudNavLink>
+    
+    <MudNavLink Href="/import" Icon="@Icons.Material.Filled.Upload">
+        ورود داده
+    </MudNavLink>
+    
+    <MudNavGroup Title="پردازش داده" Icon="@Icons.Material.Filled.TableChart" Expanded="false">
+        <MudNavLink Href="/data/table">جدول داده</MudNavLink>
+        <MudNavLink Href="/data/pivot">Pivot</MudNavLink>
+    </MudNavGroup>
+    
+    <MudNavGroup Title="اصلاحات" Icon="@Icons.Material.Filled.Build" Expanded="false">
+        <MudNavLink Href="/correction/weight">اصلاح وزن</MudNavLink>
+        <MudNavLink Href="/correction/volume">اصلاح حجم</MudNavLink>
+        <MudNavLink Href="/correction/drift">اصلاح Drift</MudNavLink>
+    </MudNavGroup>
+    
+    <MudNavLink Href="/optimization" Icon="@Icons.Material.Filled.AutoFixHigh">
+        بهینه‌سازی
+    </MudNavLink>
+    
+    <MudNavGroup Title="کنترل کیفیت" Icon="@Icons.Material.Filled.FactCheck" Expanded="false">
+        <MudNavLink Href="/qc/rm-check">بررسی RM</MudNavLink>
+        <MudNavLink Href="/qc/crm">مدیریت CRM</MudNavLink>
+    </MudNavGroup>
+    
+    <MudNavLink Href="/reports" Icon="@Icons.Material.Filled.Assessment">
+        گزارش‌ها
+    </MudNavLink>
+    
+    <AuthorizeView Roles="Admin">
+        <Authorized>
+            <MudDivider Class="my-2" />
+            <MudNavLink Href="/admin/users" Icon="@Icons.Material.Filled.People">
+                مدیریت کاربران
+            </MudNavLink>
+        </Authorized>
+    </AuthorizeView>
+</MudNavMenu>

@@ -1,0 +1,19 @@
+﻿<Router AppAssembly="@typeof(Program).Assembly">
+    <Found Context="routeData">
+        <AuthorizeRouteView RouteData="@routeData" DefaultLayout="@typeof(Layout.MainLayout)">
+            <NotAuthorized>
+                <RedirectToLogin />
+            </NotAuthorized>
+            <Authorizing>
+                <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+            </Authorizing>
+        </AuthorizeRouteView>
+        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+    </Found>
+    <NotFound>
+        <PageTitle>Not Found</PageTitle>
+        <LayoutView Layout="@typeof(Layout.MainLayout)">
+            <MudText Typo="Typo.h4">صفحه مورد نظر یافت نشد! </MudText>
+        </LayoutView>
+    </NotFound>
+</Router>

@@ -1,0 +1,47 @@
+﻿@page "/"
+@* @attribute [Authorize] *@
+
+<PageTitle>داشبورد - Isatis ICP</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">داشبورد</MudText>
+
+<MudGrid>
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Class="pa-4 d-flex flex-column align-center" Elevation="2">
+            <MudIcon Icon="@Icons.Material.Filled.Folder" Color="Color.Primary" Size="Size.Large" />
+            <MudText Typo="Typo.h4" Class="mt-2">12</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">پروژه‌ها</MudText>
+        </MudPaper>
+    </MudItem>
+    
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Class="pa-4 d-flex flex-column align-center" Elevation="2">
+            <MudIcon Icon="@Icons.Material.Filled.Science" Color="Color. Success" Size="Size. Large" />
+            <MudText Typo="Typo.h4" Class="mt-2">15,420</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">نمونه‌ها</MudText>
+        </MudPaper>
+    </MudItem>
+    
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Class="pa-4 d-flex flex-column align-center" Elevation="2">
+            <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Info" Size="Size. Large" />
+            <MudText Typo="Typo.h4" Class="mt-2">10</MudText>
+            <MudText Typo="Typo.body2" Color="Color. Secondary">پردازش شده</MudText>
+        </MudPaper>
+    </MudItem>
+    
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Class="pa-4 d-flex flex-column align-center" Elevation="2">
+            <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color. Warning" Size="Size. Large" />
+            <MudText Typo="Typo.h4" Class="mt-2">2</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">در انتظار</MudText>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+<MudPaper Class="pa-4 mt-4" Elevation="2">
+    <MudText Typo="Typo.h6" Class="mb-3">🎉 خوش آمدید به Isatis ICP</MudText>
+    <MudText Typo="Typo.body1">
+        سیستم پردازش و کنترل کیفیت داده‌های ICP-OES
+    </MudText>
+</MudPaper>
