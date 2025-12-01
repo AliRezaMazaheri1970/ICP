@@ -8,7 +8,8 @@ public record WeightCorrectionRequest(
     List<string> SolutionLabels,
     decimal NewWeight,
     decimal? WeightMin = 0.190m,
-    decimal? WeightMax = 0.210m
+    decimal? WeightMax = 0.210m,
+    string? ChangedBy = null  // اضافه شد
 );
 
 /// <summary>
@@ -18,7 +19,8 @@ public record VolumeCorrectionRequest(
     Guid ProjectId,
     List<string> SolutionLabels,
     decimal NewVolume,
-    decimal? ExpectedVolume = 50m
+    decimal? ExpectedVolume = 50m,
+    string? ChangedBy = null  // اضافه شد
 );
 
 /// <summary>
@@ -26,7 +28,8 @@ public record VolumeCorrectionRequest(
 /// </summary>
 public record ApplyOptimizationRequest(
     Guid ProjectId,
-    Dictionary<string, BlankScaleSettings> ElementSettings
+    Dictionary<string, BlankScaleSettings> ElementSettings,
+    string? ChangedBy = null  // اضافه شد
 );
 
 /// <summary>

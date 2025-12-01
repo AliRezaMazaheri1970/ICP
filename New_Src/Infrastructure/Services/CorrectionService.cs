@@ -12,11 +12,16 @@ namespace Infrastructure.Services;
 public class CorrectionService : ICorrectionService
 {
     private readonly IsatisDbContext _db;
+    private readonly IChangeLogService _changeLogService;
     private readonly ILogger<CorrectionService> _logger;
 
-    public CorrectionService(IsatisDbContext db, ILogger<CorrectionService> logger)
+    public CorrectionService(
+        IsatisDbContext db,
+        IChangeLogService changeLogService,
+        ILogger<CorrectionService> logger)
     {
         _db = db;
+        _changeLogService = changeLogService;
         _logger = logger;
     }
 
@@ -172,6 +177,7 @@ public class CorrectionService : ICorrectionService
             await SaveUndoStateAsync(request.ProjectId, "WeightCorrection");
 
             var correctedSamples = new List<CorrectedSampleInfo>();
+            var changeLogEntries = new List<(string? SolutionLabel, string? Element, string? OldValue, string? NewValue)>();
             var correctedRows = 0;
 
             foreach (var row in rawRows)
@@ -229,6 +235,9 @@ public class CorrectionService : ICorrectionService
                             oldCorrCon,
                             newCorrCon
                         ));
+
+                        changeLogEntries.Add((solutionLabel, "Act Wgt", oldWeight.ToString(), request.NewWeight.ToString()));
+                        changeLogEntries.Add((solutionLabel, "Corr Con", oldCorrCon.ToString(), newCorrCon.ToString()));
                     }
                 }
                 catch (JsonException)
@@ -244,6 +253,18 @@ public class CorrectionService : ICorrectionService
             }
 
             await _db.SaveChangesAsync();
+
+            // Log changes
+            if (changeLogEntries.Any())
+            {
+                await _changeLogService.LogBatchChangesAsync(
+                    request.ProjectId,
+                    "Weight",
+                    changeLogEntries,
+                    request.ChangedBy,
+                    $"Weight correction: {correctedSamples.Count} samples corrected to {request.NewWeight}"
+                );
+            }
 
             _logger.LogInformation("Weight correction applied: {CorrectedRows} rows for project {ProjectId}",
                 correctedRows, request.ProjectId);
@@ -278,6 +299,7 @@ public class CorrectionService : ICorrectionService
             await SaveUndoStateAsync(request.ProjectId, "VolumeCorrection");
 
             var correctedSamples = new List<CorrectedSampleInfo>();
+            var changeLogEntries = new List<(string? SolutionLabel, string? Element, string? OldValue, string? NewValue)>();
             var correctedRows = 0;
 
             foreach (var row in rawRows)
@@ -335,6 +357,9 @@ public class CorrectionService : ICorrectionService
                             oldCorrCon,
                             newCorrCon
                         ));
+
+                        changeLogEntries.Add((solutionLabel, "Act Vol", oldVolume.ToString(), request.NewVolume.ToString()));
+                        changeLogEntries.Add((solutionLabel, "Corr Con", oldCorrCon.ToString(), newCorrCon.ToString()));
                     }
                 }
                 catch (JsonException)
@@ -350,6 +375,18 @@ public class CorrectionService : ICorrectionService
             }
 
             await _db.SaveChangesAsync();
+
+            // Log changes
+            if (changeLogEntries.Any())
+            {
+                await _changeLogService.LogBatchChangesAsync(
+                    request.ProjectId,
+                    "Volume",
+                    changeLogEntries,
+                    request.ChangedBy,
+                    $"Volume correction: {correctedSamples.Count} samples corrected to {request.NewVolume}"
+                );
+            }
 
             _logger.LogInformation("Volume correction applied: {CorrectedRows} rows for project {ProjectId}",
                 correctedRows, request.ProjectId);
@@ -381,6 +418,7 @@ public class CorrectionService : ICorrectionService
             await SaveUndoStateAsync(request.ProjectId, "OptimizationApply");
 
             var correctedRows = 0;
+            var changeLogEntries = new List<(string? SolutionLabel, string? Element, string? OldValue, string? NewValue)>();
 
             foreach (var row in rawRows)
             {
@@ -389,20 +427,25 @@ public class CorrectionService : ICorrectionService
                     var dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(row.ColumnData);
                     if (dict == null) continue;
 
+                    var solutionLabel = dict.TryGetValue("Solution Label", out var sl)
+                        ? sl.GetString() ?? row.SampleId
+                        : row.SampleId;
+
                     var newDict = new Dictionary<string, object>();
                     var modified = false;
 
                     foreach (var kvp in dict)
                     {
-                        // Changed: ElementOptimizations → ElementSettings, optimization → settings
+                        // استفاده از BlankScaleSettings
                         if (request.ElementSettings.TryGetValue(kvp.Key, out var settings) &&
                             kvp.Value.ValueKind == JsonValueKind.Number)
                         {
                             var originalValue = kvp.Value.GetDecimal();
-                            // Apply: CorrectedValue = (OriginalValue + Blank) * Scale
                             var correctedValue = (originalValue + settings.Blank) * settings.Scale;
                             newDict[kvp.Key] = correctedValue;
                             modified = true;
+
+                            changeLogEntries.Add((solutionLabel, kvp.Key, originalValue.ToString(), correctedValue.ToString()));
                         }
                         else
                         {
@@ -429,6 +472,19 @@ public class CorrectionService : ICorrectionService
             }
 
             await _db.SaveChangesAsync();
+
+            // Log changes
+            if (changeLogEntries.Any())
+            {
+                var elementSummary = string.Join(", ", request.ElementSettings.Select(e => $"{e.Key}(B={e.Value.Blank:F2},S={e.Value.Scale:F2})"));
+                await _changeLogService.LogBatchChangesAsync(
+                    request.ProjectId,
+                    "BlankScale",
+                    changeLogEntries,
+                    request.ChangedBy,
+                    $"Optimization applied: {elementSummary}"
+                );
+            }
 
             _logger.LogInformation("Optimization applied: {CorrectedRows} rows for project {ProjectId}",
                 correctedRows, request.ProjectId);
@@ -481,6 +537,14 @@ public class CorrectionService : ICorrectionService
             _db.ProjectStates.Remove(lastState);
 
             await _db.SaveChangesAsync();
+
+            // Log undo action
+            await _changeLogService.LogChangeAsync(
+                projectId,
+                "Undo",
+                changedBy: null,
+                details: $"Undone correction: {lastState.Description}"
+            );
 
             _logger.LogInformation("Undo applied for project {ProjectId}", projectId);
 

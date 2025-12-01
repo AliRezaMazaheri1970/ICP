@@ -1,6 +1,4 @@
-﻿using System.Text.Json.Serialization;
-
-namespace Application.DTOs;
+﻿namespace Application.DTOs;
 
 /// <summary>
 /// Request for Blank & Scale optimization
@@ -11,7 +9,8 @@ public record BlankScaleOptimizationRequest(
     decimal MinDiffPercent = -10m,
     decimal MaxDiffPercent = 10m,
     int MaxIterations = 100,
-    int PopulationSize = 50
+    int PopulationSize = 50,
+    bool UseMultiModel = true
 );
 
 /// <summary>
@@ -23,7 +22,8 @@ public record BlankScaleOptimizationResult(
     int PassedAfter,
     decimal ImprovementPercent,
     Dictionary<string, ElementOptimization> ElementOptimizations,
-    List<OptimizedSampleDto> OptimizedData
+    List<OptimizedSampleDto> OptimizedData,
+    MultiModelSummary? ModelSummary = null
 );
 
 /// <summary>
@@ -36,7 +36,8 @@ public record ElementOptimization(
     int PassedBefore,
     int PassedAfter,
     decimal MeanDiffBefore,
-    decimal MeanDiffAfter
+    decimal MeanDiffAfter,
+    string SelectedModel = "A"
 );
 
 /// <summary>
@@ -76,10 +77,21 @@ public record ManualBlankScaleResult(
     List<OptimizedSampleDto> OptimizedData
 );
 
-// این recordها رو به انتهای فایل OptimizedSampleDto. cs اضافه کنید
+#region Multi-Model Optimization Records
 
 /// <summary>
-/// Result of multi-model optimization
+/// Summary of multi-model optimization results
+/// </summary>
+public record MultiModelSummary(
+    int ElementsOptimizedWithModelA,
+    int ElementsOptimizedWithModelB,
+    int ElementsOptimizedWithModelC,
+    string MostUsedModel,
+    string Summary
+);
+
+/// <summary>
+/// Result of multi-model optimization comparison
 /// </summary>
 public record MultiModelOptimizationResult(
     string BestModel,
@@ -100,5 +112,31 @@ public record ModelResult(
     double TotalDistance,
     double TotalSSE,
     Dictionary<string, ElementOptimization> Optimizations,
-    string? ErrorMessage
+    string? ErrorMessage = null
 );
+
+/// <summary>
+/// Detailed comparison between models for a single element
+/// </summary>
+public record ElementModelComparison(
+    string Element,
+    ElementModelResult ModelA,
+    ElementModelResult ModelB,
+    ElementModelResult ModelC,
+    string SelectedModel,
+    string SelectionReason
+);
+
+/// <summary>
+/// Result of a model for a single element
+/// </summary>
+public record ElementModelResult(
+    decimal Blank,
+    decimal Scale,
+    int PassedCount,
+    double HuberDistance,
+    double SSE,
+    decimal MeanDiffPercent
+);
+
+#endregion
