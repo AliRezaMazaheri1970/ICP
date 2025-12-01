@@ -87,3 +87,26 @@ public record BadSampleDto(
     decimal ExpectedValue,
     decimal Deviation
 );
+
+/// <summary>
+/// Request to find empty/outlier rows based on element averages
+/// مشابه empty_check. py در پایتون
+/// </summary>
+public record FindEmptyRowsRequest(
+    Guid ProjectId,
+    decimal ThresholdPercent = 70m,
+    List<string>? ElementsToCheck = null
+);
+
+/// <summary>
+/// Information about an empty/outlier row
+/// </summary>
+public record EmptyRowDto(
+    string SolutionLabel,
+    Dictionary<string, decimal?> ElementValues,
+    Dictionary<string, decimal> ElementAverages,
+    Dictionary<string, decimal> PercentOfAverage,
+    int ElementsBelowThreshold,
+    int TotalElementsChecked,
+    decimal OverallScore
+);

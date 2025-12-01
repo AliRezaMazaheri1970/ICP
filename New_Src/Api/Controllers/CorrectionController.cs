@@ -128,4 +128,23 @@ public class CorrectionController : ControllerBase
 
         return Ok(new { succeeded = true, data = new { undone = result.Data } });
     }
+
+    /// <summary>
+    /// Find empty/outlier rows where most elements are below average
+    /// POST /api/correction/empty-rows
+    /// Based on Python empty_check.py logic
+    /// </summary>
+    [HttpPost("empty-rows")]
+    public async Task<ActionResult> FindEmptyRows([FromBody] FindEmptyRowsRequest request)
+    {
+        if (request.ProjectId == Guid.Empty)
+            return BadRequest(new { succeeded = false, messages = new[] { "ProjectId is required" } });
+
+        var result = await _correctionService.FindEmptyRowsAsync(request);
+
+        if (!result.Succeeded)
+            return BadRequest(new { succeeded = false, messages = result.Messages });
+
+        return Ok(new { succeeded = true, data = result.Data });
+    }
 }

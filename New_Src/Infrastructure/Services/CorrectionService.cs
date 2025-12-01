@@ -25,6 +25,8 @@ public class CorrectionService : ICorrectionService
         _logger = logger;
     }
 
+    #region Find Bad Weights/Volumes
+
     public async Task<Result<List<BadSampleDto>>> FindBadWeightsAsync(FindBadWeightsRequest request)
     {
         try
@@ -160,6 +162,175 @@ public class CorrectionService : ICorrectionService
         }
     }
 
+    #endregion
+
+    #region Find Empty Rows (NEW - Based on Python empty_check. py)
+
+    /// <summary>
+    /// Find empty/outlier rows based on element averages
+    /// Logic from Python empty_check.py:
+    /// - Calculate mean for each element column
+    /// - If ALL (or most) elements in a row are less than threshold% of their column mean,
+    ///   mark the row as "empty" or "outlier"
+    /// </summary>
+    public async Task<Result<List<EmptyRowDto>>> FindEmptyRowsAsync(FindEmptyRowsRequest request)
+    {
+        try
+        {
+            var rawRows = await _db.RawDataRows
+                .AsNoTracking()
+                .Where(r => r.ProjectId == request.ProjectId)
+                .ToListAsync();
+
+            if (!rawRows.Any())
+                return Result<List<EmptyRowDto>>.Fail("No data found for project");
+
+            // Step 1: Parse all rows and collect element values
+            var parsedRows = new List<(string SolutionLabel, Dictionary<string, decimal?> Values)>();
+            var allElements = new HashSet<string>();
+
+            foreach (var row in rawRows)
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(row.ColumnData);
+                    var root = doc.RootElement;
+
+                    // Only check "Samp" type rows
+                    if (root.TryGetProperty("Type", out var typeElement) &&
+                        typeElement.GetString() != "Samp")
+                        continue;
+
+                    var solutionLabel = root.TryGetProperty("Solution Label", out var labelElement)
+                        ? labelElement.GetString() ?? row.SampleId ?? "Unknown"
+                        : row.SampleId ?? "Unknown";
+
+                    var values = new Dictionary<string, decimal?>();
+
+                    foreach (var prop in root.EnumerateObject())
+                    {
+                        // Skip non-element columns
+                        if (prop.Name is "Solution Label" or "Type" or "Act Wgt" or "Act Vol" or "DF")
+                            continue;
+
+                        if (prop.Value.ValueKind == JsonValueKind.Number)
+                        {
+                            values[prop.Name] = prop.Value.GetDecimal();
+                            allElements.Add(prop.Name);
+                        }
+                        else if (prop.Value.ValueKind == JsonValueKind.String &&
+                                 decimal.TryParse(prop.Value.GetString(), out var val))
+                        {
+                            values[prop.Name] = val;
+                            allElements.Add(prop.Name);
+                        }
+                    }
+
+                    if (values.Any())
+                    {
+                        parsedRows.Add((solutionLabel, values));
+                    }
+                }
+                catch (JsonException)
+                {
+                    continue;
+                }
+            }
+
+            if (!parsedRows.Any())
+                return Result<List<EmptyRowDto>>.Success(new List<EmptyRowDto>());
+
+            // Filter elements to check if specified
+            var elementsToCheck = request.ElementsToCheck?.ToHashSet() ?? allElements;
+
+            // Step 2: Calculate mean for each element column
+            var elementMeans = new Dictionary<string, decimal>();
+            foreach (var element in elementsToCheck)
+            {
+                var validValues = parsedRows
+                    .Where(r => r.Values.TryGetValue(element, out var v) && v.HasValue && v.Value > 0)
+                    .Select(r => r.Values[element]!.Value)
+                    .ToList();
+
+                if (validValues.Any())
+                {
+                    elementMeans[element] = validValues.Average();
+                }
+            }
+
+            if (!elementMeans.Any())
+                return Result<List<EmptyRowDto>>.Success(new List<EmptyRowDto>());
+
+            // Step 3: Check each row against the threshold
+            var emptyRows = new List<EmptyRowDto>();
+            var thresholdFactor = (100m - request.ThresholdPercent) / 100m;
+
+            foreach (var (solutionLabel, values) in parsedRows)
+            {
+                var percentOfAverage = new Dictionary<string, decimal>();
+                var elementsBelowThreshold = 0;
+                var totalChecked = 0;
+
+                foreach (var element in elementsToCheck.Where(e => elementMeans.ContainsKey(e)))
+                {
+                    if (!values.TryGetValue(element, out var value) || !value.HasValue)
+                        continue;
+
+                    var mean = elementMeans[element];
+                    if (mean <= 0) continue;
+
+                    totalChecked++;
+                    var percent = (value.Value / mean) * 100m;
+                    percentOfAverage[element] = percent;
+
+                    // Check if value is below threshold of mean
+                    if (value.Value < mean * thresholdFactor)
+                    {
+                        elementsBelowThreshold++;
+                    }
+                }
+
+                // If most elements are below threshold, mark as empty
+                if (totalChecked > 0)
+                {
+                    var overallScore = (decimal)elementsBelowThreshold / totalChecked * 100m;
+
+                    // Mark as empty if more than 50% of elements are below threshold
+                    if (elementsBelowThreshold > 0 && overallScore >= 50)
+                    {
+                        emptyRows.Add(new EmptyRowDto(
+                            solutionLabel,
+                            values,
+                            elementMeans.Where(e => values.ContainsKey(e.Key))
+                                .ToDictionary(e => e.Key, e => e.Value),
+                            percentOfAverage,
+                            elementsBelowThreshold,
+                            totalChecked,
+                            overallScore
+                        ));
+                    }
+                }
+            }
+
+            // Sort by score (most "empty" first)
+            var result = emptyRows.OrderByDescending(e => e.OverallScore).ToList();
+
+            _logger.LogInformation("Found {Count} empty/outlier rows in project {ProjectId}",
+                result.Count, request.ProjectId);
+
+            return Result<List<EmptyRowDto>>.Success(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to find empty rows for project {ProjectId}", request.ProjectId);
+            return Result<List<EmptyRowDto>>.Fail($"Failed to find empty rows: {ex.Message}");
+        }
+    }
+
+    #endregion
+
+    #region Apply Corrections
+
     public async Task<Result<CorrectionResultDto>> ApplyWeightCorrectionAsync(WeightCorrectionRequest request)
     {
         try
@@ -254,7 +425,7 @@ public class CorrectionService : ICorrectionService
 
             await _db.SaveChangesAsync();
 
-            // Log changes
+            // Log changes to ChangeLog
             if (changeLogEntries.Any())
             {
                 await _changeLogService.LogBatchChangesAsync(
@@ -376,7 +547,7 @@ public class CorrectionService : ICorrectionService
 
             await _db.SaveChangesAsync();
 
-            // Log changes
+            // Log changes to ChangeLog
             if (changeLogEntries.Any())
             {
                 await _changeLogService.LogBatchChangesAsync(
@@ -436,7 +607,6 @@ public class CorrectionService : ICorrectionService
 
                     foreach (var kvp in dict)
                     {
-                        // استفاده از BlankScaleSettings
                         if (request.ElementSettings.TryGetValue(kvp.Key, out var settings) &&
                             kvp.Value.ValueKind == JsonValueKind.Number)
                         {
@@ -473,7 +643,7 @@ public class CorrectionService : ICorrectionService
 
             await _db.SaveChangesAsync();
 
-            // Log changes
+            // Log changes to ChangeLog
             if (changeLogEntries.Any())
             {
                 var elementSummary = string.Join(", ", request.ElementSettings.Select(e => $"{e.Key}(B={e.Value.Blank:F2},S={e.Value.Scale:F2})"));
@@ -501,6 +671,10 @@ public class CorrectionService : ICorrectionService
             return Result<CorrectionResultDto>.Fail($"Failed to apply optimization: {ex.Message}");
         }
     }
+
+    #endregion
+
+    #region Undo
 
     public async Task<Result<bool>> UndoLastCorrectionAsync(Guid projectId)
     {
@@ -556,6 +730,8 @@ public class CorrectionService : ICorrectionService
             return Result<bool>.Fail($"Failed to undo: {ex.Message}");
         }
     }
+
+    #endregion
 
     #region Private Helpers
 

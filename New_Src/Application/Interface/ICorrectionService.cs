@@ -34,6 +34,12 @@ public interface ICorrectionService
     Task<Result<CorrectionResultDto>> ApplyOptimizationAsync(ApplyOptimizationRequest request);
 
     /// <summary>
+    /// Find empty/outlier rows where most elements are below threshold of column average
+    /// Based on Python empty_check.py logic
+    /// </summary>
+    Task<Result<List<EmptyRowDto>>> FindEmptyRowsAsync(FindEmptyRowsRequest request);
+
+    /// <summary>
     /// Undo last correction for a project
     /// </summary>
     Task<Result<bool>> UndoLastCorrectionAsync(Guid projectId);
