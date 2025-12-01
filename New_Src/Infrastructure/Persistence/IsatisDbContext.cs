@@ -12,7 +12,6 @@ public class IsatisDbContext : DbContext
     public DbSet<ProjectState> ProjectStates { get; set; } = null!;
     public DbSet<ProjectImportJob> ProjectImportJobs { get; set; } = null!;
     public DbSet<CrmData> CrmData { get; set; } = null!;
-    public DbSet<User> Users { get; set; } = null!;
     public DbSet<ChangeLog> ChangeLogs { get; set; } = null!;
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

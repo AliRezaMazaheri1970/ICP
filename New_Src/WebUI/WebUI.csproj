@@ -11,6 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Folder Include="Component\" />
     <Folder Include="Pages\App\" />
     <Folder Include="Shared\" />
   </ItemGroup>

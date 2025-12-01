@@ -17,7 +17,6 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <Folder Include="DTOs\Authentication\" />
 	  <Folder Include="Interface\Authentication\" />
 	</ItemGroup>
 
