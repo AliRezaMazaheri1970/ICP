@@ -41,6 +41,7 @@ builder.Services.AddHttpClient("Api", client =>
 // ============================================
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ImportService>();
+builder.Services.AddScoped<DashboardService>();
 // ============================================
 // Build Application
 // ============================================

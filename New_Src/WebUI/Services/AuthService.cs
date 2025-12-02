@@ -1,10 +1,11 @@
-﻿using System.Text.Json;
+using System.Net.Http.Headers;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace WebUI.Services;
 
 // ============================================
-// DTOs - مطابق با فرمت API
+// DTOs - مطابق با فرمت API جدید
 // ============================================
 
 public class LoginRequest
@@ -14,6 +15,9 @@ public class LoginRequest
 
     [JsonPropertyName("password")]
     public string Password { get; set; } = "";
+
+    [JsonPropertyName("rememberMe")]
+    public bool RememberMe { get; set; }
 }
 
 public class RegisterRequest
@@ -21,67 +25,32 @@ public class RegisterRequest
     [JsonPropertyName("username")]
     public string Username { get; set; } = "";
 
-    [JsonPropertyName("email")]
-    public string Email { get; set; } = "";
-
     [JsonPropertyName("password")]
     public string Password { get; set; } = "";
 
-    [JsonPropertyName("firstName")]
-    public string? FirstName { get; set; }
+    [JsonPropertyName("fullName")]
+    public string? FullName { get; set; }
 
-    [JsonPropertyName("lastName")]
-    public string? LastName { get; set; }
-
-    [JsonPropertyName("role")]
-    public string? Role { get; set; }
-}
-
-public class UserDto
-{
-    [JsonPropertyName("userId")]
-    public string? UserId { get; set; }
-
-    [JsonPropertyName("username")]
-    public string? Username { get; set; }
-
-    [JsonPropertyName("email")]
-    public string? Email { get; set; }
-
-    [JsonPropertyName("firstName")]
-    public string? FirstName { get; set; }
-
-    [JsonPropertyName("lastName")]
-    public string? LastName { get; set; }
-
-    [JsonPropertyName("role")]
-    public string? Role { get; set; }
-
-    [JsonPropertyName("isActive")]
-    public bool IsActive { get; set; }
-
-    public string FullName => $"{FirstName} {LastName}".Trim();
+    [JsonPropertyName("position")]
+    public string? Position { get; set; }
 }
 
 public class ApiLoginResponse
 {
-    [JsonPropertyName("succeeded")]
-    public bool Succeeded { get; set; }
+    [JsonPropertyName("isAuthenticated")]
+    public bool IsAuthenticated { get; set; }
 
-    [JsonPropertyName("accessToken")]
-    public string? AccessToken { get; set; }
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = "";
 
-    [JsonPropertyName("refreshToken")]
-    public string? RefreshToken { get; set; }
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
 
-    [JsonPropertyName("expiresAt")]
-    public DateTime? ExpiresAt { get; set; }
+    [JsonPropertyName("token")]
+    public string Token { get; set; } = "";
 
-    [JsonPropertyName("user")]
-    public UserDto? User { get; set; }
-
-    [JsonPropertyName("error")]
-    public string? Error { get; set; }
+    [JsonPropertyName("position")]
+    public string Position { get; set; } = "";
 }
 
 public class ApiRegisterResponse
@@ -89,14 +58,22 @@ public class ApiRegisterResponse
     [JsonPropertyName("succeeded")]
     public bool Succeeded { get; set; }
 
-    [JsonPropertyName("user")]
-    public UserDto? User { get; set; }
-
-    [JsonPropertyName("error")]
-    public string? Error { get; set; }
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = "";
 }
 
-// نتیجه داخلی برای UI
+public class CurrentUserResponse
+{
+    [JsonPropertyName("username")]
+    public string Username { get; set; } = "";
+
+    [JsonPropertyName("fullName")]
+    public string FullName { get; set; } = "";
+
+    [JsonPropertyName("position")]
+    public string Position { get; set; } = "";
+}
+
 public record AuthResult(
     bool IsAuthenticated,
     string Message,
@@ -114,8 +91,6 @@ public class AuthService
     private readonly HttpClient _httpClient;
     private readonly ILogger<AuthService> _logger;
     private static AuthResult? _currentUser;
-    private static string? _accessToken;
-    private static UserDto? _userInfo;
 
     public AuthService(IHttpClientFactory clientFactory, ILogger<AuthService> logger)
     {
@@ -133,7 +108,8 @@ public class AuthService
             var request = new LoginRequest
             {
                 Username = username,
-                Password = password
+                Password = password,
+                RememberMe = rememberMe
             };
 
             _logger.LogInformation("Attempting login for user: {Username}", username);
@@ -151,30 +127,25 @@ public class AuthService
                 return new AuthResult(false, "Invalid server response");
             }
 
-            if (loginResponse.Succeeded && loginResponse.User != null)
+            if (loginResponse.IsAuthenticated && !string.IsNullOrEmpty(loginResponse.Token))
             {
-                _accessToken = loginResponse.AccessToken;
-                _userInfo = loginResponse.User;
-
-                var fullName = loginResponse.User.FullName;
-                if (string.IsNullOrWhiteSpace(fullName))
-                {
-                    fullName = loginResponse.User.Username ?? "User";
-                }
-
                 _currentUser = new AuthResult(
                     IsAuthenticated: true,
-                    Message: "Login successful",
-                    Name: fullName,
-                    Token: loginResponse.AccessToken ?? "",
-                    Position: loginResponse.User.Role ?? "User"
+                    Message: loginResponse.Message,
+                    Name: string.IsNullOrWhiteSpace(loginResponse.Name) ? username : loginResponse.Name,
+                    Token: loginResponse.Token,
+                    Position: string.IsNullOrWhiteSpace(loginResponse.Position) ? "User" : loginResponse.Position
                 );
+
+                // set bearer token for subsequent calls
+                _httpClient.DefaultRequestHeaders.Authorization =
+                    new AuthenticationHeaderValue("Bearer", loginResponse.Token);
 
                 _logger.LogInformation("User {Username} logged in successfully", username);
                 return _currentUser;
             }
 
-            var errorMessage = loginResponse.Error ?? "Invalid username or password";
+            var errorMessage = loginResponse.Message ?? "Invalid username or password";
             _logger.LogWarning("Login failed for {Username}: {Error}", username, errorMessage);
             return new AuthResult(false, errorMessage);
         }
@@ -197,19 +168,12 @@ public class AuthService
     {
         try
         {
-            // جدا کردن نام و نام خانوادگی
-            var nameParts = (fullName ?? "").Split(' ', 2);
-            var firstName = nameParts.Length > 0 ? nameParts[0] : username;
-            var lastName = nameParts.Length > 1 ? nameParts[1] : "";
-
             var request = new RegisterRequest
             {
                 Username = username,
-                Email = username.Contains("@") ? username : $"{username}@isatis.local",
                 Password = password,
-                FirstName = firstName,
-                LastName = lastName,
-                Role = position ?? "Viewer"
+                FullName = string.IsNullOrWhiteSpace(fullName) ? username : fullName,
+                Position = string.IsNullOrWhiteSpace(position) ? "Analyst" : position
             };
 
             _logger.LogInformation("Attempting registration for user: {Username}", username);
@@ -219,36 +183,17 @@ public class AuthService
 
             _logger.LogDebug("Register response: {Content}", content);
 
-            if (response.IsSuccessStatusCode)
+            var registerResponse = JsonSerializer.Deserialize<ApiRegisterResponse>(content,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (registerResponse?.Succeeded == true)
             {
-                var registerResponse = JsonSerializer.Deserialize<ApiRegisterResponse>(content,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-                if (registerResponse?.Succeeded == true)
-                {
-                    _logger.LogInformation("User {Username} registered successfully", username);
-                    return new AuthResult(true, "Account created successfully!  Please sign in.");
-                }
-
-                return new AuthResult(false, registerResponse?.Error ?? "Registration failed");
+                _logger.LogInformation("User {Username} registered successfully", username);
+                return new AuthResult(true, registerResponse.Message);
             }
 
-            if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
-            {
-                return new AuthResult(false, "Username or email already exists");
-            }
-
-            // Try to parse error from response
-            try
-            {
-                var errorResponse = JsonSerializer.Deserialize<ApiRegisterResponse>(content,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                return new AuthResult(false, errorResponse?.Error ?? "Registration failed");
-            }
-            catch
-            {
-                return new AuthResult(false, $"Registration failed: {response.StatusCode}");
-            }
+            var error = registerResponse?.Message ?? "Registration failed";
+            return new AuthResult(false, error);
         }
         catch (HttpRequestException ex)
         {
@@ -263,7 +208,7 @@ public class AuthService
     }
 
     /// <summary>
-    /// بررسی session فعال
+    /// بررسی session فعال از توکن در حافظه
     /// </summary>
     public Task<AuthResult> CheckAutoLoginAsync()
     {
@@ -271,18 +216,50 @@ public class AuthService
         {
             return Task.FromResult(_currentUser);
         }
+
         return Task.FromResult(new AuthResult(false, "No active session"));
     }
 
     /// <summary>
-    /// ورود مهمان
+    /// دریافت اطلاعات کاربر از API با توکن موجود
     /// </summary>
-    public AuthResult GuestLogin()
+    public async Task<AuthResult?> RefreshCurrentUserAsync()
     {
-        _currentUser = new AuthResult(true, "Guest Login", "Guest", "", "Guest");
-        _userInfo = null;
-        _accessToken = null;
-        return _currentUser;
+        if (_currentUser == null || string.IsNullOrEmpty(_currentUser.Token))
+        {
+            return null;
+        }
+
+        try
+        {
+            _httpClient.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", _currentUser.Token);
+
+            var response = await _httpClient.GetAsync("auth/me");
+            if (!response.IsSuccessStatusCode)
+            {
+                return _currentUser;
+            }
+
+            var content = await response.Content.ReadAsStringAsync();
+            var user = JsonSerializer.Deserialize<CurrentUserResponse>(content,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (user == null) return _currentUser;
+
+            _currentUser = _currentUser with
+            {
+                Name = string.IsNullOrWhiteSpace(user.FullName) ? user.Username : user.FullName,
+                Position = string.IsNullOrWhiteSpace(user.Position) ? _currentUser.Position : user.Position
+            };
+
+            return _currentUser;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to refresh current user");
+            return _currentUser;
+        }
     }
 
     /// <summary>
@@ -292,12 +269,7 @@ public class AuthService
     {
         try
         {
-            if (!string.IsNullOrEmpty(_accessToken))
-            {
-                _httpClient.DefaultRequestHeaders.Authorization =
-                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _accessToken);
-                await _httpClient.PostAsync("auth/logout", null);
-            }
+            await _httpClient.PostAsync("auth/logout", null);
         }
         catch (Exception ex)
         {
@@ -306,8 +278,7 @@ public class AuthService
         finally
         {
             _currentUser = null;
-            _accessToken = null;
-            _userInfo = null;
+            _httpClient.DefaultRequestHeaders.Authorization = null;
         }
     }
 
@@ -315,14 +286,4 @@ public class AuthService
     /// دریافت کاربر فعلی
     /// </summary>
     public AuthResult? GetCurrentUser() => _currentUser;
-
-    /// <summary>
-    /// دریافت اطلاعات کامل کاربر
-    /// </summary>
-    public UserDto? GetUserInfo() => _userInfo;
-
-    /// <summary>
-    /// دریافت Access Token
-    /// </summary>
-    public string? GetAccessToken() => _accessToken;
 }

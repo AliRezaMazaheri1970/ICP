@@ -1,89 +1,170 @@
-﻿@page "/dashboard"
+@page "/dashboard"
 @using WebUI.Services
 @inject AuthService AuthService
+@inject DashboardService DashboardService
 @inject NavigationManager NavManager
 @inject ISnackbar Snackbar
 
 <PageTitle>ICP - Dashboard</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Large" Class="mt-8">
-    <MudPaper Elevation="2" Class="pa-6">
-        <MudText Typo="Typo.h4" Class="mb-4">
-            👋 Welcome, @userName!
-        </MudText>
-        
-        <MudText Typo="Typo.body1" Class="mb-6 mud-text-secondary">
-            Position: @userPosition
-        </MudText>
+@if (isLoading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-4" />
+}
 
-        <MudDivider Class="my-4" />
+<MudGrid Class="mb-4">
+    <MudItem xs="12">
+        <MudBreadcrumbs Items="breadcrumbs" />
+    </MudItem>
+</MudGrid>
 
-        <MudText Typo="Typo.h6" Class="mb-4">Quick Actions</MudText>
-        
-        <MudGrid>
-            <MudItem xs="12" sm="6" md="4">
-                <MudCard Elevation="2" Class="pa-4 cursor-pointer" @onclick="@(() => NavManager.NavigateTo("/import"))">
-                    <MudCardContent Class="text-center">
-                        <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" Color="Color.Primary" />
-                        <MudText Typo="Typo.h6" Class="mt-2">Import Data</MudText>
-                        <MudText Typo="Typo.body2" Class="mud-text-secondary">Upload CSV/Excel files</MudText>
-                    </MudCardContent>
-                </MudCard>
-            </MudItem>
-
-            <MudItem xs="12" sm="6" md="4">
-                <MudCard Elevation="2" Class="pa-4 cursor-pointer" @onclick="@(() => NavManager. NavigateTo("/pivot"))">
-                    <MudCardContent Class="text-center">
-                        <MudIcon Icon="@Icons.Material.Filled.TableChart" Size="Size. Large" Color="Color.Secondary" />
-                        <MudText Typo="Typo.h6" Class="mt-2">Pivot Data</MudText>
-                        <MudText Typo="Typo. body2" Class="mud-text-secondary">View and transform data</MudText>
-                    </MudCardContent>
-                </MudCard>
-            </MudItem>
-
-            <MudItem xs="12" sm="6" md="4">
-                <MudCard Elevation="2" Class="pa-4 cursor-pointer" @onclick="@(() => NavManager.NavigateTo("/process"))">
-                    <MudCardContent Class="text-center">
-                        <MudIcon Icon="@Icons.Material.Filled.Science" Size="Size.Large" Color="Color.Tertiary" />
-                        <MudText Typo="Typo.h6" Class="mt-2">Process</MudText>
-                        <MudText Typo="Typo.body2" Class="mud-text-secondary">Weight, Volume, Drift corrections</MudText>
-                    </MudCardContent>
-                </MudCard>
-            </MudItem>
-        </MudGrid>
-
-        <MudDivider Class="my-6" />
-
-        <MudButton Variant="Variant.Outlined" 
-                   Color="Color.Error" 
-                   StartIcon="@Icons.Material.Filled.Logout"
-                   OnClick="HandleLogout">
-            Logout
-        </MudButton>
+<div class="dashboard-hero">
+    <MudPaper Class="stat-card" Elevation="0">
+        <div class="stat-card__label">API Health</div>
+        <div class="stat-card__value">@healthText</div>
+        <MudText Typo="Typo.caption" Class="mt-1">@healthTimestamp</MudText>
     </MudPaper>
-</MudContainer>
+
+    <MudPaper Class="stat-card" Elevation="0">
+        <div class="stat-card__label">Recent Imports</div>
+        <div class="stat-card__value">@jobSummary</div>
+        <MudText Typo="Typo.caption" Class="mt-1">@jobDetail</MudText>
+    </MudPaper>
+</div>
+
+<MudGrid Spacing="3">
+    <MudItem xs="12" md="7">
+        <MudPaper Elevation="2" Class="pa-5">
+            <div class="d-flex align-center justify-space-between mb-2">
+                <MudText Typo="Typo.h6">Import Jobs</MudText>
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh" OnClick="LoadDashboard" Color="Color.Primary" />
+            </div>
+            <MudTable Items="importJobs" Hover="true" Dense="true" Elevation="0">
+                <HeaderContent>
+                    <MudTh>Project</MudTh>
+                    <MudTh>Status</MudTh>
+                    <MudTh>Progress</MudTh>
+                    <MudTh>Created</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Project">@context.ProjectName</MudTd>
+                    <MudTd DataLabel="Status">
+                        <MudChip T="string" Color="@StatusColor(context.State)" Variant="Variant.Filled">
+                            @StatusLabel(context.State)
+                        </MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="Progress">
+                        <MudProgressLinear Value="@(context.Percent)" Color="Color.Primary" Rounded="true" Style="min-width: 140px;" />
+                    </MudTd>
+                    <MudTd DataLabel="Created">@context.CreatedAt.ToLocalTime().ToString("g")</MudTd>
+                </RowTemplate>
+            </MudTable>
+            @if (!importJobs.Any())
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary mt-3">No import jobs were found. Start by uploading your first dataset.</MudText>
+            }
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="5">
+        <MudPaper Elevation="2" Class="pa-5">
+            <MudText Typo="Typo.h6" Class="mb-2">Quick Actions</MudText>
+            <MudStack Spacing="1.5">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CloudUpload" OnClick="() => NavManager.NavigateTo("/import")">
+                    Import data file
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Bolt" OnClick="LoadDashboard">
+                    Re-check API health
+                </MudButton>
+            </MudStack>
+            <MudDivider Class="my-4" />
+            <MudText Typo="Typo.subtitle2">Current user</MudText>
+            <MudText Typo="Typo.body1">@currentUserName</MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">@currentUserPosition</MudText>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
 
 @code {
-    private string userName = "User";
-    private string userPosition = "User";
+    private bool isLoading;
+    private List<BreadcrumbItem> breadcrumbs = new()
+    {
+        new BreadcrumbItem("ICP", href: "/dashboard", disabled: false),
+        new BreadcrumbItem("Overview", href: null, disabled: true)
+    };
 
-    protected override void OnInitialized()
+    private List<ImportJobDto> importJobs = new();
+    private string healthText = "Unknown";
+    private string healthTimestamp = string.Empty;
+    private string jobSummary = "--";
+    private string jobDetail = "";
+    private string currentUserName = "User";
+    private string currentUserPosition = "";
+
+    protected override async Task OnInitializedAsync()
     {
         var user = AuthService.GetCurrentUser();
-        if (user == null || ! user.IsAuthenticated)
+        if (user == null || !user.IsAuthenticated)
         {
             NavManager.NavigateTo("/login");
             return;
         }
 
-        userName = user. Name;
-        userPosition = user.Position;
+        currentUserName = user.Name;
+        currentUserPosition = user.Position;
+        await LoadDashboard();
     }
 
-    private async Task HandleLogout()
+    private async Task LoadDashboard()
     {
-        await AuthService.LogoutAsync();
-        Snackbar.Add("Logged out successfully", Severity.Info);
-        NavManager.NavigateTo("/login");
+        isLoading = true;
+        StateHasChanged();
+
+        var healthResult = await DashboardService.GetHealthAsync();
+        if (healthResult.Succeeded && healthResult.Data != null)
+        {
+            healthText = healthResult.Data.Status;
+            healthTimestamp = healthResult.Data.Timestamp.ToLocalTime().ToString("f");
+        }
+        else
+        {
+            healthText = "Unavailable";
+            healthTimestamp = healthResult.Message ?? "-";
+        }
+
+        var jobsResult = await DashboardService.GetImportJobsAsync(page: 1, pageSize: 5);
+        if (jobsResult.Succeeded && jobsResult.Data != null)
+        {
+            importJobs = jobsResult.Data.Items;
+            jobSummary = jobsResult.Data.Total > 0 ? jobsResult.Data.Total.ToString() : "0";
+            jobDetail = jobsResult.Data.Total > 0 ? "Active import history" : "No jobs yet";
+        }
+        else
+        {
+            importJobs = new List<ImportJobDto>();
+            jobSummary = "--";
+            jobDetail = jobsResult.Message ?? "Cannot load jobs";
+        }
+
+        isLoading = false;
+        StateHasChanged();
     }
+
+    private Color StatusColor(int state) => state switch
+    {
+        0 => Color.Default,
+        1 => Color.Info,
+        2 => Color.Success,
+        3 => Color.Error,
+        _ => Color.Secondary
+    };
+
+    private string StatusLabel(int state) => state switch
+    {
+        0 => "Pending",
+        1 => "Processing",
+        2 => "Completed",
+        3 => "Failed",
+        _ => "Queued"
+    };
 }

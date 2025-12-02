@@ -7,6 +7,7 @@
     /* Primary Colors */
     --primary-color: #004a88;
     --secondary-color: #1c6397;
+    --accent-color: #4cc2e6;
     /* Text Colors */
     --text-primary: #2c3e50;
     --text-secondary: #64748b;
@@ -14,6 +15,7 @@
     /* Background */
     --bg-primary: #ffffff;
     --bg-secondary: #f8fafc;
+    --bg-surface: #f6f8fb;
     --bg-gradient: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
     /* Border Radius */
     --radius-sm: 8px;
@@ -34,10 +36,35 @@
 /* --- Base Styles --- */
 html, body {
     font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    background: var(--bg-secondary);
+    background: var(--bg-surface);
     color: var(--text-primary);
     margin: 0;
     padding: 0;
+}
+
+.dashboard-hero {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+    margin-bottom: 1.5rem;
+}
+
+.stat-card {
+    background: linear-gradient(140deg, #1c6397 0%, #4cc2e6 100%);
+    color: #ffffff;
+    border-radius: 16px;
+    padding: 18px;
+    box-shadow: 0 20px 30px -15px rgba(0, 74, 136, 0.45);
+}
+
+.stat-card__label {
+    font-size: 0.95rem;
+    opacity: .9;
+}
+
+.stat-card__value {
+    font-size: 1.8rem;
+    font-weight: 800;
 }
 
 /* --- Buttons --- */

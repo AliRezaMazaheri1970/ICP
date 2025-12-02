@@ -1,0 +1,26 @@
+@inject NavigationManager NavManager
+@inject AuthService AuthService
+
+<MudNav Dense="true" Class="nav-menu">
+    <MudNavLink Href="/dashboard" Icon="@Icons.Material.Filled.Dashboard" Match="NavLinkMatch.Prefix">
+        Dashboard
+    </MudNavLink>
+    <MudNavLink Href="/import" Icon="@Icons.Material.Filled.CloudUpload" Match="NavLinkMatch.All">
+        Import Data
+    </MudNavLink>
+    <MudNavLink Href="/" Icon="@Icons.Material.Filled.AccountCircle" Match="NavLinkMatch.All">
+        Account
+    </MudNavLink>
+</MudNav>
+
+<MudDivider Class="my-4" />
+
+<MudPaper Class="pa-4" Elevation="0">
+    <MudText Typo="Typo.subtitle2" Class="mud-text-secondary">Connection</MudText>
+    <MudChip T="string" Color="Color.Primary" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Api">
+        API Client
+    </MudChip>
+    <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2">
+        Base URL is configured in <code>appsettings.json</code>.
+    </MudText>
+</MudPaper>

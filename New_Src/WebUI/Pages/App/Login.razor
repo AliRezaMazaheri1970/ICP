@@ -1,4 +1,4 @@
-﻿@page "/"
+@page "/"
 @page "/login"
 @using MudBlazor
 @using WebUI.Services
@@ -10,167 +10,137 @@
 
 <div class="login-container">
     <div class="login-wrapper">
-        <!-- Left Panel - Logo -->
         <div class="login-logo-panel">
             <div class="text-center">
                 <div class="login-logo-text">
-                    <img src="Images/logo-RASF1.png" width="180"/>
+                    <img src="Images/logo-RASF1.png" width="180" />
                 </div>
                 <div class="login-logo-subtitle">Razi Applied Science Foundation</div>
             </div>
         </div>
 
-        <!-- Right Panel - Form -->
         <div class="login-form-panel">
             <div class="login-form-card">
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">Welcome back</MudText>
+                <MudText Typo="Typo.h4" Align="Align.Left" Class="login-welcome-title">Sign in to ICP</MudText>
 
-                @if (showSignUp)
-                {
-                    <!-- Sign Up Form -->
-                    <MudText Typo="Typo.h4" Align="Align.Center" Class="login-welcome-title">
-                        Create Account
-                    </MudText>
+                <MudForm @ref="loginForm" @bind-IsValid="loginValid">
+                    <MudTextField @bind-Value="loginUsername"
+                                  Label="Username"
+                                  Variant="Variant.Outlined"
+                                  Required="true"
+                                  RequiredError="Username is required"
+                                  Class="mb-4" />
 
-                    <MudForm @ref="signupForm" @bind-IsValid="signupValid">
-                        <MudTextField @bind-Value="signupFullName"
-                                      Label="Full Name (Optional)"
-                                      Variant="Variant.Outlined"
-                                      Class="mb-4" />
+                    <MudTextField @bind-Value="loginPassword"
+                                  Label="Password"
+                                  Variant="Variant.Outlined"
+                                  InputType="InputType.Password"
+                                  Required="true"
+                                  RequiredError="Password is required"
+                                  Class="mb-4" />
 
-                        <MudTextField @bind-Value="signupEmail"
-                                      Label="UserName *"
-                                      Variant="Variant.Outlined"
-                                      @* InputType="InputType.Email" *@
-                                      Required="true"
-                                      RequiredError="UserName is required"
-                                      Class="mb-4" />
+                    <MudCheckBox @bind-Value="rememberMe"
+                                 Label="Remember Me"
+                                 Color="Color.Primary"
+                                 Size="Size.Small"
+                                 Class="mb-3" />
 
-                        <MudSelect @bind-Value="signupPosition"
-                                   Label="Position *"
-                                   Variant="Variant.Outlined"
-                                   Required="true"
-                                   RequiredError="Please select your position"
-                                   Class="mb-4">
-                            <MudSelectItem Value="@("Lab Manager")">Lab Manager</MudSelectItem>
-                            <MudSelectItem Value="@("Senior Analyst")">Senior Analyst</MudSelectItem>
-                            <MudSelectItem Value="@("Chemist")">Chemist</MudSelectItem>
-                            <MudSelectItem Value="@("QA/QC Engineer")">QA/QC Engineer</MudSelectItem>
-                            <MudSelectItem Value="@("Researcher")">Researcher</MudSelectItem>
-                            <MudSelectItem Value="@("Technician")">Technician</MudSelectItem>
-                            <MudSelectItem Value="@("Student")">Student</MudSelectItem>
-                            <MudSelectItem Value="@("Other")">Other</MudSelectItem>
-                        </MudSelect>
+                    <MudButton Variant="Variant.Filled"
+                               Size="Size.Large"
+                               FullWidth="true"
+                               OnClick="HandleLogin"
+                               Disabled="@(!loginValid || loginProcessing)"
+                               Class="login-btn mb-3">
+                        @if (loginProcessing)
+                        {
+                            <MudProgressCircular Class="ms-n1 me-2" Size="Size.Small" Indeterminate="true" Color="Color.Inherit" />
+                            <span>Signing In...</span>
+                        }
+                        else
+                        {
+                            <span>Sign In</span>
+                        }
+                    </MudButton>
+                </MudForm>
 
-                        <MudTextField @bind-Value="signupPassword"
-                                      Label="Password *"
-                                      Variant="Variant.Outlined"
-                                      InputType="InputType.Password"
-                                      Required="true"
-                                      RequiredError="Password is required"
-                                      Class="mb-6" />
+                <MudDivider Class="my-4" />
 
-                        <MudButton Variant="Variant.Filled"
-                                   Size="Size.Large"
-                                   FullWidth="true"
-                                   OnClick="HandleSignUp"
-                                   Disabled="@(! signupValid || signupProcessing)"
-                                   Class="login-btn mb-4">
-                            @if (signupProcessing)
-                            {
-                                <MudProgressCircular Class="ms-n1 me-2" Size="Size.Small" Indeterminate="true" Color="Color.Inherit" />
-                                <span>Creating... </span>
-                            }
-                            else
-                            {
-                                <span>Create Account</span>
-                            }
-                        </MudButton>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary mb-2">Need an account?</MudText>
+                <MudForm @ref="signupForm" @bind-IsValid="signupValid">
+                    <MudTextField @bind-Value="signupFullName"
+                                  Label="Full Name (Optional)"
+                                  Variant="Variant.Outlined"
+                                  Class="mb-3" />
 
-                        <MudText Align="Align.Center" Class="mt-4">
-                            Already have an account?
-                            <span class="login-link" @onclick="() => showSignUp = false">Sign In</span>
-                        </MudText>
-                    </MudForm>
-                }
-                else
-                {
-                    <!-- Sign In Form -->
-                    <MudText Typo="Typo.h4" Align="Align.Center" Class="login-welcome-title">
-                        Sign in to your account
-                    </MudText>
+                    <MudTextField @bind-Value="signupEmail"
+                                  Label="Username *"
+                                  Variant="Variant.Outlined"
+                                  Required="true"
+                                  RequiredError="Username is required"
+                                  Class="mb-3" />
 
-                    <MudForm @ref="loginForm" @bind-IsValid="loginValid">
-                        <MudTextField @bind-Value="loginEmail"
-                                      Label="UserName"
-                                      Variant="Variant.Outlined"
-                                      InputType="InputType.Email"
-                                      Required="true"
-                                      RequiredError="UserName is required"
-                                      Class="mb-4" />
+                    <MudSelect @bind-Value="signupPosition"
+                               Label="Position *"
+                               Variant="Variant.Outlined"
+                               Required="true"
+                               RequiredError="Please select your position"
+                               Class="mb-3">
+                        <MudSelectItem Value="@( "Analyst" )">Analyst</MudSelectItem>
+                        <MudSelectItem Value="@( "Admin" )">Admin</MudSelectItem>
+                        <MudSelectItem Value="@( "Viewer" )">Viewer</MudSelectItem>
+                    </MudSelect>
 
-                        <MudTextField @bind-Value="loginPassword"
-                                      Label="Password"
-                                      Variant="Variant.Outlined"
-                                      InputType="InputType.Password"
-                                      Required="true"
-                                      RequiredError="Password is required"
-                                      Class="mb-4" />
+                    <MudTextField @bind-Value="signupPassword"
+                                  Label="Password *"
+                                  Variant="Variant.Outlined"
+                                  InputType="InputType.Password"
+                                  Required="true"
+                                  RequiredError="Password is required"
+                                  Class="mb-4" />
 
-                        <MudCheckBox @bind-Value="rememberMe"
-                                     Label="Remember Me"
-                                     Color="Color.Primary"
-                                     Size="Size.Small"
-                                     Class="mb-4" />
+                    <MudButton Variant="Variant.Outlined"
+                               Size="Size.Medium"
+                               FullWidth="true"
+                               OnClick="HandleSignUp"
+                               Disabled="@(!signupValid || signupProcessing)"
+                               Color="Color.Primary"
+                               Class="mb-2">
+                        @if (signupProcessing)
+                        {
+                            <MudProgressCircular Class="ms-n1 me-2" Size="Size.Small" Indeterminate="true" Color="Color.Inherit" />
+                            <span>Creating account...</span>
+                        }
+                        else
+                        {
+                            <span>Create account</span>
+                        }
+                    </MudButton>
+                </MudForm>
 
-                        <MudButton Variant="Variant.Filled"
-                                   Size="Size. Large"
-                                   FullWidth="true"
-                                   OnClick="HandleLogin"
-                                   Disabled="@(!loginValid || loginProcessing)"
-                                   Class="login-btn mb-3">
-                            @if (loginProcessing)
-                            {
-                                <MudProgressCircular Class="ms-n1 me-2" Size="Size.Small" Indeterminate="true" Color="Color.Inherit" />
-                                <span>Signing In...</span>
-                            }
-                            else
-                            {
-                                <span>Sign In</span>
-                            }
-                        </MudButton>
-
-                       
-
-                        <MudText Align="Align.Center" Class="mt-4 copy-right">
-                            All rights to this website belong to RASF.
-                        </MudText>
-                    </MudForm>
-                }
+                <MudText Align="Align.Center" Class="mt-4 copy-right">
+                    All rights to this website belong to RASF.
+                </MudText>
             </div>
         </div>
     </div>
 </div>
 
 @code {
-    // Sign In fields
     private MudForm loginForm = null!;
     private bool loginValid;
-    private bool loginProcessing = false;
-    private string loginEmail = "";
+    private bool loginProcessing;
+    private string loginUsername = "";
     private string loginPassword = "";
     private bool rememberMe = true;
 
-    // Sign Up fields
     private MudForm signupForm = null!;
     private bool signupValid;
-    private bool signupProcessing = false;
+    private bool signupProcessing;
     private string signupFullName = "";
     private string signupEmail = "";
     private string signupPassword = "";
-    private string signupPosition = "";
-
-    // Toggle between Sign In / Sign Up
-    private bool showSignUp = false;
+    private string signupPosition = "Analyst";
 
     protected override async Task OnInitializedAsync()
     {
@@ -190,7 +160,7 @@
         loginProcessing = true;
         StateHasChanged();
 
-        var result = await AuthService.LoginAsync(loginEmail, loginPassword, rememberMe);
+        var result = await AuthService.LoginAsync(loginUsername, loginPassword, rememberMe);
 
         loginProcessing = false;
 
@@ -210,12 +180,6 @@
         await signupForm.Validate();
         if (!signupForm.IsValid) return;
 
-        if (string.IsNullOrEmpty(signupPosition))
-        {
-            Snackbar.Add("Please select your position", Severity.Warning);
-            return;
-        }
-
         signupProcessing = true;
         StateHasChanged();
 
@@ -225,23 +189,15 @@
 
         if (result.IsAuthenticated)
         {
-            Snackbar.Add("Account created!  Please sign in.", Severity.Success);
-            signupFullName = "";
-            signupEmail = "";
-            signupPassword = "";
-            signupPosition = "";
-            showSignUp = false;
+            Snackbar.Add("Account created! Please sign in.", Severity.Success);
+            signupFullName = string.Empty;
+            signupEmail = string.Empty;
+            signupPassword = string.Empty;
+            signupPosition = "Analyst";
         }
         else
         {
             Snackbar.Add(result.Message, Severity.Error);
         }
-    }
-
-    private void HandleGuestLogin()
-    {
-        var result = AuthService.GuestLogin();
-        Snackbar.Add("Logged in as Guest", Severity.Info);
-        NavManager.NavigateTo("/dashboard");
     }
 }
