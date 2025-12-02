@@ -13,8 +13,10 @@
         <!-- Left Panel - Logo -->
         <div class="login-logo-panel">
             <div class="text-center">
-                <div class="login-logo-text">ICP</div>
-                <div class="login-logo-subtitle">Isatis Correction Platform</div>
+                <div class="login-logo-text">
+                    <img src="Images/logo-RASF1.png" width="180"/>
+                </div>
+                <div class="login-logo-subtitle">Razi Applied Science Foundation</div>
             </div>
         </div>
 
@@ -36,7 +38,7 @@
                                       Class="mb-4" />
 
                         <MudTextField @bind-Value="signupEmail"
-                                      Label="Email Address *"
+                                      Label="UserName *"
                                       Variant="Variant.Outlined"
                                       InputType="InputType.Email"
                                       Required="true"
@@ -94,12 +96,12 @@
                 {
                     <!-- Sign In Form -->
                     <MudText Typo="Typo.h4" Align="Align.Center" Class="login-welcome-title">
-                        Welcome Back
+                        Sign in to your account
                     </MudText>
 
                     <MudForm @ref="loginForm" @bind-IsValid="loginValid">
                         <MudTextField @bind-Value="loginEmail"
-                                      Label="Email Address"
+                                      Label="UserName"
                                       Variant="Variant.Outlined"
                                       InputType="InputType.Email"
                                       Required="true"
@@ -137,17 +139,10 @@
                             }
                         </MudButton>
 
-                        <MudButton Variant="Variant.Outlined"
-                                   Size="Size.Large"
-                                   FullWidth="true"
-                                   OnClick="HandleGuestLogin"
-                                   Class="guest-btn mb-4">
-                            Continue as Guest
-                        </MudButton>
+                       
 
                         <MudText Align="Align.Center" Class="mt-4">
-                            Don't have an account?
-                            <span class="login-link" @onclick="() => showSignUp = true">Sign Up</span>
+                            All rights to this website belong to RASF.
                         </MudText>
                     </MudForm>
                 }
