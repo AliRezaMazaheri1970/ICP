@@ -40,9 +40,9 @@
                         <MudTextField @bind-Value="signupEmail"
                                       Label="UserName *"
                                       Variant="Variant.Outlined"
-                                      InputType="InputType.Email"
+                                      @* InputType="InputType.Email" *@
                                       Required="true"
-                                      RequiredError="Email is required"
+                                      RequiredError="UserName is required"
                                       Class="mb-4" />
 
                         <MudSelect @bind-Value="signupPosition"
@@ -105,7 +105,7 @@
                                       Variant="Variant.Outlined"
                                       InputType="InputType.Email"
                                       Required="true"
-                                      RequiredError="Email is required"
+                                      RequiredError="UserName is required"
                                       Class="mb-4" />
 
                         <MudTextField @bind-Value="loginPassword"
@@ -141,7 +141,7 @@
 
                        
 
-                        <MudText Align="Align.Center" Class="mt-4">
+                        <MudText Align="Align.Center" Class="mt-4 copy-right">
                             All rights to this website belong to RASF.
                         </MudText>
                     </MudForm>

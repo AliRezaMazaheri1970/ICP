@@ -119,9 +119,41 @@
     .login-logo-panel {
         flex: 0 0 auto;
         min-height: 200px;
+        border-radius: 20px 20px 0 0;
     }
 
     .login-logo-text {
         font-size: 4rem;
+
+    }
+    .login-logo-text img{
+        width:60px;
     }
 }
+
+
+@media (max-width: 380px) {
+    .login-logo-text {
+        font-size: 2rem;
+    }
+
+    .login-logo-subtitle {
+        font-size: 1rem;
+    }
+
+    .login-welcome-title {
+        font-size: .8rem;
+    }
+
+    .login-form-card {
+        width: 100%;
+        max-width: 420px;
+        padding: .5rem;
+    }
+
+    .copy-right {
+        font-weight: 500;
+        font-size: .7rem;
+    }
+}
+

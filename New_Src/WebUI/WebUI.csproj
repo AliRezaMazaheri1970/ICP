@@ -13,6 +13,7 @@
   <ItemGroup>
     <Folder Include="Component\" />
     <Folder Include="Shared\" />
+    <Folder Include="wwwroot\Images\" />
   </ItemGroup>
 
 </Project>
