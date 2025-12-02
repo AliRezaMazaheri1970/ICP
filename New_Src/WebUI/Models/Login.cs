@@ -6,9 +6,9 @@ namespace WebUI.Models;
 /// مدل درخواست لاگین برای ارسال به API
 /// </summary>
 public record LoginRequest(
-    [Required(ErrorMessage = "Email is required.")]
-    [EmailAddress]
-    string Email,
+    [Required(ErrorMessage = "UserName is required.")]
+    //[EmailAddress]
+    string UserName,
 
     [Required(ErrorMessage = "Password is required.")]
     string Password);
