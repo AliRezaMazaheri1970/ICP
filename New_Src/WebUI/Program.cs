@@ -1,43 +1,78 @@
-﻿using MudBlazor.Services; // ضروری برای MudBlazor
-using WebUI.Services;     // ضروری برای AuthService
+﻿using MudBlazor.Services;
+using WebUI.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. سرویس‌های Blazor Server
+// ============================================
+// 1.  Blazor Server Services
+// ============================================
 builder.Services.AddRazorPages();
 builder.Services.AddServerSideBlazor();
-
-// 2. سرویس‌های MudBlazor (رفع خطای CS1061)
-builder.Services.AddMudServices();
-
-// 3. تنظیم HttpClient برای اتصال به API داخلی (Thin Client Architecture)
-// این کلاینت از داخل سرور لینوکس به API شما درخواست می‌فرستد
-builder.Services.AddHttpClient("Api", client =>
+// در Program.cs بعد از AuthService
+// ============================================
+// 2. MudBlazor Services
+// ============================================
+builder.Services.AddMudServices(config =>
 {
-    // فرض بر این است که API روی پورت 5268 در حال اجراست
-    // اگر هر دو روی یک سرور هستند، localhost بهترین گزینه است
-    client.BaseAddress = new Uri("http://localhost:5268/api/");
+    config.SnackbarConfiguration.PositionClass = MudBlazor.Defaults.Classes.Position.BottomRight;
+    config.SnackbarConfiguration.PreventDuplicates = false;
+    config.SnackbarConfiguration.NewestOnTop = true;
+    config.SnackbarConfiguration.ShowCloseIcon = true;
+    config.SnackbarConfiguration.VisibleStateDuration = 5000;
+    config.SnackbarConfiguration.ShowTransitionDuration = 300;
+    config.SnackbarConfiguration.HideTransitionDuration = 300;
 });
 
-// 4. تزریق سرویس احراز هویت (رفع خطای CS0246 در Login.razor)
-builder.Services.AddScoped<AuthService>();
+// ============================================
+// 3. HttpClient for API Connection
+// ============================================
+// خواندن آدرس API از appsettings.json
+var apiBaseUrl = builder.Configuration.GetValue<string>("ApiSettings:BaseUrl") ?? "http://192.168.0.103:5000/api/";
 
+builder.Services.AddHttpClient("Api", client =>
+{
+    client.BaseAddress = new Uri(apiBaseUrl);
+    client.Timeout = TimeSpan.FromSeconds(30);
+    client.DefaultRequestHeaders.Add("Accept", "application/json");
+});
+
+// ============================================
+// 4. Application Services
+// ============================================
+builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<ImportService>();
+// ============================================
+// Build Application
+// ============================================
 var app = builder.Build();
 
-if (!app.Environment.IsDevelopment())
+// ============================================
+// Middleware Pipeline
+// ============================================
+if (app.Environment.IsDevelopment())
+{
+    app.UseDeveloperExceptionPage();
+}
+else
 {
     app.UseExceptionHandler("/Error");
-    app.UseHsts();
+    // فقط در صورت استفاده از HTTPS
+    // app.UseHsts();
 }
 
-// ریدایرکت HTTPS برای امنیت بیشتر در محیط پروداکشن
-// اگر پشت Nginx هستید و SSL را آنجا مدیریت می‌کنید، ممکن است این خط نیاز به تنظیمات ForwardedHeaders داشته باشد
-app.UseHttpsRedirection();
+// اگه پشت Nginx با SSL هستی، این خط رو کامنت کن
+// app.UseHttpsRedirection();
 
 app.UseStaticFiles();
 app.UseRouting();
 
 app.MapBlazorHub();
 app.MapFallbackToPage("/_Host");
+
+// ============================================
+// Log startup info
+// ============================================
+var logger = app.Services.GetRequiredService<ILogger<Program>>();
+logger.LogInformation("WebUI started.  API Base URL: {ApiUrl}", apiBaseUrl);
 
 app.Run();

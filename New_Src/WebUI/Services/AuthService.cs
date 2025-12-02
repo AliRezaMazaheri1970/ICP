@@ -1,19 +1,121 @@
 ﻿using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace WebUI.Services;
 
-// DTOs
-public record LoginRequest(string Email, string Password, bool RememberMe = false);
-public record RegisterRequest(string Email, string Password, string? FullName, string Position);
-public record AuthResult(bool IsAuthenticated, string Message, string Name = "User", string Token = "", string Position = "User");
+// ============================================
+// DTOs - مطابق با فرمت API
+// ============================================
+
+public class LoginRequest
+{
+    [JsonPropertyName("username")]
+    public string Username { get; set; } = "";
+
+    [JsonPropertyName("password")]
+    public string Password { get; set; } = "";
+}
+
+public class RegisterRequest
+{
+    [JsonPropertyName("username")]
+    public string Username { get; set; } = "";
+
+    [JsonPropertyName("email")]
+    public string Email { get; set; } = "";
+
+    [JsonPropertyName("password")]
+    public string Password { get; set; } = "";
+
+    [JsonPropertyName("firstName")]
+    public string? FirstName { get; set; }
+
+    [JsonPropertyName("lastName")]
+    public string? LastName { get; set; }
+
+    [JsonPropertyName("role")]
+    public string? Role { get; set; }
+}
+
+public class UserDto
+{
+    [JsonPropertyName("userId")]
+    public string? UserId { get; set; }
+
+    [JsonPropertyName("username")]
+    public string? Username { get; set; }
+
+    [JsonPropertyName("email")]
+    public string? Email { get; set; }
+
+    [JsonPropertyName("firstName")]
+    public string? FirstName { get; set; }
+
+    [JsonPropertyName("lastName")]
+    public string? LastName { get; set; }
+
+    [JsonPropertyName("role")]
+    public string? Role { get; set; }
+
+    [JsonPropertyName("isActive")]
+    public bool IsActive { get; set; }
+
+    public string FullName => $"{FirstName} {LastName}".Trim();
+}
+
+public class ApiLoginResponse
+{
+    [JsonPropertyName("succeeded")]
+    public bool Succeeded { get; set; }
+
+    [JsonPropertyName("accessToken")]
+    public string? AccessToken { get; set; }
+
+    [JsonPropertyName("refreshToken")]
+    public string? RefreshToken { get; set; }
+
+    [JsonPropertyName("expiresAt")]
+    public DateTime? ExpiresAt { get; set; }
+
+    [JsonPropertyName("user")]
+    public UserDto? User { get; set; }
+
+    [JsonPropertyName("error")]
+    public string? Error { get; set; }
+}
+
+public class ApiRegisterResponse
+{
+    [JsonPropertyName("succeeded")]
+    public bool Succeeded { get; set; }
+
+    [JsonPropertyName("user")]
+    public UserDto? User { get; set; }
+
+    [JsonPropertyName("error")]
+    public string? Error { get; set; }
+}
+
+// نتیجه داخلی برای UI
+public record AuthResult(
+    bool IsAuthenticated,
+    string Message,
+    string Name = "User",
+    string Token = "",
+    string Position = "User"
+);
+
+// ============================================
+// Auth Service
+// ============================================
 
 public class AuthService
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<AuthService> _logger;
-
-    // برای نگهداری وضعیت کاربر فعلی (در نسخه واقعی از Session/Cookie استفاده کن)
     private static AuthResult? _currentUser;
+    private static string? _accessToken;
+    private static UserDto? _userInfo;
 
     public AuthService(IHttpClientFactory clientFactory, ILogger<AuthService> logger)
     {
@@ -24,105 +126,152 @@ public class AuthService
     /// <summary>
     /// ورود کاربر
     /// </summary>
-    public async Task<AuthResult> LoginAsync(string email, string password, bool rememberMe = false)
+    public async Task<AuthResult> LoginAsync(string username, string password, bool rememberMe = false)
     {
         try
         {
-            var request = new LoginRequest(email, password, rememberMe);
-            var response = await _httpClient.PostAsJsonAsync("auth/login", request);
-
-            if (response.IsSuccessStatusCode)
+            var request = new LoginRequest
             {
-                var result = await response.Content.ReadFromJsonAsync<AuthResult>(
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                Username = username,
+                Password = password
+            };
 
-                if (result != null && result.IsAuthenticated)
-                {
-                    _currentUser = result;
-                    return result;
-                }
+            _logger.LogInformation("Attempting login for user: {Username}", username);
 
+            var response = await _httpClient.PostAsJsonAsync("auth/login", request);
+            var content = await response.Content.ReadAsStringAsync();
+
+            _logger.LogDebug("Login response: {Content}", content);
+
+            var loginResponse = JsonSerializer.Deserialize<ApiLoginResponse>(content,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (loginResponse == null)
+            {
                 return new AuthResult(false, "Invalid server response");
             }
 
-            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
-                return new AuthResult(false, "Invalid email or password");
+            if (loginResponse.Succeeded && loginResponse.User != null)
+            {
+                _accessToken = loginResponse.AccessToken;
+                _userInfo = loginResponse.User;
 
-            return new AuthResult(false, $"Server Error: {response.StatusCode}");
+                var fullName = loginResponse.User.FullName;
+                if (string.IsNullOrWhiteSpace(fullName))
+                {
+                    fullName = loginResponse.User.Username ?? "User";
+                }
+
+                _currentUser = new AuthResult(
+                    IsAuthenticated: true,
+                    Message: "Login successful",
+                    Name: fullName,
+                    Token: loginResponse.AccessToken ?? "",
+                    Position: loginResponse.User.Role ?? "User"
+                );
+
+                _logger.LogInformation("User {Username} logged in successfully", username);
+                return _currentUser;
+            }
+
+            var errorMessage = loginResponse.Error ?? "Invalid username or password";
+            _logger.LogWarning("Login failed for {Username}: {Error}", username, errorMessage);
+            return new AuthResult(false, errorMessage);
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
-            _logger.LogWarning("API not available, using offline mode");
-            // Offline mode - برای تست بدون API
-            return OfflineLogin(email, password);
+            _logger.LogError(ex, "Cannot connect to API");
+            return new AuthResult(false, "Cannot connect to server. Please try again later.");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Login API Error");
-            return new AuthResult(false, "Connection failed. Is API running? ");
+            _logger.LogError(ex, "Login error");
+            return new AuthResult(false, "An error occurred during login.");
         }
     }
 
     /// <summary>
     /// ثبت‌نام کاربر جدید
     /// </summary>
-    public async Task<AuthResult> RegisterAsync(string email, string password, string? fullName, string position)
+    public async Task<AuthResult> RegisterAsync(string username, string password, string? fullName, string? position)
     {
         try
         {
-            var request = new RegisterRequest(email, password, fullName, position);
+            // جدا کردن نام و نام خانوادگی
+            var nameParts = (fullName ?? "").Split(' ', 2);
+            var firstName = nameParts.Length > 0 ? nameParts[0] : username;
+            var lastName = nameParts.Length > 1 ? nameParts[1] : "";
+
+            var request = new RegisterRequest
+            {
+                Username = username,
+                Email = username.Contains("@") ? username : $"{username}@isatis.local",
+                Password = password,
+                FirstName = firstName,
+                LastName = lastName,
+                Role = position ?? "Viewer"
+            };
+
+            _logger.LogInformation("Attempting registration for user: {Username}", username);
+
             var response = await _httpClient.PostAsJsonAsync("auth/register", request);
+            var content = await response.Content.ReadAsStringAsync();
+
+            _logger.LogDebug("Register response: {Content}", content);
 
             if (response.IsSuccessStatusCode)
             {
-                return new AuthResult(true, "Account created successfully");
+                var registerResponse = JsonSerializer.Deserialize<ApiRegisterResponse>(content,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                if (registerResponse?.Succeeded == true)
+                {
+                    _logger.LogInformation("User {Username} registered successfully", username);
+                    return new AuthResult(true, "Account created successfully!  Please sign in.");
+                }
+
+                return new AuthResult(false, registerResponse?.Error ?? "Registration failed");
             }
 
             if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
-                return new AuthResult(false, "Email already registered");
+            {
+                return new AuthResult(false, "Username or email already exists");
+            }
 
-            var errorContent = await response.Content.ReadAsStringAsync();
-            return new AuthResult(false, $"Registration failed: {errorContent}");
+            // Try to parse error from response
+            try
+            {
+                var errorResponse = JsonSerializer.Deserialize<ApiRegisterResponse>(content,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                return new AuthResult(false, errorResponse?.Error ?? "Registration failed");
+            }
+            catch
+            {
+                return new AuthResult(false, $"Registration failed: {response.StatusCode}");
+            }
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
-            _logger.LogWarning("API not available for registration");
-            return new AuthResult(false, "Cannot register in offline mode.  Please ensure API is running.");
+            _logger.LogError(ex, "Cannot connect to API for registration");
+            return new AuthResult(false, "Cannot connect to server. Please try again later.");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Register API Error");
-            return new AuthResult(false, "Registration failed. Please try again.");
+            _logger.LogError(ex, "Registration error");
+            return new AuthResult(false, "An error occurred during registration.");
         }
     }
 
     /// <summary>
-    /// بررسی آیا کاربر قبلاً Remember Me زده
+    /// بررسی session فعال
     /// </summary>
-    public async Task<AuthResult> CheckAutoLoginAsync()
+    public Task<AuthResult> CheckAutoLoginAsync()
     {
-        try
+        if (_currentUser != null && _currentUser.IsAuthenticated)
         {
-            var response = await _httpClient.GetAsync("auth/check-session");
-
-            if (response.IsSuccessStatusCode)
-            {
-                var result = await response.Content.ReadFromJsonAsync<AuthResult>(
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-                if (result != null && result.IsAuthenticated)
-                {
-                    _currentUser = result;
-                    return result;
-                }
-            }
-
-            return new AuthResult(false, "No active session");
+            return Task.FromResult(_currentUser);
         }
-        catch
-        {
-            return new AuthResult(false, "No active session");
-        }
+        return Task.FromResult(new AuthResult(false, "No active session"));
     }
 
     /// <summary>
@@ -131,22 +280,34 @@ public class AuthService
     public AuthResult GuestLogin()
     {
         _currentUser = new AuthResult(true, "Guest Login", "Guest", "", "Guest");
+        _userInfo = null;
+        _accessToken = null;
         return _currentUser;
     }
 
     /// <summary>
-    /// خروج کاربر
+    /// خروج
     /// </summary>
     public async Task LogoutAsync()
     {
         try
         {
-            await _httpClient.PostAsync("auth/logout", null);
+            if (!string.IsNullOrEmpty(_accessToken))
+            {
+                _httpClient.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _accessToken);
+                await _httpClient.PostAsync("auth/logout", null);
+            }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Logout error");
+        }
         finally
         {
             _currentUser = null;
+            _accessToken = null;
+            _userInfo = null;
         }
     }
 
@@ -156,20 +317,12 @@ public class AuthService
     public AuthResult? GetCurrentUser() => _currentUser;
 
     /// <summary>
-    /// حالت آفلاین برای تست
+    /// دریافت اطلاعات کامل کاربر
     /// </summary>
-    private AuthResult OfflineLogin(string email, string password)
-    {
-        // برای تست بدون API - هر ایمیل/پسورد قبول میشه
-        if (!string.IsNullOrEmpty(email) && !string.IsNullOrEmpty(password))
-        {
-            var name = email.Split('@')[0];
-            name = char.ToUpper(name[0]) + name.Substring(1);
+    public UserDto? GetUserInfo() => _userInfo;
 
-            _currentUser = new AuthResult(true, "Offline Login", name, "", "Analyst");
-            return _currentUser;
-        }
-
-        return new AuthResult(false, "Invalid credentials");
-    }
+    /// <summary>
+    /// دریافت Access Token
+    /// </summary>
+    public string? GetAccessToken() => _accessToken;
 }
