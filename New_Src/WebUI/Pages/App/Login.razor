@@ -1,4 +1,4 @@
-@page "/"
+﻿@page "/"
 @page "/login"
 @using MudBlazor
 @using WebUI.Services
@@ -103,15 +103,21 @@
                                       Label="UserName"
                                       Variant="Variant.Outlined"
                                       Required="true"
+                                      Immediate="true"
                                       RequiredError="UserName is required"
                                       Class="mb-4" />
 
                         <MudTextField @bind-Value="loginPassword"
                                       Label="Password"
                                       Variant="Variant.Outlined"
-                                      InputType="InputType.Password"
+                                      InputType="@loginPasswordInputType"
                                       Required="true"
+                                      Immediate="true"
                                       RequiredError="Password is required"
+                                      Adornment="Adornment.End"
+                                      AdornmentIcon="@loginPasswordIcon"
+                                      OnAdornmentClick="() => loginPasswordVisible = !loginPasswordVisible"
+                                      AdornmentAriaLabel="Show Password"
                                       Class="mb-4" />
 
                         <MudCheckBox @bind-Value="rememberMe"
@@ -120,11 +126,12 @@
                                      Size="Size.Small"
                                      Class="mb-4" />
 
+                     
                         <MudButton Variant="Variant.Filled"
                                    Size="Size.Large"
                                    FullWidth="true"
                                    OnClick="HandleLogin"
-                                   Disabled="@(!loginValid || loginProcessing)"
+                                   Disabled="@(!IsLoginFormValid() || loginProcessing)"
                                    Class="login-btn mb-3">
                             @if (loginProcessing)
                             {
@@ -234,5 +241,18 @@
         {
             Snackbar.Add(result.Message, Severity.Error);
         }
+    }
+
+    // Password visibility toggle
+    private bool loginPasswordVisible = false;
+    private InputType loginPasswordInputType => loginPasswordVisible ? InputType.Text : InputType.Password;
+    private string loginPasswordIcon => loginPasswordVisible ? Icons.Material.Filled.Visibility : Icons.Material.Filled.VisibilityOff;
+
+    private bool IsLoginFormValid()
+    {
+        return !string.IsNullOrWhiteSpace(loginEmail) &&
+               loginEmail.Length >= 4 &&
+               !string.IsNullOrWhiteSpace(loginPassword) &&
+               loginPassword.Length >= 6;
     }
 }
