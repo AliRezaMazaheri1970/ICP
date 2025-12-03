@@ -47,127 +47,254 @@ public class PivotService : IPivotService
             if (!project.RawDataRows.Any())
                 return Result<PivotResultDto>.Fail("Project has no data");
 
-            var pivotData = new List<(string SolutionLabel, Dictionary<string, decimal?> Values, int Index)>();
-            var allElements = new HashSet<string>();
+            // Detect format: ICP format has "Element" column, Tabular format doesn't
+            var firstRow = project.RawDataRows.First();
+            var firstRowData = ParseRowData(firstRow);
+            bool isIcpFormat = firstRowData != null && firstRowData.ContainsKey("Element");
 
-            int index = 0;
-            foreach (var rawRow in project.RawDataRows.OrderBy(r => r.DataId))
+            if (isIcpFormat)
             {
-                var rowData = ParseRowData(rawRow);
-                if (rowData == null) continue;
-
-                var solutionLabel = GetSolutionLabel(rawRow, rowData);
-                if (string.IsNullOrWhiteSpace(solutionLabel)) continue;
-
-                var values = new Dictionary<string, decimal?>();
-
-                foreach (var kvp in rowData)
-                {
-                    if (IsMetadataColumn(kvp.Key)) continue;
-
-                    var element = ExtractElementName(kvp.Key);
-                    if (string.IsNullOrEmpty(element)) continue;
-
-                    allElements.Add(kvp.Key);
-
-                    decimal? value = ParseDecimalValue(kvp.Value);
-
-                    if (request.UseOxide && value.HasValue)
-                    {
-                        var elementSymbol = ExtractElementSymbol(element);
-                        if (OxideFactors.Factors.TryGetValue(elementSymbol, out var oxide))
-                        {
-                            value = value.Value * oxide.Factor;
-                        }
-                    }
-
-                    values[kvp.Key] = value;
-                }
-
-                pivotData.Add((solutionLabel, values, index++));
+                return await GetPivotTableIcpFormatAsync(project, request);
             }
-
-            var filteredData = pivotData.AsEnumerable();
-
-            if (request.SelectedSolutionLabels?.Any() == true)
+            else
             {
-                filteredData = filteredData.Where(d =>
-                    request.SelectedSolutionLabels.Contains(d.SolutionLabel));
+                return await GetPivotTableTabularFormatAsync(project, request);
             }
-
-            if (!string.IsNullOrWhiteSpace(request.SearchText))
-            {
-                var search = request.SearchText.ToLower();
-                filteredData = filteredData.Where(d =>
-                    d.SolutionLabel.ToLower().Contains(search) ||
-                    d.Values.Any(v => v.Value?.ToString().Contains(search) == true));
-            }
-
-            if (request.NumberFilters?.Any() == true)
-            {
-                foreach (var filter in request.NumberFilters)
-                {
-                    var column = filter.Key;
-                    var numberFilter = filter.Value;
-
-                    filteredData = filteredData.Where(d =>
-                    {
-                        if (!d.Values.TryGetValue(column, out var val) || !val.HasValue)
-                            return true;
-
-                        if (numberFilter.Min.HasValue && val.Value < numberFilter.Min.Value)
-                            return false;
-                        if (numberFilter.Max.HasValue && val.Value > numberFilter.Max.Value)
-                            return false;
-
-                        return true;
-                    });
-                }
-            }
-
-            var filteredList = filteredData.ToList();
-            var totalCount = filteredList.Count;
-
-            var pagedData = filteredList
-                .Skip((request.Page - 1) * request.PageSize)
-                .Take(request.PageSize)
-                .ToList();
-
-            var columns = allElements.OrderBy(e => e).ToList();
-            if (request.SelectedElements?.Any() == true)
-            {
-                columns = columns.Where(c =>
-                    request.SelectedElements.Any(e => c.StartsWith(e))).ToList();
-            }
-
-            var rows = pagedData.Select(d => new PivotRowDto(
-                d.SolutionLabel,
-                RoundValues(d.Values, request.DecimalPlaces),
-                d.Index
-            )).ToList();
-
-            var columnStats = CalculateColumnStats(filteredList, columns);
-
-            var metadata = new PivotMetadataDto(
-                pivotData.Select(d => d.SolutionLabel).Distinct().OrderBy(s => s).ToList(),
-                allElements.OrderBy(e => e).ToList(),
-                columnStats
-            );
-
-            return Result<PivotResultDto>.Success(new PivotResultDto(
-                columns,
-                rows,
-                totalCount,
-                request.Page,
-                request.PageSize,
-                metadata
-            ));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get pivot table for project {ProjectId}", request.ProjectId);
             return Result<PivotResultDto>.Fail($"Failed to get pivot table: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Pivot table for ICP format (one row per element)
+    /// Converts vertical data to horizontal pivot
+    /// </summary>
+    private async Task<Result<PivotResultDto>> GetPivotTableIcpFormatAsync(Project project, PivotRequest request)
+    {
+        // Group by Solution Label, then pivot elements to columns
+        var pivotDict = new Dictionary<string, Dictionary<string, decimal?>>();
+        var allElements = new HashSet<string>();
+        var allLabels = new HashSet<string>();
+
+        foreach (var rawRow in project.RawDataRows.OrderBy(r => r.DataId))
+        {
+            var rowData = ParseRowData(rawRow);
+            if (rowData == null) continue;
+
+            var solutionLabel = GetSolutionLabel(rawRow, rowData);
+            if (string.IsNullOrWhiteSpace(solutionLabel)) continue;
+
+            allLabels.Add(solutionLabel);
+
+            // Get Element name and Corr Con value
+            var elementName = GetStringValue(rowData, "Element");
+            if (string.IsNullOrWhiteSpace(elementName)) continue;
+
+            allElements.Add(elementName);
+
+            // Get the concentration value (Corr Con)
+            var corrCon = GetDecimalValue(rowData, "Corr Con");
+            
+            // Apply oxide conversion if requested
+            if (request.UseOxide && corrCon.HasValue)
+            {
+                var elementSymbol = ExtractElementSymbol(elementName);
+                if (OxideFactors.Factors.TryGetValue(elementSymbol, out var oxide))
+                {
+                    corrCon = corrCon.Value * oxide.Factor;
+                }
+            }
+
+            // Add to pivot dictionary
+            if (!pivotDict.ContainsKey(solutionLabel))
+            {
+                pivotDict[solutionLabel] = new Dictionary<string, decimal?>();
+            }
+            pivotDict[solutionLabel][elementName] = corrCon;
+        }
+
+        // Apply filters
+        var filteredLabels = allLabels.AsEnumerable();
+
+        if (request.SelectedSolutionLabels?.Any() == true)
+        {
+            filteredLabels = filteredLabels.Where(l => request.SelectedSolutionLabels.Contains(l));
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.SearchText))
+        {
+            var search = request.SearchText.ToLower();
+            filteredLabels = filteredLabels.Where(l => l.ToLower().Contains(search));
+        }
+
+        var filteredList = filteredLabels.ToList();
+        var totalCount = filteredList.Count;
+
+        // Pagination
+        var pagedLabels = filteredList
+            .Skip((request.Page - 1) * request.PageSize)
+            .Take(request.PageSize)
+            .ToList();
+
+        // Build columns list
+        var columns = allElements.OrderBy(e => e).ToList();
+        if (request.SelectedElements?.Any() == true)
+        {
+            columns = columns.Where(c =>
+                request.SelectedElements.Any(e => c.Contains(e, StringComparison.OrdinalIgnoreCase))).ToList();
+        }
+
+        // Build rows
+        int index = 0;
+        var rows = new List<PivotRowDto>();
+        foreach (var label in pagedLabels)
+        {
+            var values = pivotDict.TryGetValue(label, out var v) ? v : new Dictionary<string, decimal?>();
+            var roundedValues = RoundValues(values, request.DecimalPlaces);
+            rows.Add(new PivotRowDto(label, roundedValues, index++));
+        }
+
+        // Calculate stats
+        var allData = filteredList.Select(l => (l, pivotDict.TryGetValue(l, out var v) ? v : new Dictionary<string, decimal?>(), 0)).ToList();
+        var columnStats = CalculateColumnStats(allData, columns);
+
+        return Result<PivotResultDto>.Success(new PivotResultDto(
+            columns,
+            rows,
+            totalCount,
+            request.Page,
+            request.PageSize,
+            new PivotMetadataDto(
+                allLabels.OrderBy(l => l).ToList(),
+                allElements.OrderBy(e => e).ToList(),
+                columnStats
+            )
+        ));
+    }
+
+    /// <summary>
+    /// Pivot table for tabular format (columns are already elements)
+    /// </summary>
+    private async Task<Result<PivotResultDto>> GetPivotTableTabularFormatAsync(Project project, PivotRequest request)
+    {
+        var pivotData = new List<(string SolutionLabel, Dictionary<string, decimal?> Values, int Index)>();
+        var allElements = new HashSet<string>();
+
+        int index = 0;
+        foreach (var rawRow in project.RawDataRows.OrderBy(r => r.DataId))
+        {
+            var rowData = ParseRowData(rawRow);
+            if (rowData == null) continue;
+
+            var solutionLabel = GetSolutionLabel(rawRow, rowData);
+            if (string.IsNullOrWhiteSpace(solutionLabel)) continue;
+
+            var values = new Dictionary<string, decimal?>();
+
+            foreach (var kvp in rowData)
+            {
+                if (IsMetadataColumn(kvp.Key)) continue;
+
+                var element = ExtractElementName(kvp.Key);
+                if (string.IsNullOrEmpty(element)) continue;
+
+                allElements.Add(kvp.Key);
+
+                decimal? value = ParseDecimalValue(kvp.Value);
+
+                if (request.UseOxide && value.HasValue)
+                {
+                    var elementSymbol = ExtractElementSymbol(element);
+                    if (OxideFactors.Factors.TryGetValue(elementSymbol, out var oxide))
+                    {
+                        value = value.Value * oxide.Factor;
+                    }
+                }
+
+                values[kvp.Key] = value;
+            }
+
+            pivotData.Add((solutionLabel, values, index++));
+        }
+
+        var filteredData = pivotData.AsEnumerable();
+
+        if (request.SelectedSolutionLabels?.Any() == true)
+        {
+            filteredData = filteredData.Where(d =>
+                request.SelectedSolutionLabels.Contains(d.SolutionLabel));
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.SearchText))
+        {
+            var search = request.SearchText.ToLower();
+            filteredData = filteredData.Where(d =>
+                d.SolutionLabel.ToLower().Contains(search) ||
+                d.Values.Any(v => v.Value?.ToString().Contains(search) == true));
+        }
+
+        if (request.NumberFilters?.Any() == true)
+        {
+            foreach (var filter in request.NumberFilters)
+            {
+                var column = filter.Key;
+                var numberFilter = filter.Value;
+
+                filteredData = filteredData.Where(d =>
+                {
+                    if (!d.Values.TryGetValue(column, out var val) || !val.HasValue)
+                        return true;
+
+                    if (numberFilter.Min.HasValue && val.Value < numberFilter.Min.Value)
+                        return false;
+                    if (numberFilter.Max.HasValue && val.Value > numberFilter.Max.Value)
+                        return false;
+
+                    return true;
+                });
+            }
+        }
+
+        var filteredList = filteredData.ToList();
+        var totalCount = filteredList.Count;
+
+        var pagedData = filteredList
+            .Skip((request.Page - 1) * request.PageSize)
+            .Take(request.PageSize)
+            .ToList();
+
+        var columns = allElements.OrderBy(e => e).ToList();
+        if (request.SelectedElements?.Any() == true)
+        {
+            columns = columns.Where(c =>
+                request.SelectedElements.Any(e => c.StartsWith(e))).ToList();
+        }
+
+        var rows = pagedData.Select(d => new PivotRowDto(
+            d.SolutionLabel,
+            RoundValues(d.Values, request.DecimalPlaces),
+            d.Index
+        )).ToList();
+
+        var columnStats = CalculateColumnStats(filteredList, columns);
+
+        var metadata = new PivotMetadataDto(
+            pivotData.Select(d => d.SolutionLabel).Distinct().OrderBy(s => s).ToList(),
+            allElements.OrderBy(e => e).ToList(),
+            columnStats
+        );
+
+        return Result<PivotResultDto>.Success(new PivotResultDto(
+            columns,
+            rows,
+            totalCount,
+            request.Page,
+            request.PageSize,
+            metadata
+        ));
     }
 
     #endregion
@@ -479,13 +606,26 @@ public class PivotService : IPivotService
                 var rowData = ParseRowData(rawRow);
                 if (rowData == null) continue;
 
-                foreach (var key in rowData.Keys)
+                // Check if this is ICP format (has Element column)
+                if (rowData.TryGetValue("Element", out var elementVal) && elementVal != null)
                 {
-                    if (!IsMetadataColumn(key))
+                    var elementName = elementVal.ToString();
+                    if (!string.IsNullOrWhiteSpace(elementName))
                     {
-                        var element = ExtractElementName(key);
-                        if (!string.IsNullOrEmpty(element))
-                            elements.Add(key);
+                        elements.Add(elementName);
+                    }
+                }
+                else
+                {
+                    // Tabular format - get non-metadata columns
+                    foreach (var key in rowData.Keys)
+                    {
+                        if (!IsMetadataColumn(key))
+                        {
+                            var element = ExtractElementName(key);
+                            if (!string.IsNullOrEmpty(element))
+                                elements.Add(key);
+                        }
                     }
                 }
             }

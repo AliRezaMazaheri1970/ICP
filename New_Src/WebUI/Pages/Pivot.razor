@@ -44,78 +44,95 @@
 
     @if (_projectId == null)
     {
-        <MudAlert Severity="Severity.Info">
-            Please select a project from the <MudLink Href="/projects">Projects</MudLink> page.
-        </MudAlert>
+        <MudPaper Elevation="2" Class="pa-8 d-flex flex-column align-center justify-center" Style="min-height: 400px;">
+            <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Size="Size.Large" Color="Color.Primary" Class="mb-4" Style="font-size: 64px; opacity: 0.5;" />
+            <MudText Typo="Typo.h5" Class="mb-2">No Project Selected</MudText>
+            <MudText Typo="Typo.body1" Class="mud-text-secondary mb-4">Please select a project to view pivot table data</MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" Href="/projects">
+                Select Project
+            </MudButton>
+        </MudPaper>
     }
     else
     {
-        @* Filters Panel *@
-        <MudExpansionPanels Class="mb-4">
-            <MudExpansionPanel Text="Filters & Options" Expanded="true">
-                <MudGrid>
-                    <MudItem xs="12" md="4">
-                        <MudTextField @bind-Value="_searchText"
-                                      Label="Search"
-                                      Placeholder="Search in data..."
-                                      Variant="Variant.Outlined"
-                                      Adornment="Adornment.Start"
-                                      AdornmentIcon="@Icons.Material.Filled.Search"
-                                      Immediate="true"
-                                      DebounceInterval="500"
-                                      OnDebounceIntervalElapsed="LoadData" />
-                    </MudItem>
-                    <MudItem xs="12" md="3">
-                        <MudSelect T="string" 
-                                   Label="Elements" 
-                                   MultiSelection="true"
-                                   @bind-SelectedValues="_selectedElements"
-                                   Variant="Variant.Outlined"
-                                   Dense="true">
-                            @foreach (var element in _allElements)
-                            {
-                                <MudSelectItem Value="@element">@element</MudSelectItem>
-                            }
-                        </MudSelect>
-                    </MudItem>
-                    <MudItem xs="6" md="2">
-                        <MudNumericField @bind-Value="_decimalPlaces"
-                                         Label="Decimals"
-                                         Variant="Variant.Outlined"
-                                         Min="0"
-                                         Max="6" />
-                    </MudItem>
-                    <MudItem xs="6" md="2">
-                        <MudCheckBox @bind-Value="_useOxide"
-                                     Label="Use Oxide"
-                                     Color="Color.Primary" />
-                    </MudItem>
-                    <MudItem xs="12" md="1">
-                        <MudButton Variant="Variant.Filled"
-                                   Color="Color.Primary"
-                                   FullWidth="true"
-                                   OnClick="LoadData"
-                                   Disabled="_isLoading">
-                            Apply
-                        </MudButton>
-                    </MudItem>
-                </MudGrid>
-            </MudExpansionPanel>
-        </MudExpansionPanels>
+        @* Filters Panel - Only show when not initial loading *@
+        @if (!_isLoading || _pivotData != null)
+        {
+            <MudExpansionPanels Class="mb-4">
+                <MudExpansionPanel Text="Filters & Options" Expanded="true">
+                    <MudGrid>
+                        <MudItem xs="12" md="4">
+                            <MudTextField @bind-Value="_searchText"
+                                          Label="Search"
+                                          Placeholder="Search in data..."
+                                          Variant="Variant.Outlined"
+                                          Adornment="Adornment.Start"
+                                          AdornmentIcon="@Icons.Material.Filled.Search"
+                                          Immediate="true"
+                                          DebounceInterval="500"
+                                          Disabled="_isLoading"
+                                          OnDebounceIntervalElapsed="LoadData" />
+                        </MudItem>
+                        <MudItem xs="12" md="3">
+                            <MudSelect T="string" 
+                                       Label="@($"Elements ({_allElements.Count})")" 
+                                       MultiSelection="true"
+                                       @bind-SelectedValues="_selectedElements"
+                                       Variant="Variant.Outlined"
+                                       Dense="true"
+                                       Disabled="_isLoading"
+                                       AnchorOrigin="Origin.BottomCenter"
+                                       TransformOrigin="Origin.TopCenter">
+                                @foreach (var element in _allElements)
+                                {
+                                    <MudSelectItem Value="@element">@element</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="6" md="2">
+                            <MudNumericField @bind-Value="_decimalPlaces"
+                                             Label="Decimals"
+                                             Variant="Variant.Outlined"
+                                             Disabled="_isLoading"
+                                             Min="0"
+                                             Max="6" />
+                        </MudItem>
+                        <MudItem xs="6" md="2">
+                            <MudCheckBox @bind-Value="_useOxide"
+                                         Label="Use Oxide"
+                                         Disabled="_isLoading"
+                                         Color="Color.Primary" />
+                        </MudItem>
+                        <MudItem xs="12" md="1">
+                            <MudButton Variant="Variant.Filled"
+                                       Color="Color.Primary"
+                                       FullWidth="true"
+                                       OnClick="LoadData"
+                                       Disabled="_isLoading">
+                                Apply
+                            </MudButton>
+                        </MudItem>
+                    </MudGrid>
+                </MudExpansionPanel>
+            </MudExpansionPanels>
+        }
 
         @* Data Table *@
         <MudPaper Elevation="2" Class="pa-0">
             @if (_isLoading)
             {
-                <div class="d-flex justify-center align-center py-8">
-                    <MudProgressCircular Indeterminate="true" Color="Color.Primary" Size="Size.Large" />
+                <div class="d-flex flex-column justify-center align-center py-8" style="min-height: 300px;">
+                    <MudProgressCircular Indeterminate="true" Color="Color.Primary" Size="Size.Large" Class="mb-4" />
+                    <MudText Typo="Typo.body1" Class="mud-text-secondary">Loading data...</MudText>
                 </div>
             }
             else if (_pivotData == null || !_pivotData.Rows.Any())
             {
-                <MudAlert Severity="Severity.Warning" Class="ma-4">
-                    No data found. Try adjusting your filters.
-                </MudAlert>
+                <div class="d-flex flex-column justify-center align-center py-8" style="min-height: 300px;">
+                    <MudIcon Icon="@Icons.Material.Filled.SearchOff" Size="Size.Large" Color="Color.Default" Class="mb-4" Style="font-size: 48px; opacity: 0.3;" />
+                    <MudText Typo="Typo.h6" Class="mb-2">No Data Found</MudText>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">Try adjusting your filters or select different elements</MudText>
+                </div>
             }
             else
             {
@@ -198,7 +215,7 @@
     private string _searchText = "";
     private int _decimalPlaces = 2;
     private bool _useOxide = false;
-    private bool _isLoading = false;
+    private bool _isLoading = true;  // Start with loading state
     private int _currentPage = 1;
     private int _pageSize = 100;
     private int _totalPages = 1;
@@ -209,15 +226,21 @@
         
         if (_projectId.HasValue)
         {
+            _isLoading = true;
+            StateHasChanged();
+
             var projectResult = await ProjectService.GetProjectAsync(_projectId.Value);
             if (projectResult.Succeeded && projectResult.Data != null)
             {
                 _projectName = projectResult.Data.ProjectName;
-                ProjectService.SetCurrentProject(projectResult.Data);
             }
 
             await LoadElements();
             await LoadData();
+        }
+        else
+        {
+            _isLoading = false;
         }
     }
 
@@ -309,6 +332,6 @@
     private async Task DownloadFile(byte[] data, string fileName, string contentType)
     {
         var base64 = Convert.ToBase64String(data);
-        await JS.InvokeVoidAsync("downloadFile", fileName, base64, contentType);
+        await JS.InvokeVoidAsync("downloadFile", fileName, contentType, base64);
     }
 }

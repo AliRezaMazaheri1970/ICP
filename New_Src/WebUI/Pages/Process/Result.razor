@@ -14,6 +14,10 @@
             <div>
                 <MudText Typo="Typo.h4" Class="fw-bold">Final Results</MudText>
                 <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    @if (!string.IsNullOrEmpty(_projectName))
+                    {
+                        <span>Project: <strong>@_projectName</strong> | </span>
+                    }
                     View and export processed data with all corrections applied
                 </MudText>
             </div>
@@ -242,12 +246,18 @@
     private int _rmSamples = 0;
     private int _badSamples = 0;
     private decimal _passRate = 0;
+    private string? _projectName;
 
     protected override async Task OnInitializedAsync()
     {
         _projectId = projectId ?? ProjectService.CurrentProjectId;
         if (_projectId.HasValue)
         {
+            var projectResult = await ProjectService.GetProjectAsync(_projectId.Value);
+            if (projectResult.Succeeded && projectResult.Data != null)
+            {
+                _projectName = projectResult.Data.ProjectName;
+            }
             await LoadData();
         }
     }

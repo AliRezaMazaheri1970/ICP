@@ -28,6 +28,17 @@ public interface ICorrectionService
     Task<Result<CorrectionResultDto>> ApplyVolumeCorrectionAsync(VolumeCorrectionRequest request);
 
     /// <summary>
+    /// Apply DF (Dilution Factor) correction to selected samples
+    /// Formula: NewCorrCon = (NewDf / OldDf) * OldCorrCon
+    /// </summary>
+    Task<Result<CorrectionResultDto>> ApplyDfCorrectionAsync(DfCorrectionRequest request);
+
+    /// <summary>
+    /// Get all samples with their DF values
+    /// </summary>
+    Task<Result<List<DfSampleDto>>> GetDfSamplesAsync(Guid projectId);
+
+    /// <summary>
     /// Apply blank and scale optimization to project data
     /// Formula: CorrectedValue = (OriginalValue + Blank) * Scale
     /// </summary>
@@ -38,6 +49,11 @@ public interface ICorrectionService
     /// Based on Python empty_check.py logic
     /// </summary>
     Task<Result<List<EmptyRowDto>>> FindEmptyRowsAsync(FindEmptyRowsRequest request);
+
+    /// <summary>
+    /// Delete rows by solution labels
+    /// </summary>
+    Task<Result<int>> DeleteRowsAsync(DeleteRowsRequest request);
 
     /// <summary>
     /// Undo last correction for a project

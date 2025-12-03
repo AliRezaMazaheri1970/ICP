@@ -13,6 +13,10 @@
             <div>
                 <MudText Typo="Typo.h4" Class="fw-bold">Weight Check</MudText>
                 <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    @if (!string.IsNullOrEmpty(_projectName))
+                    {
+                        <span>Project: <strong>@_projectName</strong> | </span>
+                    }
                     Find and correct samples with abnormal weights
                 </MudText>
             </div>
@@ -191,17 +195,26 @@
     public Guid? projectId { get; set; }
 
     private Guid? _projectId;
-    private decimal _weightMin = 0.09m;
-    private decimal _weightMax = 0.11m;
-    private decimal _newWeight = 0.10m;
+    private string? _projectName;
+    private decimal _weightMin = 0.190m;
+    private decimal _weightMax = 0.210m;
+    private decimal _newWeight = 0.200m;
     private List<BadSampleDto>? _badSamples;
     private HashSet<BadSampleDto> _selectedSamples = new();
     private bool _isLoading = false;
     private bool _isApplying = false;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         _projectId = projectId ?? ProjectService.CurrentProjectId;
+        if (_projectId.HasValue)
+        {
+            var result = await ProjectService.GetProjectAsync(_projectId.Value);
+            if (result.Succeeded && result.Data != null)
+            {
+                _projectName = result.Data.ProjectName;
+            }
+        }
     }
 
     private async Task FindBadWeights()

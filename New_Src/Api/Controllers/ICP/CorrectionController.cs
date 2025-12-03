@@ -92,6 +92,26 @@ public class CorrectionController : ControllerBase
     }
 
     /// <summary>
+    /// Apply DF (Dilution Factor) correction to selected samples
+    /// POST /api/correction/df
+    /// </summary>
+    [HttpPost("df")]
+    public async Task<ActionResult> ApplyDfCorrection([FromBody] DfCorrectionRequest request)
+    {
+        if (request.ProjectId == Guid.Empty)
+            return BadRequest(new { succeeded = false, messages = new[] { "ProjectId is required" } });
+
+        if (request.SolutionLabels == null || !request.SolutionLabels.Any())
+            return BadRequest(new { succeeded = false, messages = new[] { "At least one solution label is required" } });
+
+        var result = await _correctionService.ApplyDfCorrectionAsync(request);
+        if (!result.Succeeded)
+            return BadRequest(new { succeeded = false, messages = result.Messages });
+
+        return Ok(new { succeeded = true, data = result.Data });
+    }
+
+    /// <summary>
     /// Apply blank and scale optimization results to project data
     /// POST /api/correction/apply-optimization
     /// </summary>
@@ -106,6 +126,23 @@ public class CorrectionController : ControllerBase
             return BadRequest(new { succeeded = false, messages = new[] { "At least one element setting is required" } });
 
         var result = await _correctionService.ApplyOptimizationAsync(request);
+        if (!result.Succeeded)
+            return BadRequest(new { succeeded = false, messages = result.Messages });
+
+        return Ok(new { succeeded = true, data = result.Data });
+    }
+
+    /// <summary>
+    /// Get all samples with their DF values
+    /// GET /api/correction/{projectId}/df-samples
+    /// </summary>
+    [HttpGet("{projectId:guid}/df-samples")]
+    public async Task<ActionResult> GetDfSamples([FromRoute] Guid projectId)
+    {
+        if (projectId == Guid.Empty)
+            return BadRequest(new { succeeded = false, messages = new[] { "ProjectId is required" } });
+
+        var result = await _correctionService.GetDfSamplesAsync(projectId);
         if (!result.Succeeded)
             return BadRequest(new { succeeded = false, messages = result.Messages });
 
@@ -142,6 +179,26 @@ public class CorrectionController : ControllerBase
 
         var result = await _correctionService.FindEmptyRowsAsync(request);
 
+        if (!result.Succeeded)
+            return BadRequest(new { succeeded = false, messages = result.Messages });
+
+        return Ok(new { succeeded = true, data = result.Data });
+    }
+
+    /// <summary>
+    /// Delete rows by solution labels
+    /// POST /api/correction/delete-rows
+    /// </summary>
+    [HttpPost("delete-rows")]
+    public async Task<ActionResult> DeleteRows([FromBody] DeleteRowsRequest request)
+    {
+        if (request.ProjectId == Guid.Empty)
+            return BadRequest(new { succeeded = false, messages = new[] { "ProjectId is required" } });
+
+        if (request.SolutionLabels == null || !request.SolutionLabels.Any())
+            return BadRequest(new { succeeded = false, messages = new[] { "At least one solution label is required" } });
+
+        var result = await _correctionService.DeleteRowsAsync(request);
         if (!result.Succeeded)
             return BadRequest(new { succeeded = false, messages = result.Messages });
 

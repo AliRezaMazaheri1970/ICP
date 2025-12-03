@@ -13,6 +13,10 @@
             <div>
                 <MudText Typo="Typo.h4" Class="fw-bold">Dilution Factor Check</MudText>
                 <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    @if (!string.IsNullOrEmpty(_projectName))
+                    {
+                        <span>Project: <strong>@_projectName</strong> | </span>
+                    }
                     Detect and correct samples with abnormal dilution factors
                 </MudText>
             </div>
@@ -231,8 +235,9 @@
     public Guid? projectId { get; set; }
 
     private Guid? _projectId;
-    private decimal _expectedDf = 100m;
-    private decimal _tolerancePercent = 5m;
+    private string? _projectName;
+    private decimal _expectedDf = 1m;
+    private decimal _tolerancePercent = 0m;  // Python uses exact match
     private bool _autoCorrect = false;
     private bool _isLoading = false;
     private int _totalSamples = 0;
@@ -245,6 +250,11 @@
         _projectId = projectId ?? ProjectService.CurrentProjectId;
         if (_projectId.HasValue)
         {
+            var projectResult = await ProjectService.GetProjectAsync(_projectId.Value);
+            if (projectResult.Succeeded && projectResult.Data != null)
+            {
+                _projectName = projectResult.Data.ProjectName;
+            }
             await LoadSamples();
         }
     }
@@ -253,36 +263,24 @@
     {
         if (_projectId == null) return;
 
-        var request = new PivotRequest { ProjectId = _projectId.Value, PageSize = 10000 };
-        var result = await PivotService.GetPivotTableAsync(request);
+        // Use new DF samples API that reads directly from RawDataRows
+        var result = await CorrectionService.GetDfSamplesAsync(_projectId.Value);
         if (result.Succeeded && result.Data != null)
         {
             _allSamples.Clear();
             var dfValues = new Dictionary<decimal, int>();
-            int rowNum = 1;
 
-            foreach (var row in result.Data.Rows)
+            foreach (var sample in result.Data)
             {
-                decimal df = 100m;
-                // Try to get DF from Values dictionary
-                if (row.Values.TryGetValue("DF", out var dfValue) && dfValue.HasValue)
-                {
-                    df = dfValue.Value;
-                }
-                else if (row.Values.TryGetValue("DilutionFactor", out var df2Value) && df2Value.HasValue)
-                {
-                    df = df2Value.Value;
-                }
-
                 _allSamples.Add(new DfSample
                 {
-                    RowNumber = rowNum++,
-                    SolutionLabel = row.SolutionLabel,
-                    CurrentDf = df,
+                    RowNumber = sample.RowNumber,
+                    SolutionLabel = sample.SolutionLabel,
+                    CurrentDf = sample.CurrentDf,
                     ExpectedDf = _expectedDf
                 });
 
-                var roundedDf = Math.Round(df);
+                var roundedDf = Math.Round(sample.CurrentDf);
                 if (!dfValues.ContainsKey(roundedDf))
                     dfValues[roundedDf] = 0;
                 dfValues[roundedDf]++;
@@ -346,21 +344,24 @@
 
         try
         {
-            var correctionRequest = new
-            {
-                ProjectId = _projectId.Value,
-                CorrectionType = "DF",
-                RowNumbers = _badDfSamples.Select(s => s.RowNumber).ToList(),
-                TargetValue = _expectedDf
-            };
+            var solutionLabels = _badDfSamples.Select(s => s.SolutionLabel).ToList();
+            var result = await CorrectionService.ApplyDfCorrectionAsync(_projectId.Value, solutionLabels, _expectedDf);
 
-            // Apply correction via API
-            foreach (var sample in _badDfSamples)
+            if (result.Succeeded && result.Data != null)
             {
-                sample.IsCorrected = true;
+                Snackbar.Add($"Corrected {result.Data.CorrectedRows} samples to DF = {_expectedDf}", Severity.Success);
+                
+                // Reload samples to show updated state
+                await LoadSamples();
             }
-
-            Snackbar.Add($"Corrected {_badDfSamples.Count} samples", Severity.Success);
+            else
+            {
+                Snackbar.Add(result.Message ?? "Failed to apply correction", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
         }
         finally
         {

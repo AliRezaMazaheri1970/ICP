@@ -239,7 +239,7 @@ public class PivotService
         {
             SetAuthHeader();
 
-            var response = await _httpClient.PostAsJsonAsync("pivot/export/csv", request);
+            var response = await _httpClient.PostAsJsonAsync("pivot/export", request);
 
             if (response.IsSuccessStatusCode)
             {

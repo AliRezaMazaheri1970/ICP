@@ -56,13 +56,31 @@ public class CorrectionService : ICorrectionService
                     if (!root.TryGetProperty("Act Wgt", out var weightElement))
                         continue;
 
-                    var weight = weightElement.GetDecimal();
+                    // Handle null values
+                    if (weightElement.ValueKind == JsonValueKind.Null)
+                        continue;
+
+                    decimal weight;
+                    if (weightElement.ValueKind == JsonValueKind.Number)
+                        weight = weightElement.GetDecimal();
+                    else if (weightElement.ValueKind == JsonValueKind.String && 
+                             decimal.TryParse(weightElement.GetString(), out var parsedWeight))
+                        weight = parsedWeight;
+                    else
+                        continue;
 
                     if (weight < request.WeightMin || weight > request.WeightMax)
                     {
-                        var corrCon = root.TryGetProperty("Corr Con", out var corrConElement)
-                            ? corrConElement.GetDecimal()
-                            : 0m;
+                        decimal corrCon = 0m;
+                        if (root.TryGetProperty("Corr Con", out var corrConElement) && 
+                            corrConElement.ValueKind != JsonValueKind.Null)
+                        {
+                            if (corrConElement.ValueKind == JsonValueKind.Number)
+                                corrCon = corrConElement.GetDecimal();
+                            else if (corrConElement.ValueKind == JsonValueKind.String &&
+                                     decimal.TryParse(corrConElement.GetString(), out var parsedCorrCon))
+                                corrCon = parsedCorrCon;
+                        }
 
                         var solutionLabel = root.TryGetProperty("Solution Label", out var labelElement)
                             ? labelElement.GetString() ?? row.SampleId ?? "Unknown"
@@ -123,13 +141,31 @@ public class CorrectionService : ICorrectionService
                     if (!root.TryGetProperty("Act Vol", out var volumeElement))
                         continue;
 
-                    var volume = volumeElement.GetDecimal();
+                    // Handle null values
+                    if (volumeElement.ValueKind == JsonValueKind.Null)
+                        continue;
+
+                    decimal volume;
+                    if (volumeElement.ValueKind == JsonValueKind.Number)
+                        volume = volumeElement.GetDecimal();
+                    else if (volumeElement.ValueKind == JsonValueKind.String && 
+                             decimal.TryParse(volumeElement.GetString(), out var parsedVolume))
+                        volume = parsedVolume;
+                    else
+                        continue;
 
                     if (volume != request.ExpectedVolume)
                     {
-                        var corrCon = root.TryGetProperty("Corr Con", out var corrConElement)
-                            ? corrConElement.GetDecimal()
-                            : 0m;
+                        decimal corrCon = 0m;
+                        if (root.TryGetProperty("Corr Con", out var corrConElement) && 
+                            corrConElement.ValueKind != JsonValueKind.Null)
+                        {
+                            if (corrConElement.ValueKind == JsonValueKind.Number)
+                                corrCon = corrConElement.GetDecimal();
+                            else if (corrConElement.ValueKind == JsonValueKind.String &&
+                                     decimal.TryParse(corrConElement.GetString(), out var parsedCorrCon))
+                                corrCon = parsedCorrCon;
+                        }
 
                         var solutionLabel = root.TryGetProperty("Solution Label", out var labelElement)
                             ? labelElement.GetString() ?? row.SampleId ?? "Unknown"
@@ -396,12 +432,31 @@ public class CorrectionService : ICorrectionService
                     if (!root.TryGetProperty("Act Wgt", out var weightElement))
                         continue;
 
-                    var oldWeight = weightElement.GetDecimal();
+                    // Handle null values
+                    if (weightElement.ValueKind == JsonValueKind.Null)
+                        continue;
+
+                    decimal oldWeight;
+                    if (weightElement.ValueKind == JsonValueKind.Number)
+                        oldWeight = weightElement.GetDecimal();
+                    else if (weightElement.ValueKind == JsonValueKind.String &&
+                             decimal.TryParse(weightElement.GetString(), out var parsedWeight))
+                        oldWeight = parsedWeight;
+                    else
+                        continue;
+
                     if (oldWeight == 0) continue;
 
-                    var oldCorrCon = root.TryGetProperty("Corr Con", out var corrConElement)
-                        ? corrConElement.GetDecimal()
-                        : 0m;
+                    decimal oldCorrCon = 0m;
+                    if (root.TryGetProperty("Corr Con", out var corrConElement) &&
+                        corrConElement.ValueKind != JsonValueKind.Null)
+                    {
+                        if (corrConElement.ValueKind == JsonValueKind.Number)
+                            oldCorrCon = corrConElement.GetDecimal();
+                        else if (corrConElement.ValueKind == JsonValueKind.String &&
+                                 decimal.TryParse(corrConElement.GetString(), out var parsedCorrCon))
+                            oldCorrCon = parsedCorrCon;
+                    }
 
                     var newCorrCon = (request.NewWeight / oldWeight) * oldCorrCon;
 
@@ -518,12 +573,31 @@ public class CorrectionService : ICorrectionService
                     if (!root.TryGetProperty("Act Vol", out var volumeElement))
                         continue;
 
-                    var oldVolume = volumeElement.GetDecimal();
+                    // Handle null values
+                    if (volumeElement.ValueKind == JsonValueKind.Null)
+                        continue;
+
+                    decimal oldVolume;
+                    if (volumeElement.ValueKind == JsonValueKind.Number)
+                        oldVolume = volumeElement.GetDecimal();
+                    else if (volumeElement.ValueKind == JsonValueKind.String &&
+                             decimal.TryParse(volumeElement.GetString(), out var parsedVolume))
+                        oldVolume = parsedVolume;
+                    else
+                        continue;
+
                     if (oldVolume == 0) continue;
 
-                    var oldCorrCon = root.TryGetProperty("Corr Con", out var corrConElement)
-                        ? corrConElement.GetDecimal()
-                        : 0m;
+                    decimal oldCorrCon = 0m;
+                    if (root.TryGetProperty("Corr Con", out var corrConElement) &&
+                        corrConElement.ValueKind != JsonValueKind.Null)
+                    {
+                        if (corrConElement.ValueKind == JsonValueKind.Number)
+                            oldCorrCon = corrConElement.GetDecimal();
+                        else if (corrConElement.ValueKind == JsonValueKind.String &&
+                                 decimal.TryParse(corrConElement.GetString(), out var parsedCorrCon))
+                            oldCorrCon = parsedCorrCon;
+                    }
 
                     var newCorrCon = (request.NewVolume / oldVolume) * oldCorrCon;
 
@@ -596,6 +670,219 @@ public class CorrectionService : ICorrectionService
         {
             _logger.LogError(ex, "Failed to apply volume correction for project {ProjectId}", request.ProjectId);
             return Result<CorrectionResultDto>.Fail($"Failed to apply volume correction: {ex.Message}");
+        }
+    }
+
+    public async Task<Result<List<DfSampleDto>>> GetDfSamplesAsync(Guid projectId)
+    {
+        try
+        {
+            var rawRows = await _db.RawDataRows
+                .AsNoTracking()
+                .Where(r => r.ProjectId == projectId)
+                .OrderBy(r => r.DataId)
+                .ToListAsync();
+
+            if (!rawRows.Any())
+                return Result<List<DfSampleDto>>.Fail("No data found for project");
+
+            var samples = new List<DfSampleDto>();
+            int rowNum = 1;
+
+            foreach (var row in rawRows)
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(row.ColumnData);
+                    var root = doc.RootElement;
+
+                    var solutionLabel = root.TryGetProperty("Solution Label", out var labelElement)
+                        ? labelElement.GetString() ?? row.SampleId ?? $"Row-{rowNum}"
+                        : row.SampleId ?? $"Row-{rowNum}";
+
+                    decimal df = 1m; // Default
+                    if (root.TryGetProperty("DF", out var dfElement) && dfElement.ValueKind != JsonValueKind.Null)
+                    {
+                        if (dfElement.ValueKind == JsonValueKind.Number)
+                            df = dfElement.GetDecimal();
+                        else if (dfElement.ValueKind == JsonValueKind.String &&
+                                 decimal.TryParse(dfElement.GetString(), out var parsedDf))
+                            df = parsedDf;
+                    }
+
+                    string? sampleType = null;
+                    if (root.TryGetProperty("Type", out var typeElement) && typeElement.ValueKind == JsonValueKind.String)
+                    {
+                        sampleType = typeElement.GetString();
+                    }
+
+                    samples.Add(new DfSampleDto(rowNum, solutionLabel, df, sampleType));
+                    rowNum++;
+                }
+                catch (JsonException)
+                {
+                    rowNum++;
+                    continue;
+                }
+            }
+
+            return Result<List<DfSampleDto>>.Success(samples);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get DF samples for project {ProjectId}", projectId);
+            return Result<List<DfSampleDto>>.Fail($"Failed: {ex.Message}");
+        }
+    }
+
+    public async Task<Result<CorrectionResultDto>> ApplyDfCorrectionAsync(DfCorrectionRequest request)
+    {
+        try
+        {
+            if (request.NewDf <= 0)
+                return Result<CorrectionResultDto>.Fail("New DF must be positive");
+
+            _logger.LogInformation("ApplyDfCorrectionAsync called with ProjectId={ProjectId}, NewDf={NewDf}, SolutionLabels count={Count}",
+                request.ProjectId, request.NewDf, request.SolutionLabels?.Count ?? 0);
+
+            var rawRows = await _db.RawDataRows
+                .Where(r => r.ProjectId == request.ProjectId)
+                .ToListAsync();
+
+            if (!rawRows.Any())
+                return Result<CorrectionResultDto>.Fail("No data found for project");
+
+            _logger.LogInformation("Found {Count} raw rows for project", rawRows.Count);
+
+            await SaveUndoStateAsync(request.ProjectId, "DfCorrection");
+
+            var correctedSamples = new List<CorrectedSampleInfo>();
+            var changeLogEntries = new List<(string? SolutionLabel, string? Element, string? OldValue, string? NewValue)>();
+            var correctedRows = 0;
+            var skippedNoLabel = 0;
+            var skippedNoDf = 0;
+
+            foreach (var row in rawRows)
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(row.ColumnData);
+                    var root = doc.RootElement;
+
+                    var solutionLabel = root.TryGetProperty("Solution Label", out var labelElement)
+                        ? labelElement.GetString() ?? row.SampleId
+                        : row.SampleId;
+
+                    if (solutionLabel == null || request.SolutionLabels == null || !request.SolutionLabels.Contains(solutionLabel))
+                    {
+                        skippedNoLabel++;
+                        continue;
+                    }
+
+                    if (!root.TryGetProperty("DF", out var dfElement))
+                    {
+                        skippedNoDf++;
+                        continue;
+                    }
+
+                    // Handle null values
+                    if (dfElement.ValueKind == JsonValueKind.Null)
+                        continue;
+
+                    decimal oldDf;
+                    if (dfElement.ValueKind == JsonValueKind.Number)
+                        oldDf = dfElement.GetDecimal();
+                    else if (dfElement.ValueKind == JsonValueKind.String &&
+                             decimal.TryParse(dfElement.GetString(), out var parsedDf))
+                        oldDf = parsedDf;
+                    else
+                        continue;
+
+                    if (oldDf == 0) continue;
+
+                    decimal oldCorrCon = 0m;
+                    if (root.TryGetProperty("Corr Con", out var corrConElement) &&
+                        corrConElement.ValueKind != JsonValueKind.Null)
+                    {
+                        if (corrConElement.ValueKind == JsonValueKind.Number)
+                            oldCorrCon = corrConElement.GetDecimal();
+                        else if (corrConElement.ValueKind == JsonValueKind.String &&
+                                 decimal.TryParse(corrConElement.GetString(), out var parsedCorrCon))
+                            oldCorrCon = parsedCorrCon;
+                    }
+
+                    // DF Correction formula: NewCorrCon = (NewDf / OldDf) * OldCorrCon
+                    var newCorrCon = (request.NewDf / oldDf) * oldCorrCon;
+
+                    var dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(row.ColumnData);
+                    var newDict = new Dictionary<string, object>();
+
+                    foreach (var kvp in dict!)
+                    {
+                        if (kvp.Key == "DF")
+                            newDict[kvp.Key] = request.NewDf;
+                        else if (kvp.Key == "Corr Con")
+                            newDict[kvp.Key] = newCorrCon;
+                        else
+                            newDict[kvp.Key] = GetJsonValue(kvp.Value);
+                    }
+
+                    row.ColumnData = JsonSerializer.Serialize(newDict);
+                    correctedRows++;
+
+                    if (!correctedSamples.Any(s => s.SolutionLabel == solutionLabel))
+                    {
+                        correctedSamples.Add(new CorrectedSampleInfo(
+                            solutionLabel,
+                            oldDf,
+                            request.NewDf,
+                            oldCorrCon,
+                            newCorrCon
+                        ));
+
+                        changeLogEntries.Add((solutionLabel, "DF", oldDf.ToString(), request.NewDf.ToString()));
+                        changeLogEntries.Add((solutionLabel, "Corr Con", oldCorrCon.ToString(), newCorrCon.ToString()));
+                    }
+                }
+                catch (JsonException)
+                {
+                    continue;
+                }
+            }
+
+            var project = await _db.Projects.FindAsync(request.ProjectId);
+            if (project != null)
+            {
+                project.LastModifiedAt = DateTime.UtcNow;
+            }
+
+            await _db.SaveChangesAsync();
+
+            // Log changes to ChangeLog
+            if (changeLogEntries.Any())
+            {
+                await _changeLogService.LogBatchChangesAsync(
+                    request.ProjectId,
+                    "DF",
+                    changeLogEntries,
+                    request.ChangedBy,
+                    $"DF correction: {correctedSamples.Count} samples corrected to {request.NewDf}"
+                );
+            }
+
+            _logger.LogInformation("DF correction applied: {CorrectedRows} rows, skipped {SkippedNoLabel} (no label match), {SkippedNoDf} (no DF) for project {ProjectId}",
+                correctedRows, skippedNoLabel, skippedNoDf, request.ProjectId);
+
+            return Result<CorrectionResultDto>.Success(new CorrectionResultDto(
+                rawRows.Count,
+                correctedRows,
+                correctedSamples
+            ));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to apply DF correction for project {ProjectId}", request.ProjectId);
+            return Result<CorrectionResultDto>.Fail($"Failed to apply DF correction: {ex.Message}");
         }
     }
 
@@ -693,6 +980,81 @@ public class CorrectionService : ICorrectionService
         {
             _logger.LogError(ex, "Failed to apply optimization for project {ProjectId}", request.ProjectId);
             return Result<CorrectionResultDto>.Fail($"Failed to apply optimization: {ex.Message}");
+        }
+    }
+
+    #endregion
+
+    #region Delete Rows
+
+    public async Task<Result<int>> DeleteRowsAsync(DeleteRowsRequest request)
+    {
+        try
+        {
+            _logger.LogInformation("Deleting {Count} rows from project {ProjectId}",
+                request.SolutionLabels.Count, request.ProjectId);
+
+            // Save undo state
+            await SaveUndoStateAsync(request.ProjectId, $"Delete_{request.SolutionLabels.Count}_rows");
+
+            var rawRows = await _db.RawDataRows
+                .Where(r => r.ProjectId == request.ProjectId)
+                .ToListAsync();
+
+            var rowsToDelete = new List<RawDataRow>();
+
+            foreach (var row in rawRows)
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(row.ColumnData);
+                    var root = doc.RootElement;
+
+                    string solutionLabel;
+                    if (root.TryGetProperty("Solution Label", out var labelElement) && 
+                        labelElement.ValueKind != JsonValueKind.Null)
+                    {
+                        solutionLabel = labelElement.GetString() ?? row.SampleId ?? "Unknown";
+                    }
+                    else
+                    {
+                        solutionLabel = row.SampleId ?? "Unknown";
+                    }
+
+                    if (request.SolutionLabels.Contains(solutionLabel))
+                    {
+                        rowsToDelete.Add(row);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to parse row for deletion check");
+                }
+            }
+
+            if (rowsToDelete.Any())
+            {
+                _db.RawDataRows.RemoveRange(rowsToDelete);
+                await _db.SaveChangesAsync();
+
+                // Log the deletion
+                await _changeLogService.LogChangeAsync(
+                    request.ProjectId,
+                    "DeleteRows",
+                    request.ChangedBy,
+                    details: $"Deleted {rowsToDelete.Count} rows: {string.Join(", ", request.SolutionLabels.Take(10))}{(request.SolutionLabels.Count > 10 ? "..." : "")}"
+                );
+            }
+
+            _logger.LogInformation("Deleted {Count} rows from project {ProjectId}",
+                rowsToDelete.Count, request.ProjectId);
+
+            return Result<int>.Success(rowsToDelete.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete rows for project {ProjectId}", request.ProjectId);
+            return Result<int>.Fail($"Failed to delete rows: {ex.Message}");
         }
     }
 

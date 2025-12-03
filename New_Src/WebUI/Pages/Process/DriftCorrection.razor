@@ -13,6 +13,10 @@
             <div>
                 <MudText Typo="Typo.h4" Class="fw-bold">Drift Correction</MudText>
                 <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    @if (!string.IsNullOrEmpty(_projectName))
+                    {
+                        <span>Project: <strong>@_projectName</strong> | </span>
+                    }
                     Correct instrument drift using Linear or Stepwise methods
                 </MudText>
             </div>
@@ -249,6 +253,7 @@
     public Guid? projectId { get; set; }
 
     private Guid? _projectId;
+    private string? _projectName;
     private DriftMethod _method = DriftMethod.Linear;
     private IEnumerable<string> _selectedElements = new HashSet<string>();
     private List<string> _allElements = new();
@@ -262,6 +267,11 @@
         _projectId = projectId ?? ProjectService.CurrentProjectId;
         if (_projectId.HasValue)
         {
+            var projectResult = await ProjectService.GetProjectAsync(_projectId.Value);
+            if (projectResult.Succeeded && projectResult.Data != null)
+            {
+                _projectName = projectResult.Data.ProjectName;
+            }
             await LoadElements();
         }
     }

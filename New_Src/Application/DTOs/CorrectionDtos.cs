@@ -53,6 +53,25 @@ public record VolumeCorrectionRequest(
 );
 
 /// <summary>
+/// Request to apply DF (Dilution Factor) correction
+/// </summary>
+public record DfCorrectionRequest(
+    Guid ProjectId,
+    List<string> SolutionLabels,
+    decimal NewDf,
+    string? ChangedBy = null
+);
+
+/// <summary>
+/// Request to delete rows by solution labels
+/// </summary>
+public record DeleteRowsRequest(
+    Guid ProjectId,
+    List<string> SolutionLabels,
+    string? ChangedBy = null
+);
+
+/// <summary>
 /// Request to apply optimization (Blank & Scale)
 /// </summary>
 public record ApplyOptimizationRequest(
@@ -72,6 +91,16 @@ public record ElementSettings(
 // ============================================
 // Response DTOs
 // ============================================
+
+/// <summary>
+/// DF Sample information for DF Check page
+/// </summary>
+public record DfSampleDto(
+    int RowNumber,
+    string SolutionLabel,
+    decimal CurrentDf,
+    string? SampleType
+);
 
 /// <summary>
 /// Information about a sample with bad weight or volume

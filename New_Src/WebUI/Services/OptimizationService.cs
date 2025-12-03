@@ -195,7 +195,7 @@ public class OptimizationService
             SetAuthHeader();
 
             var response = await _httpClient.GetAsync(
-                $"optimization/{projectId}/stats?minDiff={minDiff}&maxDiff={maxDiff}");
+                $"optimization/{projectId}/statistics?minDiff={minDiff}&maxDiff={maxDiff}");
             var content = await response.Content.ReadAsStringAsync();
 
             if (response.IsSuccessStatusCode)

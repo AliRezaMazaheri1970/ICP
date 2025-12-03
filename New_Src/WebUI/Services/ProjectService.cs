@@ -29,6 +29,25 @@ public class ProjectListItemDto
     public int RawRowsCount { get; set; }
 }
 
+// DTO for loaded project (from GET /api/projects/{id})
+public class ProjectInfoDto
+{
+    [JsonPropertyName("projectId")]
+    public Guid ProjectId { get; set; }
+    
+    [JsonPropertyName("projectName")]
+    public string? ProjectName { get; set; }
+    
+    [JsonPropertyName("createdAt")]
+    public DateTime CreatedAt { get; set; }
+    
+    [JsonPropertyName("lastModifiedAt")]
+    public DateTime LastModifiedAt { get; set; }
+    
+    [JsonPropertyName("owner")]
+    public string? Owner { get; set; }
+}
+
 public class ProjectDto
 {
     // From import jobs response
@@ -209,7 +228,7 @@ public class ProjectService
     /// <summary>
     /// Get a single project by ID
     /// </summary>
-    public async Task<ServiceResult<ProjectDto>> GetProjectAsync(Guid projectId)
+    public async Task<ServiceResult<ProjectInfoDto>> GetProjectAsync(Guid projectId)
     {
         try
         {
@@ -220,23 +239,23 @@ public class ProjectService
 
             if (response.IsSuccessStatusCode)
             {
-                var result = JsonSerializer.Deserialize<ApiResult<ProjectDto>>(content,
+                var result = JsonSerializer.Deserialize<ApiResult<ProjectInfoDto>>(content,
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
                 if (result?.Succeeded == true && result.Data != null)
                 {
-                    return ServiceResult<ProjectDto>.Success(result.Data);
+                    return ServiceResult<ProjectInfoDto>.Success(result.Data);
                 }
 
-                return ServiceResult<ProjectDto>.Fail(result?.Message ?? "Project not found");
+                return ServiceResult<ProjectInfoDto>.Fail(result?.Message ?? "Project not found");
             }
 
-            return ServiceResult<ProjectDto>.Fail($"Server error: {response.StatusCode}");
+            return ServiceResult<ProjectInfoDto>.Fail($"Server error: {response.StatusCode}");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error loading project {ProjectId}", projectId);
-            return ServiceResult<ProjectDto>.Fail($"Error: {ex.Message}");
+            return ServiceResult<ProjectInfoDto>.Fail($"Error: {ex.Message}");
         }
     }
 

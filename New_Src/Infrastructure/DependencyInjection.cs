@@ -1,6 +1,7 @@
 ﻿using Application.Services;
 using Infrastructure.Persistence;
 using Infrastructure.Services;
+using Infrastructure.Services.Processors;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -33,7 +34,7 @@ public static class DependencyInjection
 
         // Processing services
         services.AddScoped<IProcessingService, ProcessingService>();
-        services.AddScoped<IRowProcessor, Infrastructure.Services.Processors.ComputeStatisticsProcessor>();
+        services.AddScoped<IRowProcessor, Processors.ComputeStatisticsProcessor>();
 
         // CRM Service
         services.AddScoped<ICrmService, CrmService>();

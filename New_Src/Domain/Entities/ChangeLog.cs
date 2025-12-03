@@ -1,4 +1,4 @@
-﻿namespace Domain.Entities;
+namespace Domain.Entities;
 
 /// <summary>
 /// Audit log for tracking all changes to project data
