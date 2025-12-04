@@ -1,11 +1,12 @@
-﻿using System.Text.Json;
-using Application.DTOs;
+﻿using Application.DTOs;
 using Application.Services;
 using Domain.Entities;
 using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Shared.Wrapper;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Infrastructure.Services;
 
@@ -201,192 +202,212 @@ public class CorrectionService : ICorrectionService
     #endregion
 
     #region Find Empty Rows (Based on Python empty_check.py)
-
-    /// <summary>
-    /// Find empty/outlier rows based on element averages
-    /// Logic from Python empty_check.py:
-    /// - Calculate mean for each element column
-    /// - If ALL (or most) elements in a row are less than threshold% of their column mean,
-    ///   mark the row as "empty" or "outlier"
-    /// 
-    /// Python equivalent (empty_check.py line 500-502):
-    ///   below_threshold = df_numeric < threshold_values
-    ///   empty_rows_mask = below_threshold.all(axis=1)
-    /// </summary>
+    // ---------------------------------------------------------
+    // متد اصلی: شناسایی ردیف‌های خالی با منطق دقیق پایتون
+    // ---------------------------------------------------------
     public async Task<Result<List<EmptyRowDto>>> FindEmptyRowsAsync(FindEmptyRowsRequest request)
     {
         try
         {
+            // 1. دریافت داده‌های خام
             var rawRows = await _db.RawDataRows
                 .AsNoTracking()
                 .Where(r => r.ProjectId == request.ProjectId)
                 .ToListAsync();
 
             if (!rawRows.Any())
-                return Result<List<EmptyRowDto>>.Fail("No data found for project");
+                return Result<List<EmptyRowDto>>.Fail("هیچ داده‌ای برای این پروژه یافت نشد.");
 
-            // Step 1: Parse all rows and collect element values
-            var parsedRows = new List<(string SolutionLabel, Dictionary<string, decimal?> Values)>();
+            // ساختار: [SampleId] -> [Element] -> Value
+            var pivotedData = new Dictionary<string, Dictionary<string, decimal>>();
             var allElements = new HashSet<string>();
+
+            const decimal STD_WEIGHT = 1.0m;
+            const decimal STD_VOLUME = 10.0m;
 
             foreach (var row in rawRows)
             {
                 try
                 {
                     using var doc = JsonDocument.Parse(row.ColumnData);
-                    var root = doc.RootElement;
 
-                    // Only check "Samp" type rows
-                    if (root.TryGetProperty("Type", out var typeElement) &&
-                        typeElement.GetString() != "Samp")
-                        continue;
-
-                    var solutionLabel = root.TryGetProperty("Solution Label", out var labelElement)
-                        ? labelElement.GetString() ?? row.SampleId ?? "Unknown"
-                        : row.SampleId ?? "Unknown";
-
-                    var values = new Dictionary<string, decimal?>();
-
-                    foreach (var prop in root.EnumerateObject())
+                    // الف) نرمال‌سازی کلیدها: ساخت دیکشنری با کلیدهای تمیز (بدون فاصله و حروف بزرگ)
+                    // این بخش حیاتی است تا "Act Wgt" و "ActWgt" یکی شناخته شوند
+                    var rowData = new Dictionary<string, JsonElement>();
+                    foreach (var prop in doc.RootElement.EnumerateObject())
                     {
-                        // Skip non-element columns
-                        if (prop.Name is "Solution Label" or "Type" or "Act Wgt" or "Act Vol" or "DF")
-                            continue;
-
-                        if (prop.Value.ValueKind == JsonValueKind.Number)
-                        {
-                            values[prop.Name] = prop.Value.GetDecimal();
-                            allElements.Add(prop.Name);
-                        }
-                        else if (prop.Value.ValueKind == JsonValueKind.String &&
-                                 decimal.TryParse(prop.Value.GetString(), out var val))
-                        {
-                            values[prop.Name] = val;
-                            allElements.Add(prop.Name);
-                        }
+                        string cleanKey = NormalizeKey(prop.Name);
+                        rowData[cleanKey] = prop.Value;
                     }
 
-                    if (values.Any())
-                    {
-                        parsedRows.Add((solutionLabel, values));
-                    }
+                    // ب) استخراج شناسه نمونه و نام عنصر
+                    // اصلاح: استفاده از متغیر واسط برای رفع هشدار Null
+                    string? extractedLabel = GetValue(rowData, "SOLUTIONLABEL")?.GetString();
+                    string sampleId = !string.IsNullOrWhiteSpace(extractedLabel)
+                        ? extractedLabel
+                        : (row.SampleId ?? "Unknown");
+
+                    string? element = GetValue(rowData, "ELEMENT")?.GetString();
+                    if (string.IsNullOrWhiteSpace(element)) continue; // ردیف هدر یا متادیتا
+
+                    // ج) خواندن مقادیر عددی (با هندل کردن نال)
+                    decimal corrCon = GetDecimalSafe(rowData, "CORRCON", "SOLNCONC");
+                    decimal actWgt = GetDecimalSafe(rowData, "ACTWGT", "WEIGHT");
+                    decimal actVol = GetDecimalSafe(rowData, "ACTVOL", "VOLUME");
+                    decimal df = GetDecimalSafe(rowData, "DF", "DILUTION");
+
+                    // د) اعمال فرمول‌های اصلاح (دقیقاً مشابه پایتون)
+                    decimal finalVal = corrCon;
+
+                    // 1. اصلاح وزن
+                    if (actWgt != 0) finalVal = finalVal * (STD_WEIGHT / actWgt);
+
+                    // 2. اصلاح حجم
+                    finalVal = finalVal * (actVol / STD_VOLUME);
+
+                    // 3. اصلاح رقت
+                    if (df != 0) finalVal = finalVal * df;
+
+                    // ه) ذخیره در ساختار پیوت
+                    if (!pivotedData.ContainsKey(sampleId))
+                        pivotedData[sampleId] = new Dictionary<string, decimal>();
+
+                    pivotedData[sampleId][element] = finalVal;
+                    allElements.Add(element);
                 }
-                catch (JsonException)
+                catch (Exception ex)
                 {
-                    continue;
+                    // اصلاح: استفاده از SampleId به جای Id برای لاگ
+                    _logger.LogWarning("Error parsing row for sample {SampleId}: {Message}", row.SampleId, ex.Message);
                 }
             }
 
-            if (!parsedRows.Any())
+            if (!pivotedData.Any())
                 return Result<List<EmptyRowDto>>.Success(new List<EmptyRowDto>());
 
-            // Filter elements to check if specified
-            // Python default: {'Na', 'Ca', 'Al', 'Mg', 'K'}
-            var elementsToCheck = request.ElementsToCheck?.ToHashSet() ?? allElements;
-
-            // Step 2: Calculate mean for each element column
-            // Python equivalent: column_means = df_numeric.mean()
-            var elementMeans = new Dictionary<string, decimal>();
-            foreach (var element in elementsToCheck)
+            // 2. محاسبه میانگین قدر مطلق هر ستون (Abs Mean)
+            var columnAbsMeans = new Dictionary<string, decimal>();
+            foreach (var elem in allElements)
             {
-                var validValues = parsedRows
-                    .Where(r => r.Values.TryGetValue(element, out var v) && v.HasValue && v.Value > 0)
-                    .Select(r => r.Values[element]!.Value)
-                    .ToList();
-
-                if (validValues.Any())
+                decimal sum = 0;
+                int count = 0;
+                foreach (var sample in pivotedData.Values)
                 {
-                    elementMeans[element] = validValues.Average();
+                    if (sample.ContainsKey(elem))
+                    {
+                        sum += Math.Abs(sample[elem]);
+                        count++;
+                    }
                 }
+                columnAbsMeans[elem] = count > 0 ? sum / count : 0;
             }
 
-            if (!elementMeans.Any())
-                return Result<List<EmptyRowDto>>.Success(new List<EmptyRowDto>());
-
-            // Step 3: Check each row against the threshold
-            // Python equivalent: threshold_values = column_means * (1 - self.mean_percentage_threshold / 100)
+            // 3. بررسی و امتیازدهی به ردیف‌ها
             var emptyRows = new List<EmptyRowDto>();
-            var thresholdFactor = (100m - request.ThresholdPercent) / 100m;
 
-            foreach (var (solutionLabel, values) in parsedRows)
+            // اصلاح: استفاده از decimal برای هماهنگی با نوع داده Request
+            decimal effectivePercent = request.ThresholdPercent > 0 ? request.ThresholdPercent : 20m;
+            decimal thresholdFactor = effectivePercent / 100m;
+
+            foreach (var sampleEntry in pivotedData)
             {
-                var percentOfAverage = new Dictionary<string, decimal>();
-                var elementsBelowThreshold = 0;
-                var totalChecked = 0;
+                var sampleId = sampleEntry.Key;
+                var values = sampleEntry.Value;
 
-                foreach (var element in elementsToCheck.Where(e => elementMeans.ContainsKey(e)))
+                int totalElementsChecked = 0;
+                int belowThresholdCount = 0;
+                var details = new Dictionary<string, decimal>();
+                var rowValuesNullable = new Dictionary<string, decimal?>();
+
+                foreach (var elem in allElements)
                 {
-                    if (!values.TryGetValue(element, out var value) || !value.HasValue)
-                        continue;
+                    if (!values.ContainsKey(elem)) continue;
+                    if (!columnAbsMeans.ContainsKey(elem)) continue;
 
-                    var mean = elementMeans[element];
-                    if (mean <= 0) continue;
+                    decimal val = values[elem];
+                    decimal mean = columnAbsMeans[elem];
+                    decimal threshold = mean * thresholdFactor;
 
-                    totalChecked++;
-                    var percent = (value.Value / mean) * 100m;
-                    percentOfAverage[element] = percent;
+                    rowValuesNullable[elem] = val;
 
-                    // Check if value is below threshold of mean
-                    // Python: below_threshold = df_numeric < threshold_values
-                    if (value.Value < mean * thresholdFactor)
+                    // درصد انحراف برای نمایش
+                    details[elem] = mean != 0 ? (Math.Abs(val) / mean) * 100 : 0;
+
+                    // شرط اصلی: |Value| <= Threshold
+                    // استفاده از <= برای حالتی که هم Value و هم Mean صفر هستند (مثل Blank)
+                    if (Math.Abs(val) <= threshold)
                     {
-                        elementsBelowThreshold++;
+                        belowThresholdCount++;
                     }
+                    totalElementsChecked++;
                 }
 
-                // Determine if row is empty based on mode
-                if (totalChecked > 0)
+                if (totalElementsChecked > 0)
                 {
-                    var overallScore = (decimal)elementsBelowThreshold / totalChecked * 100m;
+                    decimal emptyScore = ((decimal)belowThresholdCount / totalElementsChecked) * 100m;
 
-                    // ✅ اصلاح شده: پشتیبانی از هر دو حالت
-                    // RequireAllElements = true  → مثل پایتون: همه عناصر باید زیر آستانه باشند
-                    // RequireAllElements = false → حالت قبلی: بیش از 50% کافیه
-                    bool isEmptyRow;
+                    bool isEmpty = request.RequireAllElements
+                        ? belowThresholdCount == totalElementsChecked
+                        : emptyScore >= 80;
 
-                    if (request.RequireAllElements)
-                    {
-                        // Python-compatible: ALL elements must be below threshold
-                        // Python equivalent (empty_check.py line 502): empty_rows_mask = below_threshold.all(axis=1)
-                        isEmptyRow = elementsBelowThreshold == totalChecked && totalChecked > 0;
-                    }
-                    else
-                    {
-                        // Flexible mode: More than 50% below threshold
-                        isEmptyRow = elementsBelowThreshold > 0 && overallScore >= 50;
-                    }
-
-                    if (isEmptyRow)
+                    if (isEmpty)
                     {
                         emptyRows.Add(new EmptyRowDto(
-                            solutionLabel,
-                            values,
-                            elementMeans.Where(e => values.ContainsKey(e.Key))
-                                .ToDictionary(e => e.Key, e => e.Value),
-                            percentOfAverage,
-                            elementsBelowThreshold,
-                            totalChecked,
-                            overallScore
+                            sampleId,
+                            rowValuesNullable,
+                            columnAbsMeans,
+                            details,
+                            belowThresholdCount,
+                            totalElementsChecked,
+                            emptyScore
                         ));
                     }
                 }
             }
 
-            // Sort by score (most "empty" first)
-            var result = emptyRows.OrderByDescending(e => e.OverallScore).ToList();
-
-            _logger.LogInformation("Found {Count} empty/outlier rows in project {ProjectId} (RequireAllElements={RequireAll})",
-                result.Count, request.ProjectId, request.RequireAllElements);
-
-            return Result<List<EmptyRowDto>>.Success(result);
+            return Result<List<EmptyRowDto>>.Success(emptyRows.OrderByDescending(x => x.OverallScore).ToList());
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to find empty rows for project {ProjectId}", request.ProjectId);
-            return Result<List<EmptyRowDto>>.Fail($"Failed to find empty rows: {ex.Message}");
+            _logger.LogError(ex, "Error in FindEmptyRowsAsync");
+            return Result<List<EmptyRowDto>>.Fail($"Error: {ex.Message}");
         }
     }
 
+    // ---------------------------------------------------------
+    // توابع کمکی (Helpers) - حتماً به انتهای کلاس اضافه کنید
+    // ---------------------------------------------------------
+
+    private string NormalizeKey(string key)
+    {
+        if (string.IsNullOrEmpty(key)) return "";
+        // حذف تمام کاراکترهای غیر از حروف و اعداد و تبدیل به حروف بزرگ
+        // "Act Wgt" -> "ACTWGT"
+        return Regex.Replace(key, "[^a-zA-Z0-9]", "").ToUpperInvariant();
+    }
+
+    private JsonElement? GetValue(Dictionary<string, JsonElement> rowData, params string[] candidateKeys)
+    {
+        foreach (var key in candidateKeys)
+        {
+            string normalized = NormalizeKey(key);
+            if (rowData.TryGetValue(normalized, out var val)) return val;
+        }
+        return null;
+    }
+
+    private decimal GetDecimalSafe(Dictionary<string, JsonElement> rowData, params string[] candidateKeys)
+    {
+        var element = GetValue(rowData, candidateKeys);
+        if (element.HasValue)
+        {
+            if (element.Value.ValueKind == JsonValueKind.Number)
+                return element.Value.GetDecimal();
+            if (element.Value.ValueKind == JsonValueKind.String && decimal.TryParse(element.Value.GetString(), out var d))
+                return d;
+        }
+        return 0;
+    }
     #endregion
 
     #region Apply Corrections
