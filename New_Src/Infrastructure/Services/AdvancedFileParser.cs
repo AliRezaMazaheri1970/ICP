@@ -672,52 +672,59 @@ public class AdvancedFileParser
         var warnings = new List<ImportWarning>();
 
         stream.Position = 0;
-
-        var config = new CsvConfiguration(CultureInfo.InvariantCulture)
-        {
-            DetectDelimiter = true,
-            BadDataFound = null,
-            MissingFieldFound = null,
-            TrimOptions = TrimOptions.Trim,
-            HeaderValidated = null
-        };
-
         using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
-        using var csv = new CsvReader(reader, config);
-
-        int headerRow = options?.HeaderRow ?? 0;
-        for (int i = 0; i < headerRow && csv.Read(); i++) { }
-
-        if (!csv.Read())
+        
+        // Read all lines first
+        var allLines = new List<string>();
+        string? line;
+        while ((line = await reader.ReadLineAsync()) != null)
         {
-            warnings.Add(new ImportWarning(null, "", "File is empty or has no header", ImportWarningLevel.Error));
+            allLines.Add(line);
+        }
+        
+        if (allLines.Count == 0)
+        {
+            warnings.Add(new ImportWarning(null, "", "File is empty", ImportWarningLevel.Error));
             return (rows, warnings);
         }
-
-        csv.ReadHeader();
-        var headers = csv.HeaderRecord ?? Array.Empty<string>();
+        
+        // Header row is 1-based from user, convert to 0-based index
+        int headerRowIndex = (options?.HeaderRow ?? 1) - 1;
+        if (headerRowIndex < 0) headerRowIndex = 0;
+        if (headerRowIndex >= allLines.Count)
+        {
+            warnings.Add(new ImportWarning(null, "", $"Header row {headerRowIndex + 1} is beyond file length", ImportWarningLevel.Error));
+            return (rows, warnings);
+        }
+        
+        // Parse header row
+        var headerLine = allLines[headerRowIndex];
+        var headers = ParseCsvLine(headerLine);
         var columnMap = MapColumns(headers, options?.ColumnMappings);
+        
+        _logger.LogInformation("Using header row {Row}: {Headers}", headerRowIndex + 1, string.Join(", ", headers.Take(10)));
 
-        int rowNumber = headerRow + 1;
-        int totalEstimate = 1000;
+        int totalRows = allLines.Count;
         int processedRows = 0;
+        int endRowIndex = options?.SkipLastRow == true ? allLines.Count - 1 : allLines.Count;
 
-        while (csv.Read())
+        // Start reading from row after header
+        for (int i = headerRowIndex + 1; i < endRowIndex; i++)
         {
             if (cancellationToken.IsCancellationRequested) break;
 
-            rowNumber++;
-
-            if (options?.SkipLastRow == true && csv.Parser.RawRow == csv.Parser.Count - 1)
-                continue;
+            var dataLine = allLines[i];
+            if (string.IsNullOrWhiteSpace(dataLine)) continue;
 
             try
             {
-                var solutionLabel = GetColumnValue(csv, columnMap, "SolutionLabel") ?? "Unknown";
-                var element = GetColumnValue(csv, columnMap, "Element") ?? "";
-                var intensityStr = GetColumnValue(csv, columnMap, "Intensity");
-                var corrConStr = GetColumnValue(csv, columnMap, "CorrCon");
-                var typeStr = GetColumnValue(csv, columnMap, "Type");
+                var parts = ParseCsvLine(dataLine);
+                
+                var solutionLabel = GetColumnValueFromParts(parts, columnMap, "SolutionLabel") ?? "Unknown";
+                var element = GetColumnValueFromParts(parts, columnMap, "Element") ?? "";
+                var intensityStr = GetColumnValueFromParts(parts, columnMap, "Intensity");
+                var corrConStr = GetColumnValueFromParts(parts, columnMap, "CorrCon");
+                var typeStr = GetColumnValueFromParts(parts, columnMap, "Type");
 
                 if (string.IsNullOrWhiteSpace(element)) continue;
 
@@ -726,9 +733,9 @@ public class AdvancedFileParser
                 var corrCon = ParseDecimal(corrConStr);
                 var type = !string.IsNullOrEmpty(typeStr) ? typeStr : DetectSampleType(solutionLabel, options);
 
-                var actWgtStr = GetColumnValue(csv, columnMap, "ActWgt");
-                var actVolStr = GetColumnValue(csv, columnMap, "ActVol");
-                var dfStr = GetColumnValue(csv, columnMap, "DF");
+                var actWgtStr = GetColumnValueFromParts(parts, columnMap, "ActWgt");
+                var actVolStr = GetColumnValueFromParts(parts, columnMap, "ActVol");
+                var dfStr = GetColumnValueFromParts(parts, columnMap, "DF");
 
                 rows.Add(new ParsedFileRow(
                     solutionLabel,
@@ -744,17 +751,27 @@ public class AdvancedFileParser
             }
             catch (Exception ex)
             {
-                warnings.Add(new ImportWarning(rowNumber, "", $"Failed to parse row: {ex.Message}", ImportWarningLevel.Warning));
+                warnings.Add(new ImportWarning(i + 1, "", $"Failed to parse row: {ex.Message}", ImportWarningLevel.Warning));
             }
 
             processedRows++;
-            if (processedRows % 100 == 0)
+            if (processedRows % 1000 == 0)
             {
-                progress?.Report((totalEstimate, processedRows, $"Parsing row {processedRows}"));
+                progress?.Report((totalRows, processedRows, $"Parsing row {processedRows}/{totalRows}"));
             }
         }
-
+        
+        _logger.LogInformation("Parsed {RowCount} rows from tabular CSV", rows.Count);
         return (rows, warnings);
+    }
+    
+    private string? GetColumnValueFromParts(string[] parts, Dictionary<string, int> columnMap, string columnName)
+    {
+        if (columnMap.TryGetValue(columnName, out var index) && index < parts.Length)
+        {
+            return parts[index];
+        }
+        return null;
     }
 
     #endregion

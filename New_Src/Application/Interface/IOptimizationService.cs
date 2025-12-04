@@ -28,4 +28,9 @@ public interface IOptimizationService
     /// Get current pass/fail statistics for CRM comparison
     /// </summary>
     Task<Result<BlankScaleOptimizationResult>> GetCurrentStatisticsAsync(Guid projectId, decimal minDiff = -10m, decimal maxDiff = 10m);
+
+    /// <summary>
+    /// Debug: Get sample labels from project for troubleshooting
+    /// </summary>
+    Task<object> GetDebugSamplesAsync(Guid projectId);
 }

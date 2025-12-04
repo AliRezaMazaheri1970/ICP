@@ -140,3 +140,28 @@ window.blurElement = function (elementId) {
     }
     return false;
 };
+
+// Prevent default drag/drop behavior on dropzone
+window.initDropZone = function (elementId) {
+    const element = document.getElementById(elementId);
+    if (element) {
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            element.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            }, false);
+        });
+        return true;
+    }
+    return false;
+};
+
+// Trigger file input click
+window.triggerFileInput = function (elementId) {
+    const element = document.getElementById(elementId);
+    if (element) {
+        element.click();
+        return true;
+    }
+    return false;
+};

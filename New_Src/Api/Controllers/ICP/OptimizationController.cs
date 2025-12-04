@@ -79,4 +79,15 @@ public class OptimizationController : ControllerBase
 
         return Ok(new { succeeded = true, data = result.Data });
     }
+
+    /// <summary>
+    /// Debug: Get project sample labels (for troubleshooting CRM matching)
+    /// GET /api/optimization/{projectId}/debug-samples
+    /// </summary>
+    [HttpGet("{projectId:guid}/debug-samples")]
+    public async Task<ActionResult> DebugSamples(Guid projectId)
+    {
+        var result = await _optimizationService.GetDebugSamplesAsync(projectId);
+        return Ok(new { succeeded = true, data = result });
+    }
 }

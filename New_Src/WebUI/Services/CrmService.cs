@@ -122,7 +122,7 @@ public class CrmService
             if (!string.IsNullOrEmpty(analysisMethod))
                 url += $"&analysisMethod={Uri.EscapeDataString(analysisMethod)}";
             if (!string.IsNullOrEmpty(search))
-                url += $"&search={Uri.EscapeDataString(search)}";
+                url += $"&searchText={Uri.EscapeDataString(search)}";
             if (ourOreasOnly == true)
                 url += "&ourOreasOnly=true";
 
@@ -158,7 +158,7 @@ public class CrmService
         {
             SetAuthHeader();
 
-            var response = await _httpClient.GetAsync("crm/analysis-methods");
+            var response = await _httpClient.GetAsync("crm/methods");
             var content = await response.Content.ReadAsStringAsync();
 
             if (response.IsSuccessStatusCode)

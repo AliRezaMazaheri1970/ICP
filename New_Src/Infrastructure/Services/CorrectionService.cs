@@ -1005,25 +1005,27 @@ public class CorrectionService : ICorrectionService
 
             var rowsToDelete = new List<RawDataRow>();
 
+            // Regex to detect CRM/RM samples that should NOT be deleted
+            var rmPattern = new System.Text.RegularExpressions.Regex(
+                @"^(OREAS|SRM|CRM|NIST|BCR|TILL|GBW)[\s\-_]*(\d+|BLANK)?",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
             foreach (var row in rawRows)
             {
                 try
                 {
-                    using var doc = JsonDocument.Parse(row.ColumnData);
-                    var root = doc.RootElement;
-
-                    string solutionLabel;
-                    if (root.TryGetProperty("Solution Label", out var labelElement) && 
-                        labelElement.ValueKind != JsonValueKind.Null)
+                    // Use SampleId as the primary identifier (set during import)
+                    var sampleId = row.SampleId ?? "Unknown";
+                    
+                    // PROTECT CRM/RM samples from deletion - they should never be deleted
+                    // even if their Solution Label matches a blank pattern
+                    if (rmPattern.IsMatch(sampleId))
                     {
-                        solutionLabel = labelElement.GetString() ?? row.SampleId ?? "Unknown";
-                    }
-                    else
-                    {
-                        solutionLabel = row.SampleId ?? "Unknown";
+                        _logger.LogDebug("Protecting CRM/RM sample from deletion: {SampleId}", sampleId);
+                        continue;
                     }
 
-                    if (request.SolutionLabels.Contains(solutionLabel))
+                    if (request.SolutionLabels.Contains(sampleId))
                     {
                         rowsToDelete.Add(row);
                     }

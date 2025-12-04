@@ -546,17 +546,20 @@ public class OptimizationService : IOptimizationService
     {
         var rawRows = await _db.RawDataRows.AsNoTracking().Where(r => r.ProjectId == projectId).ToListAsync();
         var result = new List<RmSampleData>();
-        var rmPattern = new System.Text.RegularExpressions.Regex(@"^(OREAS|SRM|CRM|NIST|BCR|TILL|GBW)\s*\d*", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        // Match CRM/OREAS/etc. at start, optionally followed by numbers/spaces/letters
+        // Examples: "CRM 252  y", "CRM BLANK  R", "OREAS 100a", "CRM258"
+        var rmPattern = new System.Text.RegularExpressions.Regex(@"^(OREAS|SRM|CRM|NIST|BCR|TILL|GBW)[\s\-_]*(\d+|BLANK)?", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
         foreach (var row in rawRows)
         {
             try
             {
+                // Use SampleId field directly as the label (set during import)
+                var solutionLabel = row.SampleId ?? "";
+                if (string.IsNullOrEmpty(solutionLabel) || !rmPattern.IsMatch(solutionLabel)) continue;
+
                 var data = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(row.ColumnData);
                 if (data == null) continue;
-
-                var solutionLabel = data.TryGetValue("Solution Label", out var sl) ? sl.GetString() ?? "" : row.SampleId ?? "";
-                if (!rmPattern.IsMatch(solutionLabel)) continue;
 
                 var values = new Dictionary<string, decimal?>();
                 foreach (var kvp in data)
@@ -594,11 +597,26 @@ public class OptimizationService : IOptimizationService
     private List<MatchedSample> MatchWithCrm(List<RmSampleData> projectData, Dictionary<string, Dictionary<string, decimal>> crmData)
     {
         var result = new List<MatchedSample>();
+        // Regex to extract number from CRM label (e.g., "CRM 252  y" -> "252", "OREAS 100a" -> "100")
+        var numberPattern = new System.Text.RegularExpressions.Regex(@"(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        
         foreach (var sample in projectData)
         {
+            // Extract number from sample label
+            var sampleMatch = numberPattern.Match(sample.SolutionLabel);
+            var sampleNumber = sampleMatch.Success ? sampleMatch.Groups[1].Value : "";
+            
+            // Skip BLANK samples (no number to match)
+            if (string.IsNullOrEmpty(sampleNumber)) continue;
+            
+            // Find CRM in database that contains the same number
             var matchedCrm = crmData.Keys.FirstOrDefault(k =>
-                sample.SolutionLabel.Contains(k, StringComparison.OrdinalIgnoreCase) ||
-                k.Contains(sample.SolutionLabel, StringComparison.OrdinalIgnoreCase));
+            {
+                var crmMatch = numberPattern.Match(k);
+                if (!crmMatch.Success) return false;
+                var crmNumber = crmMatch.Groups[1].Value;
+                return crmNumber == sampleNumber;
+            });
 
             if (matchedCrm != null)
             {
@@ -714,6 +732,41 @@ public class OptimizationService : IOptimizationService
                 optimizedValues, diffBefore, diffAfter, passBefore, passAfter));
         }
         return result;
+    }
+
+    public async Task<object> GetDebugSamplesAsync(Guid projectId)
+    {
+        // Get ALL distinct SampleIds from project to find CRM/RM samples
+        var distinctSampleIds = await _db.RawDataRows.AsNoTracking()
+            .Where(r => r.ProjectId == projectId)
+            .Select(r => r.SampleId)
+            .Distinct()
+            .ToListAsync();
+        
+        // Match CRM/OREAS/etc. at start, optionally followed by numbers/spaces/letters
+        // Examples: "CRM 252  y", "CRM BLANK  R", "OREAS 100a", "CRM258"
+        var rmPattern = new System.Text.RegularExpressions.Regex(@"^(OREAS|SRM|CRM|NIST|BCR|TILL|GBW)[\s\-_]*(\d+|BLANK)?", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        
+        var allLabels = distinctSampleIds.Where(s => !string.IsNullOrEmpty(s)).ToList();
+        var rmLabels = allLabels.Where(s => rmPattern.IsMatch(s!)).ToList();
+        
+        // Get sample raw data for debugging
+        var rawRows = await _db.RawDataRows.AsNoTracking().Where(r => r.ProjectId == projectId).Take(5).ToListAsync();
+        var sampleColumnData = rawRows.Select(r => r.ColumnData ?? "null").ToList();
+        
+        var totalRows = await _db.RawDataRows.CountAsync(r => r.ProjectId == projectId);
+        var crmIds = await _db.CrmData.AsNoTracking().Select(c => c.CrmId).Distinct().Take(20).ToListAsync();
+        
+        return new
+        {
+            totalRows = totalRows,
+            allLabelsCount = allLabels.Count,
+            rmLabelsCount = rmLabels.Count,
+            sampleLabels = allLabels.Distinct().Take(30).ToList(),
+            rmLabels = rmLabels.Distinct().Take(30).ToList(),
+            sampleCrmIds = crmIds,
+            rawColumnDataSamples = sampleColumnData  // Debug: show raw JSON
+        };
     }
 
     private record RmSampleData(string SolutionLabel, Dictionary<string, decimal?> Values);

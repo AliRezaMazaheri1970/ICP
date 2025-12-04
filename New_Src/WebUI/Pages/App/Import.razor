@@ -50,7 +50,8 @@
                                 {
                                     <MudIcon Icon="@Icons.Material.Filled.CloudUpload" 
                                              Size="Size.Large" 
-                                             Class="mb-2 result-random-icons" />
+                                             Color="Color.Primary" 
+                                             Class="mb-2" />
                                     <MudText Typo="Typo.h6">Drop file here or click to browse</MudText>
                                     <MudText Typo="Typo.body2" Class="mud-text-secondary mt-1">
                                         Supported formats: CSV, Excel (.xlsx, .xls), TXT
@@ -269,10 +270,20 @@
             : "d-flex flex-column align-center justify-center";
     }
 
+    private async Task OnInputFileChange(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file == null) return;
+        await ProcessFile(file);
+    }
     private async Task OnFileSelected(IBrowserFile file)
     {
         if (file == null) return;
-        
+        await ProcessFile(file);
+    }
+
+    private async Task ProcessFile(IBrowserFile file)
+    {
         isLoading = true;
         StateHasChanged();
         
