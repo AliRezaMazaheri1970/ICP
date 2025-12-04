@@ -81,7 +81,7 @@
             </MudItem>
 
             <MudItem xs="12" md="8">
-                <MudPaper Elevation="2" Class="pa-4">
+                <MudPaper Elevation="2" Class="pa-4 height-75">
                     <MudText Typo="Typo.h6" Class="mb-4">
                         <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Class="me-2" />
                         Bad Volume Samples
@@ -109,6 +109,7 @@
                     {
                         <MudTable Items="@_badSamples"
                                   Hover="true"
+                                  Class="height-inner"
                                   Dense="true"
                                   MultiSelection="true"
                                   @bind-SelectedItems="_selectedSamples">
@@ -129,6 +130,18 @@
                                 </MudTd>
                             </RowTemplate>
                         </MudTable>
+                        <div class="d-flex justify-end mt-4 gap-2">
+                            <MudButton Variant="Variant.Outlined"
+                                       Size="Size.Small"
+                                       OnClick="SelectAll">
+                                Select All
+                            </MudButton>
+                            <MudButton Variant="Variant.Outlined"
+                                       Size="Size.Small"
+                                       OnClick="ClearSelection">
+                                Clear Selection
+                            </MudButton>
+                        </div>
                     }
                 </MudPaper>
             </MudItem>
@@ -204,5 +217,18 @@
         }
 
         _isApplying = false;
+    }
+
+    private void SelectAll()
+    {
+        if (_badSamples != null)
+        {
+            _selectedSamples = new HashSet<BadSampleDto>(_badSamples);
+        }
+    }
+
+    private void ClearSelection()
+    {
+        _selectedSamples.Clear();
     }
 }

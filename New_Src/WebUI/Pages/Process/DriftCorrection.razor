@@ -8,7 +8,7 @@
 <PageTitle>ICP - Drift Correction</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
-    <MudPaper Elevation="0" Class="pa-4 mb-4">
+    <MudPaper Elevation="0" Class="pa-4 mb-4 custom-card-all">
         <div class="d-flex justify-space-between align-center">
             <div>
                 <MudText Typo="Typo.h4" Class="fw-bold">Drift Correction</MudText>
@@ -35,7 +35,7 @@
         <MudGrid>
             @* Settings Panel *@
             <MudItem xs="12" md="3">
-                <MudPaper Elevation="2" Class="pa-4">
+                <MudPaper Elevation="0" Class="pa-4 custom-card-all">
                     <MudText Typo="Typo.h6" Class="mb-4">
                         <MudIcon Icon="@Icons.Material.Filled.Settings" Class="me-2" />
                         Settings
@@ -95,7 +95,7 @@
                 @* Segments Info *@
                 @if (_analysisResult != null && _analysisResult.Segments.Any())
                 {
-                    <MudPaper Elevation="2" Class="pa-4 mt-4">
+                    <MudPaper Elevation="0" Class="pa-4 mt-4 height-segmants custom-card-all">
                         <MudText Typo="Typo.h6" Class="mb-2">
                             <MudIcon Icon="@Icons.Material.Filled.Timeline" Class="me-2" />
                             Segments
@@ -120,7 +120,7 @@
 
             @* Results Panel *@
             <MudItem xs="12" md="9">
-                <MudPaper Elevation="2" Class="pa-4">
+                <MudPaper Elevation="0" Class="pa-4 custom-card-all height-75">
                     @if (_isLoading)
                     {
                         <div class="d-flex justify-center align-center py-8">
@@ -139,25 +139,25 @@
                         <MudGrid Class="mb-4">
                             <MudItem xs="6" sm="3">
                                 <MudPaper Elevation="0" Class="pa-3 text-center" Style="background: var(--mud-palette-info-lighten);">
-                                    <MudText Typo="Typo.h4" Color="Color.Info">@_analysisResult.TotalSamples</MudText>
+                                    <MudText Typo="Typo.h4" Class="color-white">@_analysisResult.TotalSamples</MudText>
                                     <MudText Typo="Typo.caption">Total Samples</MudText>
                                 </MudPaper>
                             </MudItem>
                             <MudItem xs="6" sm="3">
                                 <MudPaper Elevation="0" Class="pa-3 text-center" Style="background: var(--mud-palette-success-lighten);">
-                                    <MudText Typo="Typo.h4" Color="Color.Success">@_analysisResult.SegmentsFound</MudText>
+                                    <MudText Typo="Typo.h4" Class="color-white">@_analysisResult.SegmentsFound</MudText>
                                     <MudText Typo="Typo.caption">Segments</MudText>
                                 </MudPaper>
                             </MudItem>
                             <MudItem xs="6" sm="3">
                                 <MudPaper Elevation="0" Class="pa-3 text-center" Style="background: var(--mud-palette-warning-lighten);">
-                                    <MudText Typo="Typo.h4" Color="Color.Warning">@_analysisResult.ElementDrifts.Count</MudText>
+                                    <MudText Typo="Typo.h4" Class="color-white">@_analysisResult.ElementDrifts.Count</MudText>
                                     <MudText Typo="Typo.caption">Elements Analyzed</MudText>
                                 </MudPaper>
                             </MudItem>
                             <MudItem xs="6" sm="3">
                                 <MudPaper Elevation="0" Class="pa-3 text-center" Style="background: var(--mud-palette-secondary-lighten);">
-                                    <MudText Typo="Typo.h4" Color="Color.Secondary">@_analysisResult.CorrectedSamples</MudText>
+                                    <MudText Typo="Typo.h4" Class="color-white">@_analysisResult.CorrectedSamples</MudText>
                                     <MudText Typo="Typo.caption">Corrected</MudText>
                                 </MudPaper>
                             </MudItem>
@@ -169,7 +169,7 @@
                                   Hover="true"
                                   Dense="true"
                                   FixedHeader="true"
-                                  Height="300px">
+                                  >
                             <HeaderContent>
                                 <MudTh>Element</MudTh>
                                 <MudTh>Initial Ratio</MudTh>

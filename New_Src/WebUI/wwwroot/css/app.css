@@ -47,39 +47,55 @@
     --transition-slow: 350ms ease;
     /*active menu color*/
     --sidebar-active-color: #00BCD4;
-
 }
-.color-light-blue{
+
+.color-white {
+    color: white;
+    text-shadow: 0 0 2px #000;
+}
+
+.color-light-blue {
     color: var(--accent-color);
 }
+
 .color-dark-blue {
     color: var(--primary-color);
 }
+
 .color-bg-dark-blue {
     background-color: var(--secondary-color);
     color: #fff;
     font-weight: 500;
 }
-    .color-bg-dark-blue:hover {
+
+ .color-bg-dark-blue:hover {
         background-color: var(--bg-blue);
         color: #000;
+ }
+
+.color-border {
+    border: 1px solid var(--bg-primary);
 }
-    .color-border{
-        border: 1px solid var(--bg-primary);
-    }
 
 .refresh-crm {
     color: var(--secondary-color);
     border: 1px solid var(--secondary-color);
 }
-    .refresh-crm:hover {
+
+.refresh-crm:hover {
         color: var(--secondary-color);
         border: 1px solid var(--secondary-color);
         box-shadow: rgba(0, 188, 212, 0.15) 0px 5px 10px !important;
         background: #d7f3f7;
         transform: translateY(-2px);
         transition: all 0.3s ease-in-out;
-    }
+}
+.custom-card-all {
+    /*    box-shadow: 0 4px 10px rgba(0, 188, 212, 0.15) !important;*/
+    box-shadow: rgba(0, 188, 212, 0.15) 0px 0px 3px !important;
+    border-radius: var(--radius-md) !important;
+    border: 1px solid rgba(0, 188, 212, 0.1);
+}
 /* --- Base Styles --- */
 html, body {
     font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -254,6 +270,7 @@ html, body {
     border-radius: var(--radius-md) !important;
     box-shadow: 0px 0px 3px 0 #a1f4ff;
 }
+
     .box-action:hover {
         box-shadow: rgba(0, 188, 212, 0.15) 0px 5px 10px !important;
         background: #d7f3f7;
@@ -281,6 +298,7 @@ html, body {
     font-weight: 700 !important;
     color: var(--secondary-color) !important;
 }
+
 .mud-navmenu.mud-navmenu-default .mud-nav-link.active:not(.mud-nav-link-disabled) {
     font-weight: 700 !important;
     color: var(--secondary-color) !important;
@@ -289,6 +307,7 @@ html, body {
 .mud-nav-item .mud-nav-link.mud-ripple.mud-nav-link-active .mud-icon-root {
     color: #00BCD4 !important;
 }
+
 .mud-nav-item:active {
     font-weight: 700 !important;
     color: var(--secondary-color) !important;
@@ -301,7 +320,7 @@ html, body {
 
 /* در app.css */
 .custom-card {
-/*    box-shadow: 0 4px 10px rgba(0, 188, 212, 0.15) !important;*/
+    /*    box-shadow: 0 4px 10px rgba(0, 188, 212, 0.15) !important;*/
     box-shadow: rgba(0, 188, 212, 0.15) 0px 0px 3px !important;
     border-radius: var(--radius-md) !important;
     border: 1px solid rgba(0, 188, 212, 0.1);
@@ -323,10 +342,18 @@ html, body {
 .mud-navmenu .mud-nav-link.active .mud-icon-root {
     color: var(--secondary-color) !important;
 }
-.height-75{
-    height:75vh;
+
+.height-75 {
+    height: 75vh;
+    overflow: scroll;
 }
-.height-inner{
-    height:87%;
-    overflow:scroll;
+
+.height-inner {
+    height: 87%;
+    overflow: scroll;
+}
+
+.height-segmants {
+    height: 37vh;
+    overflow: scroll;
 }
