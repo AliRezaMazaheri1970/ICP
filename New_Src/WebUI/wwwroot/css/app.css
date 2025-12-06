@@ -263,7 +263,7 @@ html, body {
 }
 /*Override Style  MudBlazor.min.css Dashboard*/
 
-.box-action {
+/*.box-action {
     color: var(--mud-palette-text-primary);
     border: 1px solid rgb(232, 232, 232,0.1);
     padding: 5px 15px;
@@ -276,9 +276,9 @@ html, body {
         background: #d7f3f7;
         transform: translateY(-2px);
         transition: all 0.3s ease-in-out;
-    }
+    }*/
 
-.mud-button-label {
+/*.mud-button-label {
     gap: 10px;
 }
 
@@ -288,7 +288,7 @@ html, body {
 
 .result-random-icons {
     color: var(--secondary-color);
-}
+}*/
 
 .header-color {
     background: var(--bg-gradient-blue);
