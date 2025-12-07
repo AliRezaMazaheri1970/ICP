@@ -2,6 +2,7 @@
 @using WebUI.Services
 @inject AuthService AuthService
 @inject NavigationManager NavManager
+@inject IJSRuntime JSRuntime
 
 @* <MudThemeProvider @bind-IsDarkMode="_isDarkMode" /> *@
 <MudThemeProvider @bind-IsDarkMode="_isDarkMode" Theme="_customTheme" />
@@ -150,4 +151,22 @@ else
             Surface = "#252b3b",
         }
     };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await JSRuntime.InvokeVoidAsync("eval", @"
+                let idleTimeout;
+                function resetTimer() {
+                    clearTimeout(idleTimeout);
+                    idleTimeout = setTimeout(() => location.href = '/logout', 600000); 
+                }
+                ['mousemove','keydown','scroll','click','touchstart'].forEach(evt =>
+                    document.addEventListener(evt, resetTimer, { passive: true })
+                );
+                resetTimer();
+            ");
+        }
+    }
 }
