@@ -201,15 +201,22 @@ public class CorrectionService : ICorrectionService
 
     #endregion
 
-    #region Find Empty Rows (Based on Python empty_check.py)
-    // ---------------------------------------------------------
-    // متد اصلی: شناسایی ردیف‌های خالی با منطق دقیق پایتون
-    // ---------------------------------------------------------
+    // ============================================================
+    // FindEmptyRowsAsync - نسخه نهایی و مطمئن
+    // ============================================================
+    // 
+    // قانون:
+    // - null = missing (مثل '-----' در CSV)
+    // - 0 = مقدار واقعی صفر (مثل Blank)
+    //
+    // ============================================================
+
+    #region Find Empty Rows (FINAL - CORRECT VERSION)
+
     public async Task<Result<List<EmptyRowDto>>> FindEmptyRowsAsync(FindEmptyRowsRequest request)
     {
         try
         {
-            // 1. دریافت داده‌های خام
             var rawRows = await _db.RawDataRows
                 .AsNoTracking()
                 .Where(r => r.ProjectId == request.ProjectId)
@@ -218,96 +225,96 @@ public class CorrectionService : ICorrectionService
             if (!rawRows.Any())
                 return Result<List<EmptyRowDto>>.Fail("هیچ داده‌ای برای این پروژه یافت نشد.");
 
-            // ساختار: [SampleId] -> [Element] -> Value
-            var pivotedData = new Dictionary<string, Dictionary<string, decimal>>();
+            var pivotedData = new Dictionary<string, Dictionary<string, decimal?>>();
             var allElements = new HashSet<string>();
 
-            const decimal STD_WEIGHT = 1.0m;
-            const decimal STD_VOLUME = 10.0m;
+            // پیش‌فرض: Na, Ca, Al, Mg, K
+            var elementsToCheck = request.ElementsToCheck?.Any() == true
+                ? request.ElementsToCheck.ToHashSet(StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Na", "Ca", "Al", "Mg", "K" };
 
             foreach (var row in rawRows)
             {
                 try
                 {
                     using var doc = JsonDocument.Parse(row.ColumnData);
+                    var root = doc.RootElement;
 
-                    // الف) نرمال‌سازی کلیدها: ساخت دیکشنری با کلیدهای تمیز (بدون فاصله و حروف بزرگ)
-                    // این بخش حیاتی است تا "Act Wgt" و "ActWgt" یکی شناخته شوند
-                    var rowData = new Dictionary<string, JsonElement>();
-                    foreach (var prop in doc.RootElement.EnumerateObject())
+                    string sampleId = row.SampleId ?? "Unknown";
+                    if (root.TryGetProperty("Solution Label", out var labelElement))
                     {
-                        string cleanKey = NormalizeKey(prop.Name);
-                        rowData[cleanKey] = prop.Value;
+                        var label = labelElement.GetString();
+                        if (!string.IsNullOrWhiteSpace(label))
+                            sampleId = label;
                     }
 
-                    // ب) استخراج شناسه نمونه و نام عنصر
-                    // اصلاح: استفاده از متغیر واسط برای رفع هشدار Null
-                    string? extractedLabel = GetValue(rowData, "SOLUTIONLABEL")?.GetString();
-                    string sampleId = !string.IsNullOrWhiteSpace(extractedLabel)
-                        ? extractedLabel
-                        : (row.SampleId ?? "Unknown");
+                    if (!root.TryGetProperty("Element", out var elementProp))
+                        continue;
+                    string? elementName = elementProp.GetString();
+                    if (string.IsNullOrWhiteSpace(elementName))
+                        continue;
 
-                    string? element = GetValue(rowData, "ELEMENT")?.GetString();
-                    if (string.IsNullOrWhiteSpace(element)) continue; // ردیف هدر یا متادیتا
+                    string elementPrefix = elementName.Split(' ')[0];
+                    if (!elementsToCheck.Contains(elementPrefix))
+                        continue;
 
-                    // ج) خواندن مقادیر عددی (با هندل کردن نال)
-                    decimal corrCon = GetDecimalSafe(rowData, "CORRCON", "SOLNCONC");
-                    decimal actWgt = GetDecimalSafe(rowData, "ACTWGT", "WEIGHT");
-                    decimal actVol = GetDecimalSafe(rowData, "ACTVOL", "VOLUME");
-                    decimal df = GetDecimalSafe(rowData, "DF", "DILUTION");
+                    // استخراج Soln Conc
+                    decimal? value = null;
+                    if (root.TryGetProperty("Soln Conc", out var solnConcElement))
+                    {
+                        if (solnConcElement.ValueKind == JsonValueKind.Number)
+                        {
+                            value = solnConcElement.GetDecimal();
+                        }
+                        else if (solnConcElement.ValueKind == JsonValueKind.String)
+                        {
+                            var strVal = solnConcElement.GetString();
+                            // "-----" = null
+                            if (!string.IsNullOrWhiteSpace(strVal) &&
+                                strVal != "-----" &&
+                                decimal.TryParse(strVal, out var parsed))
+                            {
+                                value = parsed;
+                            }
+                        }
+                        // اگر null بود در JSON، value همون null میمونه
+                    }
 
-                    // د) اعمال فرمول‌های اصلاح (دقیقاً مشابه پایتون)
-                    decimal finalVal = corrCon;
-
-                    // 1. اصلاح وزن
-                    if (actWgt != 0) finalVal = finalVal * (STD_WEIGHT / actWgt);
-
-                    // 2. اصلاح حجم
-                    finalVal = finalVal * (actVol / STD_VOLUME);
-
-                    // 3. اصلاح رقت
-                    if (df != 0) finalVal = finalVal * df;
-
-                    // ه) ذخیره در ساختار پیوت
                     if (!pivotedData.ContainsKey(sampleId))
-                        pivotedData[sampleId] = new Dictionary<string, decimal>();
+                        pivotedData[sampleId] = new Dictionary<string, decimal?>();
 
-                    pivotedData[sampleId][element] = finalVal;
-                    allElements.Add(element);
+                    pivotedData[sampleId][elementName] = value;
+                    allElements.Add(elementName);
                 }
-                catch (Exception ex)
+                catch (JsonException ex)
                 {
-                    // اصلاح: استفاده از SampleId به جای Id برای لاگ
-                    _logger.LogWarning("Error parsing row for sample {SampleId}: {Message}", row.SampleId, ex.Message);
+                    _logger.LogWarning("Error parsing row {SampleId}: {Message}", row.SampleId, ex.Message);
                 }
             }
 
             if (!pivotedData.Any())
                 return Result<List<EmptyRowDto>>.Success(new List<EmptyRowDto>());
 
-            // 2. محاسبه میانگین قدر مطلق هر ستون (Abs Mean)
-            var columnAbsMeans = new Dictionary<string, decimal>();
+            // محاسبه میانگین (فقط مقادیر غیر null)
+            var columnMeans = new Dictionary<string, decimal>();
             foreach (var elem in allElements)
             {
-                decimal sum = 0;
-                int count = 0;
+                var validValues = new List<decimal>();
                 foreach (var sample in pivotedData.Values)
                 {
-                    if (sample.ContainsKey(elem))
+                    if (sample.TryGetValue(elem, out var val) && val.HasValue)
                     {
-                        sum += Math.Abs(sample[elem]);
-                        count++;
+                        validValues.Add(val.Value);
                     }
                 }
-                columnAbsMeans[elem] = count > 0 ? sum / count : 0;
+                columnMeans[elem] = validValues.Any() ? validValues.Average() : 0m;
             }
 
-            // 3. بررسی و امتیازدهی به ردیف‌ها
             var emptyRows = new List<EmptyRowDto>();
 
-            // اصلاح: استفاده از decimal برای هماهنگی با نوع داده Request
-            decimal effectivePercent = request.ThresholdPercent > 0 ? request.ThresholdPercent : 20m;
-            decimal thresholdFactor = effectivePercent / 100m;
+            // threshold = mean * (1 - percent/100)
+            decimal effectivePercent = request.ThresholdPercent > 0 ? request.ThresholdPercent : 70m;
+            decimal thresholdFactor = 1m - (effectivePercent / 100m);
 
             foreach (var sampleEntry in pivotedData)
             {
@@ -321,25 +328,33 @@ public class CorrectionService : ICorrectionService
 
                 foreach (var elem in allElements)
                 {
-                    if (!values.ContainsKey(elem)) continue;
-                    if (!columnAbsMeans.ContainsKey(elem)) continue;
+                    if (!values.TryGetValue(elem, out var valNullable))
+                        continue;
+                    if (!columnMeans.TryGetValue(elem, out var mean))
+                        continue;
 
-                    decimal val = values[elem];
-                    decimal mean = columnAbsMeans[elem];
                     decimal threshold = mean * thresholdFactor;
+                    rowValuesNullable[elem] = valNullable;
 
-                    rowValuesNullable[elem] = val;
+                    // همه elements شمرده میشن
+                    totalElementsChecked++;
 
-                    // درصد انحراف برای نمایش
-                    details[elem] = mean != 0 ? (Math.Abs(val) / mean) * 100 : 0;
+                    // ✅ فقط null = missing
+                    // 0 یک مقدار واقعی هست (مثل Blank)
+                    if (!valNullable.HasValue)
+                    {
+                        details[elem] = 0;
+                        continue;  // null = NOT below threshold
+                    }
 
-                    // شرط اصلی: |Value| <= Threshold
-                    // استفاده از <= برای حالتی که هم Value و هم Mean صفر هستند (مثل Blank)
-                    if (Math.Abs(val) <= threshold)
+                    decimal val = valNullable.Value;
+                    details[elem] = mean != 0 ? (val / mean) * 100m : 0m;
+
+                    // val < threshold
+                    if (val < threshold)
                     {
                         belowThresholdCount++;
                     }
-                    totalElementsChecked++;
                 }
 
                 if (totalElementsChecked > 0)
@@ -355,7 +370,7 @@ public class CorrectionService : ICorrectionService
                         emptyRows.Add(new EmptyRowDto(
                             sampleId,
                             rowValuesNullable,
-                            columnAbsMeans,
+                            columnMeans,
                             details,
                             belowThresholdCount,
                             totalElementsChecked,
@@ -364,6 +379,8 @@ public class CorrectionService : ICorrectionService
                     }
                 }
             }
+
+            _logger.LogInformation("Found {Count} empty rows", emptyRows.Count);
 
             return Result<List<EmptyRowDto>>.Success(emptyRows.OrderByDescending(x => x.OverallScore).ToList());
         }
@@ -374,40 +391,6 @@ public class CorrectionService : ICorrectionService
         }
     }
 
-    // ---------------------------------------------------------
-    // توابع کمکی (Helpers) - حتماً به انتهای کلاس اضافه کنید
-    // ---------------------------------------------------------
-
-    private string NormalizeKey(string key)
-    {
-        if (string.IsNullOrEmpty(key)) return "";
-        // حذف تمام کاراکترهای غیر از حروف و اعداد و تبدیل به حروف بزرگ
-        // "Act Wgt" -> "ACTWGT"
-        return Regex.Replace(key, "[^a-zA-Z0-9]", "").ToUpperInvariant();
-    }
-
-    private JsonElement? GetValue(Dictionary<string, JsonElement> rowData, params string[] candidateKeys)
-    {
-        foreach (var key in candidateKeys)
-        {
-            string normalized = NormalizeKey(key);
-            if (rowData.TryGetValue(normalized, out var val)) return val;
-        }
-        return null;
-    }
-
-    private decimal GetDecimalSafe(Dictionary<string, JsonElement> rowData, params string[] candidateKeys)
-    {
-        var element = GetValue(rowData, candidateKeys);
-        if (element.HasValue)
-        {
-            if (element.Value.ValueKind == JsonValueKind.Number)
-                return element.Value.GetDecimal();
-            if (element.Value.ValueKind == JsonValueKind.String && decimal.TryParse(element.Value.GetString(), out var d))
-                return d;
-        }
-        return 0;
-    }
     #endregion
 
     #region Apply Corrections
