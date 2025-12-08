@@ -19,9 +19,7 @@
     <!-- App Styles -->
     <link href="css/reset.css" rel="stylesheet" />
     <link href="css/app.css" rel="stylesheet" />
-    <link href="css/pages/login.css" rel="stylesheet" />
-    <link href="css/pages/import.css" rel="stylesheet" />
-    <link href="css/pages/dashboard.css" rel="stylesheet" />
+    <link href="css/all.css" rel="stylesheet" />
     <link href="WebUI.styles.css" rel="stylesheet" />
 
     <component type="typeof(HeadOutlet)" render-mode="ServerPrerendered" />
@@ -46,19 +44,5 @@
     <script src="js/helpers.js"></script>
     <script src="_framework/blazor.server.js"></script>
 
-
-    @* <script>
-        let timeout;
-        function resetTimer() {
-            clearTimeout(timeout);
-            timeout = setTimeout(() => location.href = "/logout", 60000); // ۱ دقیقه برای تست
-        }
-        document.onmousemove = resetTimer;
-        document.onkeydown = resetTimer;
-        document.onscroll = resetTimer;
-        document.onclick = resetTimer;
-        document.ontouchstart = resetTimer;
-        resetTimer();
-    </script> *@
 </body>
 </html>
