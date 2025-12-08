@@ -5,7 +5,9 @@
 @inject ISnackbar Snackbar
 
 <PageTitle>ICP - Volume Check</PageTitle>
+
 <NavigationLock OnBeforeInternalNavigation="OnBeforeNavigation" ConfirmExternalNavigation="_isApplying" />
+
 @* Loading Overlay *@
 @if (_isApplying || _isLoading)
 {
@@ -13,7 +15,6 @@
         <MudPaper Elevation="4" Class="pa-6 d-flex flex-column align-center">
             <MudProgressCircular Color="Color.Primary" Size="Size.Large" Indeterminate="true" />
             <MudText Typo="Typo.h6" Class="mt-4">Processing...</MudText>
-            
         </MudPaper>
     </div>
 }
@@ -44,6 +45,7 @@
     else
     {
         <MudGrid>
+            @* Settings *@
             <MudItem xs="12" md="4">
                 <MudPaper Elevation="0" Class="pa-4 custom-card-all">
                     <MudText Typo="Typo.h6" Class="mb-4">
@@ -63,7 +65,6 @@
                                StartIcon="@Icons.Material.Filled.Search"
                                OnClick="FindBadVolumes"
                                Disabled="@(_isLoading || _isApplying)">
-                               @* Disabled="_isLoading"> *@
                         @if (_isLoading)
                         {
                             <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
@@ -87,24 +88,34 @@
                                    StartIcon="@Icons.Material.Filled.Build"
                                    OnClick="ApplyCorrection"
                                    Disabled="@(!_selectedSamples.Any() || _isApplying)">
+                            @if (_isApplying)
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
+                            }
                             Apply to Selected (@_selectedSamples.Count)
                         </MudButton>
                     }
                 </MudPaper>
             </MudItem>
 
+            @* Results *@
             <MudItem xs="12" md="8">
-                <MudPaper Elevation="0" Class="pa-4 height-75 custom-card-all">
-                    <MudText Typo="Typo.h6" Class="mb-4">
-                        <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Class="me-2" />
-                        Bad Volume Samples
+                <MudPaper Elevation="0" Class="pa-4 custom-card-all">
+
+                    <div class="d-flex justify-space-between align-center mb-4">
+                        <MudText Typo="Typo.h6">
+                            <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Class="me-2" />
+                            Bad Volume Samples
+                        </MudText>
                         @if (_badSamples != null)
                         {
-                            <MudChip T="string" Size="Size.Small" Color="Color.Success" Class="ms-2">
-                                @_badSamples.Count found
-                            </MudChip>
+                            <MudText Typo="Typo.caption">
+                                Showing @((_currentPage - 1) * _pageSize + 1) -
+                                @Math.Min(_currentPage * _pageSize, _totalCount)
+                                of @_totalCount
+                            </MudText>
                         }
-                    </MudText>
+                    </div>
 
                     @if (_badSamples == null)
                     {
@@ -120,7 +131,7 @@
                     }
                     else
                     {
-                        <MudTable Items="@_badSamples"
+                        <MudTable Items="@_pagedRows"
                                   Hover="true"
                                   Class="height-inner"
                                   Dense="true"
@@ -134,7 +145,9 @@
                             </HeaderContent>
                             <RowTemplate>
                                 <MudTd>@context.SolutionLabel</MudTd>
-                                <MudTd><MudText Color="Color.Error">@context.ActualValue.ToString("F2")</MudText></MudTd>
+                                <MudTd>
+                                    <MudText Color="Color.Error">@context.ActualValue.ToString("F2")</MudText>
+                                </MudTd>
                                 <MudTd>@context.ExpectedValue.ToString("F2")</MudTd>
                                 <MudTd>
                                     <MudChip T="string" Size="Size.Small" Color="Color.Warning">
@@ -143,6 +156,33 @@
                                 </MudTd>
                             </RowTemplate>
                         </MudTable>
+
+                        @* Pagination *@
+                        <div class="d-flex justify-center align-center mt-4 gap-4">
+                            <MudSelect T="int" Value="_pageSize" ValueChanged="OnPageSizeChanged"
+                                       Label="Per Page"
+                                       Variant="Variant.Outlined"
+                                       Dense="true"
+                                       Style="width: 100px;">
+                                <MudSelectItem Value="15">15</MudSelectItem>
+                                <MudSelectItem Value="30">30</MudSelectItem>
+                                <MudSelectItem Value="45">45</MudSelectItem>
+                                <MudSelectItem Value="60">60</MudSelectItem>
+                                <MudSelectItem Value="75">75</MudSelectItem>
+                                <MudSelectItem Value="90">90</MudSelectItem>
+                                <MudSelectItem Value="105">105</MudSelectItem>
+                                <MudSelectItem Value="120">120</MudSelectItem>
+                            </MudSelect>
+
+                            <MudPagination Count="@_totalPages"
+                                           Selected="_currentPage"
+                                           SelectedChanged="OnPageChanged"
+                                           ShowFirstButton="true"
+                                           ShowLastButton="true"
+                                           BoundaryCount="1"
+                                           MiddleCount="3" />
+                        </div>
+
                         <div class="d-flex justify-end mt-4 gap-2">
                             <MudButton Variant="Variant.Outlined"
                                        Size="Size.Small"
@@ -176,23 +216,61 @@
         align-items: center;
         z-index: 9999;
     }
+
+    .mud-simple-table table {
+        width: 100%;
+        display: table;
+        border-spacing: 0;
+        border-collapse: collapse;
+        height: 200px;
+        overflow: scroll;
+    }
+
+    .mud-table-dense * .mud-table-row .mud-table-cell {
+        padding: 2px 15px 2px 16px;
+        padding-inline-start: 16px;
+        padding-inline-end: 24px;
+    }
+
+    .mud-table {
+        color: var(--mud-palette-text-primary);
+        background-color: var(--mud-palette-surface);
+        border-radius: var(--mud-default-borderradius);
+        transition: box-shadow 300ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;
+        height: 600px;
+        overflow: scroll;
+    }
 </style>
-    @code {
+
+@code {
     [SupplyParameterFromQuery]
     public Guid? projectId { get; set; }
 
     private Guid? _projectId;
     private string? _projectName;
+
     private decimal _expectedVolume = 50m;
     private decimal _newVolume = 50m;
+
     private List<BadSampleDto>? _badSamples;
+    private List<BadSampleDto> _pagedRows = new();
     private HashSet<BadSampleDto> _selectedSamples = new();
+
     private bool _isLoading = false;
     private bool _isApplying = false;
+
+    // Pagination
+    private int _currentPage = 1;
+    private int _pageSize = 15;
+    private int _totalCount = 0;
+    private int _totalPages => _totalCount == 0
+        ? 1
+        : (int)Math.Ceiling((double)_totalCount / _pageSize);
 
     protected override async Task OnInitializedAsync()
     {
         _projectId = projectId ?? ProjectService.CurrentProjectId;
+
         if (_projectId.HasValue)
         {
             var result = await ProjectService.GetProjectAsync(_projectId.Value);
@@ -208,6 +286,7 @@
         if (_projectId == null) return;
 
         _isLoading = true;
+        _selectedSamples.Clear();
         StateHasChanged();
 
         var result = await CorrectionService.FindBadVolumesAsync(_projectId.Value, _expectedVolume);
@@ -215,22 +294,56 @@
         if (result.Succeeded && result.Data != null)
         {
             _badSamples = result.Data;
+            _totalCount = _badSamples.Count;
         }
         else
         {
             Snackbar.Add(result.Message ?? "Failed", Severity.Error);
             _badSamples = new();
+            _totalCount = 0;
         }
+
+        _currentPage = 1;
+        UpdatePagedRows();
 
         _isLoading = false;
     }
 
+    private void UpdatePagedRows()
+    {
+        if (_badSamples == null)
+        {
+            _pagedRows = new();
+            return;
+        }
+
+        _pagedRows = _badSamples
+            .Skip((_currentPage - 1) * _pageSize)
+            .Take(_pageSize)
+            .ToList();
+    }
+
+    private void OnPageChanged(int page)
+    {
+        _currentPage = page;
+        UpdatePagedRows();
+        StateHasChanged();
+    }
+
+    private void OnPageSizeChanged(int size)
+    {
+        _pageSize = size;
+        _currentPage = 1;
+        UpdatePagedRows();
+        StateHasChanged();
+    }
+
     private async Task ApplyCorrection()
     {
-        
         if (_projectId == null || !_selectedSamples.Any()) return;
 
         _isApplying = true;
+        StateHasChanged();
 
         var labels = _selectedSamples.Select(s => s.SolutionLabel).ToList();
         var result = await CorrectionService.ApplyVolumeCorrectionAsync(_projectId.Value, labels, _newVolume);
@@ -260,6 +373,7 @@
     {
         _selectedSamples.Clear();
     }
+
     private async Task OnBeforeNavigation(LocationChangingContext context)
     {
         if (_isApplying)

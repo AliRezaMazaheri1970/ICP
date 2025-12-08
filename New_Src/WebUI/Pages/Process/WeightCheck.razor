@@ -8,18 +8,17 @@
 <PageTitle>ICP - Weight Check</PageTitle>
 
 <NavigationLock OnBeforeInternalNavigation="OnBeforeNavigation" ConfirmExternalNavigation="_isApplying" />
+
 @if (_isApplying || _isLoading)
 {
     <div class="loading-overlay">
         <MudPaper Elevation="4" Class="pa-6 d-flex flex-column align-center">
             <MudProgressCircular Color="Color.Primary" Size="Size.Large" Indeterminate="true" />
             <MudText Typo="Typo.h6" Class="mt-4">Processing...</MudText>
-            @* <MudText Typo="Typo.body2" Color="Color.Secondary">
-                Applying corrections to @_selectedSamples.Count samples
-            </MudText> *@
         </MudPaper>
     </div>
 }
+
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
     <MudPaper Elevation="0" Class="pa-4 mb-4 custom-card-all">
         <div class="d-flex justify-space-between align-center">
@@ -45,10 +44,11 @@
     }
     else
     {
-        <MudGrid >
-            @* Settings Panel *@
+        <MudGrid>
+            <!-- Settings -->
             <MudItem xs="12" md="4">
                 <MudPaper Elevation="0" Class="pa-4 custom-card-all">
+
                     <MudText Typo="Typo.h6" Class="mb-4">
                         <MudIcon Icon="@Icons.Material.Filled.Settings" Class="me-2" />
                         Settings
@@ -110,42 +110,48 @@
                 </MudPaper>
             </MudItem>
 
-            @* Results Panel *@
+            <!-- Results -->
             <MudItem xs="12" md="8">
-                <MudPaper Elevation="0" Class="pa-4 height-75 custom-card-all">
-                    <MudText Typo="Typo.h6" Class="mb-4">
-                        <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Class="me-2" />
-                        Bad Weight Samples
+                <MudPaper Elevation="0" Class="pa-4 custom-card-all">
+
+                    <div class="d-flex justify-space-between align-center mb-4">
+                        <MudText Typo="Typo.h6">
+                            <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Class="me-2" />
+                            Bad Weight Samples
+                        </MudText>
+
                         @if (_badSamples != null)
                         {
-                            <MudChip T="string" Size="Size.Small" Color="Color.Success" Class="ms-2">
-                                @_badSamples.Count found
-                            </MudChip>
+                            <MudText Typo="Typo.caption">
+                                Showing @((_currentPage - 1) * _pageSize + 1) -
+                                @Math.Min(_currentPage * _pageSize, _totalCount)
+                                of @_totalCount
+                            </MudText>
                         }
-                    </MudText>
+                    </div>
 
                     @if (_badSamples == null)
                     {
                         <MudAlert Severity="Severity.Info">
-                            Click "Find Bad Weights" to search for samples outside the weight range.
+                            Click "Find Bad Weights" to search.
                         </MudAlert>
                     }
                     else if (!_badSamples.Any())
                     {
                         <MudAlert Severity="Severity.Success">
-                            <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Class="me-2" />
                             All samples are within the acceptable weight range!
                         </MudAlert>
                     }
                     else
                     {
-                        <MudTable Items="@_badSamples"
+                        <!-- Table -->
+                        <MudTable Items="@_pagedRows"
                                   Hover="true"
-                                  Class="height-inner"
                                   Dense="true"
                                   MultiSelection="true"
                                   @bind-SelectedItems="_selectedSamples"
                                   SelectOnRowClick="true">
+
                             <HeaderContent>
                                 <MudTh>Solution Label</MudTh>
                                 <MudTh>Actual Weight</MudTh>
@@ -153,52 +159,61 @@
                                 <MudTh>Deviation</MudTh>
                                 <MudTh>Status</MudTh>
                             </HeaderContent>
+
                             <RowTemplate>
-                                <MudTd DataLabel="Solution Label">
-                                    <MudText Typo="Typo.body2" Class="fw-medium">@context.SolutionLabel</MudText>
-                                </MudTd>
-                                <MudTd DataLabel="Actual Weight">
+                                <MudTd>@context.SolutionLabel</MudTd>
+
+                                <MudTd>
                                     <MudText Color="Color.Error">@context.ActualValue.ToString("F4")</MudText>
                                 </MudTd>
-                                <MudTd DataLabel="Expected">
-                                    @context.ExpectedValue.ToString("F4")
-                                </MudTd>
-                                <MudTd DataLabel="Deviation">
-                                    <MudChip T="string" 
-                                             Size="Size.Small" 
+
+                                <MudTd>@context.ExpectedValue.ToString("F4")</MudTd>
+
+                                <MudTd>
+                                    <MudChip T="string"
                                              Color="@(Math.Abs(context.Deviation) > 20 ? Color.Error : Color.Warning)">
                                         @context.Deviation.ToString("F1")%
                                     </MudChip>
                                 </MudTd>
-                                <MudTd DataLabel="Status">
+
+                                <MudTd>
                                     @if (context.ActualValue < _weightMin)
                                     {
-                                        <MudIcon Icon="@Icons.Material.Filled.ArrowDownward" Color="Color.Error" Size="Size.Small" />
-                                        <span class="mud-text-error">Low</span>
+                                        <MudText Color="Color.Error">Low</MudText>
                                     }
                                     else
                                     {
-                                        <MudIcon Icon="@Icons.Material.Filled.ArrowUpward" Color="Color.Warning" Size="Size.Small" />
-                                        <span class="mud-text-warning">High</span>
+                                        <MudText Color="Color.Warning">High</MudText>
                                     }
                                 </MudTd>
                             </RowTemplate>
                         </MudTable>
 
-                        <div class="d-flex justify-end mt-4 gap-2">
-                            <MudButton Variant="Variant.Outlined"
-                                       Size="Size.Small"
-                                       Disabled="@(_isLoading || _isApplying)"
-                                       OnClick="SelectAll">
-                                Select All
-                            </MudButton>
-                            <MudButton Variant="Variant.Outlined"
-                                       Size="Size.Small"
-                                       Disabled="@(_isLoading || _isApplying)"
-                                       OnClick="ClearSelection">
-                                Clear Selection
-                            </MudButton>
+                        <!-- Pagination -->
+                        <div class="d-flex justify-center align-center mt-4 gap-4">
+
+                            <MudSelect T="int" Value="_pageSize" ValueChanged="OnPageSizeChanged"
+                                       Label="Per Page" Variant="Variant.Outlined"
+                                       Dense="true" Style="width: 100px;">
+                                <MudSelectItem Value="15">15</MudSelectItem>
+                                <MudSelectItem Value="30">30</MudSelectItem>
+                                <MudSelectItem Value="45">45</MudSelectItem>
+                                <MudSelectItem Value="60">60</MudSelectItem>
+                                <MudSelectItem Value="75">75</MudSelectItem>
+                                <MudSelectItem Value="90">90</MudSelectItem>
+                                <MudSelectItem Value="105">105</MudSelectItem>
+                                <MudSelectItem Value="120">120</MudSelectItem>
+                            </MudSelect>
+
+                            <MudPagination Count="@_totalPages"
+                                           Selected="_currentPage"
+                                           SelectedChanged="OnPageChanged"
+                                           ShowFirstButton="true"
+                                           ShowLastButton="true"
+                                           BoundaryCount="1"
+                                           MiddleCount="3" />
                         </div>
+
                     }
                 </MudPaper>
             </MudItem>
@@ -218,32 +233,67 @@
         align-items: center;
         z-index: 9999;
     }
+
+    .mud-simple-table table {
+        width: 100%;
+        display: table;
+        border-spacing: 0;
+        border-collapse: collapse;
+        height: 200px;
+        overflow: scroll;
+    }
+
+    .mud-table-dense * .mud-table-row .mud-table-cell {
+        padding: 0px 15px 0px 16px;
+        padding-inline-start: 16px;
+        padding-inline-end: 24px;
+    }
+
+    .mud-table {
+        color: var(--mud-palette-text-primary);
+        background-color: var(--mud-palette-surface);
+        border-radius: var(--mud-default-borderradius);
+        transition: box-shadow 300ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;
+        height: 650px;
+        overflow: scroll;
+    }
 </style>
 
 @code {
+
     [SupplyParameterFromQuery]
     public Guid? projectId { get; set; }
 
     private Guid? _projectId;
     private string? _projectName;
+
     private decimal _weightMin = 0.190m;
     private decimal _weightMax = 0.210m;
     private decimal _newWeight = 0.200m;
+
     private List<BadSampleDto>? _badSamples;
+    private List<BadSampleDto> _pagedRows = new();
     private HashSet<BadSampleDto> _selectedSamples = new();
+
     private bool _isLoading = false;
     private bool _isApplying = false;
+
+    // Pagination
+    private int _currentPage = 1;
+    private int _pageSize = 15;
+    private int _totalCount = 0;
+    private int _totalPages => _totalCount == 0 ? 1 :
+        (int)Math.Ceiling((double)_totalCount / _pageSize);
 
     protected override async Task OnInitializedAsync()
     {
         _projectId = projectId ?? ProjectService.CurrentProjectId;
+
         if (_projectId.HasValue)
         {
             var result = await ProjectService.GetProjectAsync(_projectId.Value);
-            if (result.Succeeded && result.Data != null)
-            {
-                _projectName = result.Data.ProjectName;
-            }
+            if (result.Succeeded)
+                _projectName = result.Data?.ProjectName;
         }
     }
 
@@ -256,23 +306,52 @@
         _selectedSamples.Clear();
         StateHasChanged();
 
-        var result = await CorrectionService.FindBadWeightsAsync(_projectId.Value, _weightMin, _weightMax);
+        var result = await CorrectionService.FindBadWeightsAsync(
+            _projectId.Value, _weightMin, _weightMax);
 
-        if (result.Succeeded && result.Data != null)
+        if (result.Succeeded)
         {
-            _badSamples = result.Data;
-            if (_badSamples.Any())
-            {
-                Snackbar.Add($"Found {_badSamples.Count} samples with bad weights", Severity.Warning);
-            }
+            _badSamples = result.Data ?? new();
+            _totalCount = _badSamples.Count;
+
+            Snackbar.Add($"Found {_badSamples.Count} samples", Severity.Warning);
         }
         else
         {
             Snackbar.Add(result.Message ?? "Failed to check weights", Severity.Error);
-            _badSamples = new List<BadSampleDto>();
+            _badSamples = new();
+            _totalCount = 0;
         }
 
+        _currentPage = 1;
+        UpdatePagedRows();
+
         _isLoading = false;
+    }
+
+    private void UpdatePagedRows()
+    {
+        if (_badSamples == null) return;
+
+        _pagedRows = _badSamples
+            .Skip((_currentPage - 1) * _pageSize)
+            .Take(_pageSize)
+            .ToList();
+    }
+
+    private void OnPageChanged(int page)
+    {
+        _currentPage = page;
+        UpdatePagedRows();
+        StateHasChanged();
+    }
+
+    private void OnPageSizeChanged(int size)
+    {
+        _pageSize = size;
+        _currentPage = 1;
+        UpdatePagedRows();
+        StateHasChanged();
     }
 
     private async Task ApplyCorrection()
@@ -283,12 +362,14 @@
         StateHasChanged();
 
         var labels = _selectedSamples.Select(s => s.SolutionLabel).ToList();
-        var result = await CorrectionService.ApplyWeightCorrectionAsync(_projectId.Value, labels, _newWeight);
+
+        var result = await CorrectionService.ApplyWeightCorrectionAsync(
+            _projectId.Value, labels, _newWeight);
 
         if (result.Succeeded)
         {
             Snackbar.Add($"Corrected {result.Data?.CorrectedRows ?? 0} samples", Severity.Success);
-            await FindBadWeights(); // Refresh
+            await FindBadWeights();
         }
         else
         {
@@ -298,24 +379,9 @@
         _isApplying = false;
     }
 
-    private void SelectAll()
-    {
-        if (_badSamples != null)
-        {
-            _selectedSamples = new HashSet<BadSampleDto>(_badSamples);
-        }
-    }
-
-    private void ClearSelection()
-    {
-        _selectedSamples.Clear();
-    }
-
     private async Task OnBeforeNavigation(LocationChangingContext context)
     {
         if (_isApplying)
-        {
             context.PreventNavigation();
-        }
     }
 }
