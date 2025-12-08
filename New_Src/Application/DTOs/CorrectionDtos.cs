@@ -1,4 +1,7 @@
-﻿namespace Application.DTOs;
+﻿using System.Text.Json.Serialization; // ✅ برای JsonIgnore
+using System.Text.RegularExpressions;
+
+namespace Application.DTOs;
 
 // ============================================
 // Request DTOs
@@ -29,7 +32,7 @@ public record FindEmptyRowsRequest(
     Guid ProjectId,
     decimal ThresholdPercent = 70m,
     List<string>? ElementsToCheck = null,
-    bool RequireAllElements = true  // ✅ اضافه شد - true = مثل پایتون (همه عناصر باید زیر آستانه باشند)
+    bool RequireAllElements = true
 );
 
 /// <summary>
@@ -124,7 +127,15 @@ public record EmptyRowDto(
     int ElementsBelowThreshold,
     int TotalElementsChecked,
     decimal OverallScore
-);
+)
+{
+    /// <summary>
+    /// یک شناسه امن برای استفاده در HTML ID و Key
+    /// تمام کاراکترهای غیر مجاز (فاصله، پرانتز و...) را حذف می‌کند
+    /// </summary>
+    [JsonIgnore] // ✅ این فیلد در جیسون ذخیره یا ارسال نمی‌شود
+    public string SafeId => Regex.Replace(SolutionLabel ?? Guid.NewGuid().ToString(), @"[^a-zA-Z0-9-_]", "_");
+}
 
 /// <summary>
 /// Result of applying a correction

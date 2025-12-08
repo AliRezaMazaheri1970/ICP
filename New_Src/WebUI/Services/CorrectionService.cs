@@ -1,6 +1,6 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
-
+using Application.DTOs; 
 namespace WebUI.Services;
 
 // ============================================
@@ -212,7 +212,7 @@ public class CorrectionService
     /// <summary>
     /// Find empty/outlier rows
     /// </summary>
-    public async Task<ServiceResult<List<EmptyRowDto>>> FindEmptyRowsAsync(Guid projectId, decimal thresholdPercent = 70m)
+    public async Task<ServiceResult<List<Application.DTOs.EmptyRowDto>>> FindEmptyRowsAsync(Guid projectId, decimal thresholdPercent = 70m)
     {
         try
         {
@@ -224,21 +224,25 @@ public class CorrectionService
 
             if (response.IsSuccessStatusCode)
             {
-                var result = JsonSerializer.Deserialize<ApiResult<List<EmptyRowDto>>>(content,
+                // ✅ تغییر مهم: استفاده صریح از Application.DTOs.EmptyRowDto
+                var result = JsonSerializer.Deserialize<ApiResult<List<Application.DTOs.EmptyRowDto>>>(content,
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
                 if (result?.Succeeded == true && result.Data != null)
-                    return ServiceResult<List<EmptyRowDto>>.Success(result.Data);
+                {
+                    // حالا result.Data از نوع درست است و بدون خطا تبدیل می‌شود
+                    return ServiceResult<List<Application.DTOs.EmptyRowDto>>.Success(result.Data);
+                }
 
-                return ServiceResult<List<EmptyRowDto>>.Fail(result?.Message ?? "Failed");
+                return ServiceResult<List<Application.DTOs.EmptyRowDto>>.Fail(result?.Message ?? "Failed");
             }
 
-            return ServiceResult<List<EmptyRowDto>>.Fail($"Server error: {response.StatusCode}");
+            return ServiceResult<List<Application.DTOs.EmptyRowDto>>.Fail($"Server error: {response.StatusCode}");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error finding empty rows");
-            return ServiceResult<List<EmptyRowDto>>.Fail($"Error: {ex.Message}");
+            return ServiceResult<List<Application.DTOs.EmptyRowDto>>.Fail($"Error: {ex.Message}");
         }
     }
 

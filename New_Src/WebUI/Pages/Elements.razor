@@ -81,7 +81,26 @@
                         </MudTable>
                     }
                 </MudPaper>
+                @* Common Oxide Factors Reference *@
+                <MudPaper Elevation="0" Class="pa-4 mt-4 custom-card-all">
+                    <MudExpansionPanels>
+                        <MudExpansionPanel Text="Common Oxide Factors Reference">
+                            <MudGrid>
+                                @foreach (var oxide in _commonOxides)
+                                {
+                                    <MudItem xs="6" sm="4" md="2">
+                                        <MudPaper Elevation="0" Class="pa-2 text-center" Style="background: var(--mud-palette-background-grey);">
+                                            <MudText Typo="Typo.body2" Class="fw-medium">@oxide.Oxide</MudText>
+                                            <MudText Typo="Typo.caption">@oxide.Factor.ToString("F4")</MudText>
+                                        </MudPaper>
+                                    </MudItem>
+                                }
+                            </MudGrid>
+                        </MudExpansionPanel>
+                    </MudExpansionPanels>
+                </MudPaper>
             </MudItem>
+
 
             @* Element Details / Editor *@
             <MudItem xs="12" md="4">
@@ -107,7 +126,7 @@
                         <MudTextField @bind-Value="_selectedElement.Symbol"
                                       Label="Symbol"
                                       Variant="Variant.Outlined"
-                                      Class="mb-3" />
+                                      Class="mb-3 " />
 
                         <MudSelect T="string"
                                    Label="Unit"
@@ -161,6 +180,7 @@
                     }
                 </MudPaper>
 
+
                 @* Oxide Factor Calculator *@
                 <MudPaper Elevation="0" Class="pa-4 mt-4 custom-card-all">
                     <MudText Typo="Typo.h6" Class="mb-4">
@@ -199,27 +219,13 @@
             </MudItem>
         </MudGrid>
 
-        @* Common Oxide Factors Reference *@
-        <MudPaper Elevation="0" Class="pa-4 mt-4 custom-card-all">
-            <MudExpansionPanels>
-                <MudExpansionPanel Text="Common Oxide Factors Reference">
-                    <MudGrid>
-                        @foreach (var oxide in _commonOxides)
-                        {
-                            <MudItem xs="6" sm="4" md="2">
-                                <MudPaper Elevation="0" Class="pa-2 text-center" Style="background: var(--mud-palette-background-grey);">
-                                    <MudText Typo="Typo.body2" Class="fw-medium">@oxide.Oxide</MudText>
-                                    <MudText Typo="Typo.caption">@oxide.Factor.ToString("F4")</MudText>
-                                </MudPaper>
-                            </MudItem>
-                        }
-                    </MudGrid>
-                </MudExpansionPanel>
-            </MudExpansionPanels>
-        </MudPaper>
     }
 </MudContainer>
-
+<style>
+    .mud-input > input.mud-input-root-outlined, div.mud-input-slot.mud-input-root-outlined {
+        padding: 12px 14px;
+    }
+</style>
 @code {
     [SupplyParameterFromQuery]
     public Guid? projectId { get; set; }

@@ -1,5 +1,7 @@
 @page "/process/empty"
 @using WebUI.Services
+@using Application.DTOs  @* ✅ این خط اضافه شد تا SafeId شناخته شود *@
+@using EmptyRowDto = Application.DTOs.EmptyRowDto
 @inject ProjectService ProjectService
 @inject CorrectionService CorrectionService
 @inject ISnackbar Snackbar
@@ -7,6 +9,7 @@
 
 <PageTitle>ICP - Empty Check</PageTitle>
 <NavigationLock OnBeforeInternalNavigation="OnBeforeNavigation" ConfirmExternalNavigation="_isLoading" />
+
 @* Loading Overlay *@
 @if (_isLoading)
 {
@@ -14,7 +17,6 @@
         <MudPaper Elevation="4" Class="pa-6 d-flex flex-column align-center">
             <MudProgressCircular Color="Color.Primary" Size="Size.Large" Indeterminate="true" />
             <MudText Typo="Typo.h6" Class="mt-4">Processing...</MudText>
-
         </MudPaper>
     </div>
 }
@@ -39,7 +41,8 @@
     @if (_projectId == null)
     {
         <MudAlert Severity="Severity.Warning">
-            Please select a project first. <MudLink Href="/projects">Go to Projects</MudLink>
+            Please select a project first.
+            <MudLink Href="/projects">Go to Projects</MudLink>
         </MudAlert>
     }
     else
@@ -94,7 +97,7 @@
                                     <MudChip T="string" Size="Size.Small" Color="Color.Primary">@_selectedRows.Count</MudChip>
                                 </div>
                             }
-                            
+
                             @* Progress Bar for Delete Operation *@
                             @if (_isDeleting && _deleteProgress > 0)
                             {
@@ -102,18 +105,18 @@
                                 <MudText Typo="Typo.caption" Class="mb-1">
                                     Deleting: @_deletedCount / @_totalToDelete rows
                                 </MudText>
-                                <MudProgressLinear Value="@_deleteProgress" 
-                                                   Color="Color.Error" 
-                                                   Striped="true" 
+                                <MudProgressLinear Value="@_deleteProgress"
+                                                   Color="Color.Error"
+                                                   Striped="true"
                                                    Size="Size.Large"
                                                    Class="mb-2">
                                     <MudText Typo="Typo.caption">@_deleteProgress.ToString("F0")%</MudText>
                                 </MudProgressLinear>
                             }
-                            
+
                             <MudDivider Class="my-2" />
-                            
-                            @* Delete All - حذف همه *@
+
+                            @* Delete All *@
                             <MudButton Variant="Variant.Filled"
                                        Color="Color.Error"
                                        FullWidth="true"
@@ -128,8 +131,8 @@
                             </MudButton>
 
                             <MudDivider Class="my-2" />
-                            
-                            @* Select All - انتخاب همه *@
+
+                            @* Select All *@
                             <MudButton Variant="Variant.Filled"
                                        Color="Color.Primary"
                                        FullWidth="true"
@@ -149,8 +152,8 @@
                             </MudButton>
 
                             <MudDivider Class="my-2" />
-                            
-                            @* Delete Selected - حذف انتخاب شده‌ها *@
+
+                            @* Delete Selected *@
                             <MudButton Variant="Variant.Filled"
                                        Color="Color.Warning"
                                        FullWidth="true"
@@ -159,7 +162,7 @@
                                        Disabled="@(!_selectedRows.Any() || _isDeleting)">
                                 Delete Selected (@_selectedRows.Count)
                             </MudButton>
-                            
+
                             <MudButton Variant="Variant.Outlined"
                                        Color="Color.Info"
                                        FullWidth="true"
@@ -172,7 +175,7 @@
                 }
             </MudItem>
 
-            <MudItem xs="12" md="9" >
+            <MudItem xs="12" md="9">
                 <MudPaper Elevation="0" Class="pa-4 custom-card-all">
                     <div class="d-flex justify-space-between align-center mb-4">
                         <MudText Typo="Typo.h6">
@@ -206,7 +209,6 @@
                                   Hover="true"
                                   Dense="true"
                                   FixedHeader="true"
-                                  @* Height="200px" *@
                                   T="EmptyRowDto"
                                   OnRowClick="@((args) => { if (args.Item != null) SelectRow(args.Item); })">
                             <HeaderContent>
@@ -220,7 +222,9 @@
                             </HeaderContent>
                             <RowTemplate>
                                 <MudTd>
-                                    <MudCheckBox T="bool" Value="@_selectedRows.Contains(context)" 
+                                    @* ✅ اینجا SafeId استفاده شده است *@
+                                    <MudCheckBox T="bool" @key="@context.SafeId"
+                                                 Value="@_selectedRows.Contains(context)"
                                                  ValueChanged="@((bool val) => ToggleRowSelection(context, val))" />
                                 </MudTd>
                                 <MudTd>
@@ -233,7 +237,7 @@
                                 </MudTd>
                                 <MudTd>@context.TotalElementsChecked</MudTd>
                                 <MudTd>
-                                    <MudProgressLinear Value="@((double)context.OverallScore)" 
+                                    <MudProgressLinear Value="@((double)context.OverallScore)"
                                                        Color="@GetScoreColor(context.OverallScore)"
                                                        Size="Size.Small"
                                                        Style="width: 80px;" />
@@ -255,8 +259,8 @@
                                 </MudTd>
                                 <MudTd>
                                     <MudTooltip Text="Delete this row">
-                                        <MudIconButton Icon="@Icons.Material.Filled.Delete" 
-                                                       Color="Color.Error" 
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                       Color="Color.Error"
                                                        Size="Size.Small"
                                                        OnClick="@(() => DeleteSingleRow(context))" />
                                     </MudTooltip>
@@ -266,14 +270,20 @@
 
                         @* Pagination *@
                         <div class="d-flex justify-center align-center mt-4 gap-4">
-                            <MudSelect T="int" Value="_pageSize" ValueChanged="OnPageSizeChanged" 
+                            <MudSelect T="int" Value="_pageSize" ValueChanged="OnPageSizeChanged"
                                        Label="Per Page" Variant="Variant.Outlined" Dense="true" Style="width: 100px;">
-                                <MudSelectItem Value="25">25</MudSelectItem>
+                                <MudSelectItem Value="10">10</MudSelectItem>
+                                <MudSelectItem Value="20">20</MudSelectItem>
+                                <MudSelectItem Value="30">30</MudSelectItem>
+                                <MudSelectItem Value="40">40</MudSelectItem>
                                 <MudSelectItem Value="50">50</MudSelectItem>
+                                <MudSelectItem Value="60">60</MudSelectItem>
+                                <MudSelectItem Value="70">70</MudSelectItem>
+                                <MudSelectItem Value="80">80</MudSelectItem>
+                                <MudSelectItem Value="90">90</MudSelectItem>
                                 <MudSelectItem Value="100">100</MudSelectItem>
-                                <MudSelectItem Value="200">200</MudSelectItem>
                             </MudSelect>
-                            <MudPagination Count="@_totalPages" 
+                            <MudPagination Count="@_totalPages"
                                            Selected="_currentPage"
                                            SelectedChanged="OnPageChanged"
                                            ShowFirstButton="true"
@@ -283,7 +293,7 @@
                         </div>
 
                         @* Element Details *@
-                        <MudExpansionPanels Class="mt-4" >
+                        <MudExpansionPanels Class="mt-4">
                             <MudExpansionPanel Text="Element Details" @bind-Expanded="_detailsExpanded">
                                 @if (_selectedEmpty != null)
                                 {
@@ -368,7 +378,7 @@
     private int _currentPage = 1;
     private int _pageSize = 50;
     private int _totalCount = 0;
-    private int _totalPages => (int)Math.Ceiling((double)_totalCount / _pageSize);
+    private int _totalPages => _totalCount == 0 ? 1 : (int)Math.Ceiling((double)_totalCount / _pageSize);
 
     protected override async Task OnInitializedAsync()
     {
@@ -386,13 +396,11 @@
     private async Task FindEmptyRows()
     {
         if (_projectId == null) return;
-
         _isLoading = true;
         _selectedRows.Clear();
         StateHasChanged();
 
         var result = await CorrectionService.FindEmptyRowsAsync(_projectId.Value, _thresholdPercent);
-
         if (result.Succeeded && result.Data != null)
         {
             _emptyRows = result.Data.OrderBy(x => x.OverallScore).ToList();
@@ -419,7 +427,6 @@
     private void UpdatePagedRows()
     {
         if (_emptyRows == null) return;
-        
         _pagedRows = _emptyRows
             .Skip((_currentPage - 1) * _pageSize)
             .Take(_pageSize)
@@ -494,13 +501,11 @@
     private async Task DeleteAllRows()
     {
         if (_emptyRows == null || !_emptyRows.Any() || _projectId == null) return;
-
         var confirm = await DialogService.ShowMessageBox(
             "⚠️ Delete ALL Empty Rows",
             $"Are you sure you want to delete ALL {_totalCount} empty/outlier rows?\n\nThis action CANNOT be undone!",
             yesText: "Yes, Delete All",
             cancelText: "Cancel");
-
         if (confirm != true) return;
 
         // دومین تأیید برای اطمینان
@@ -509,7 +514,6 @@
             $"This will permanently delete {_totalCount} rows. Are you absolutely sure?",
             yesText: "DELETE",
             cancelText: "Cancel");
-
         if (doubleConfirm != true) return;
 
         _isDeleting = true;
@@ -517,7 +521,7 @@
         _deletedCount = 0;
         StateHasChanged();
 
-        // حذف به صورت دسته‌ای (batch) برای جلوگیری از timeout
+        // حذف به صورت دسته‌ای (batch)
         var allLabels = _emptyRows.Select(r => r.SolutionLabel).ToList();
         var batchSize = 500;
         _totalToDelete = allLabels.Count;
@@ -527,14 +531,13 @@
         {
             var batch = allLabels.Skip(i).Take(batchSize).ToList();
             var result = await CorrectionService.DeleteRowsAsync(_projectId.Value, batch);
-            
+
             if (result.Succeeded)
             {
                 totalDeleted += result.Data;
                 _deletedCount = totalDeleted;
                 _deleteProgress = (double)totalDeleted / _totalToDelete * 100;
                 StateHasChanged();
-                
                 Snackbar.Add($"Batch {i / batchSize + 1}: Deleted {result.Data} rows ({_deleteProgress:F0}%)", Severity.Info);
             }
             else
@@ -562,13 +565,11 @@
     private async Task DeleteSelectedRows()
     {
         if (!_selectedRows.Any() || _projectId == null) return;
-
         var confirm = await DialogService.ShowMessageBox(
             "Confirm Delete",
             $"Are you sure you want to delete {_selectedRows.Count} selected rows? This action cannot be undone.",
             yesText: "Delete",
             cancelText: "Cancel");
-
         if (confirm != true) return;
 
         _isDeleting = true;
@@ -580,8 +581,6 @@
         if (result.Succeeded)
         {
             Snackbar.Add($"Deleted {result.Data} rows successfully", Severity.Success);
-            
-            // Remove from local list
             foreach (var row in _selectedRows.ToList())
             {
                 _emptyRows?.Remove(row);
@@ -601,17 +600,14 @@
     private async Task DeleteSingleRow(EmptyRowDto row)
     {
         if (_projectId == null) return;
-
         var confirm = await DialogService.ShowMessageBox(
             "Confirm Delete",
             $"Are you sure you want to delete '{row.SolutionLabel}'?",
             yesText: "Delete",
             cancelText: "Cancel");
-
         if (confirm != true) return;
 
         var result = await CorrectionService.DeleteRowsAsync(_projectId.Value, new List<string> { row.SolutionLabel });
-
         if (result.Succeeded)
         {
             Snackbar.Add($"Deleted '{row.SolutionLabel}'", Severity.Success);
@@ -632,12 +628,13 @@
         if (score < 50) return Color.Warning;
         return Color.Info;
     }
+
     private async Task OnBeforeNavigation(LocationChangingContext context)
     {
         if (_isLoading)
         {
             context.PreventNavigation();
         }
+        await Task.CompletedTask;
     }
-
 }
