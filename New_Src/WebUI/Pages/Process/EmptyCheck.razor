@@ -11,7 +11,7 @@
 <NavigationLock OnBeforeInternalNavigation="OnBeforeNavigation" ConfirmExternalNavigation="_isLoading" />
 
 @* Loading Overlay *@
-@if (_isLoading)
+@if (_isLoading || _isDeleting)
 {
     <div class="loading-overlay">
         <MudPaper Elevation="4" Class="pa-6 d-flex flex-column align-center">
@@ -378,7 +378,7 @@
     }
 </style>
 
-@code {
+    @code {
     [SupplyParameterFromQuery]
     public Guid? projectId { get; set; }
 
@@ -630,8 +630,10 @@
             yesText: "Delete",
             cancelText: "Cancel");
         if (confirm != true) return;
-
+        _isDeleting = true;
+        StateHasChanged();
         var result = await CorrectionService.DeleteRowsAsync(_projectId.Value, new List<string> { row.SolutionLabel });
+       
         if (result.Succeeded)
         {
             Snackbar.Add($"Deleted '{row.SolutionLabel}'", Severity.Success);
@@ -639,11 +641,13 @@
             _selectedRows.Remove(row);
             _totalCount = _emptyRows?.Count ?? 0;
             UpdatePagedRows();
+
         }
         else
         {
             Snackbar.Add(result.Message ?? "Failed to delete", Severity.Error);
         }
+        _isDeleting = false;
     }
 
     private Color GetScoreColor(decimal score)

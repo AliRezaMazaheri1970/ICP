@@ -200,7 +200,7 @@
                 {
                     <MudPaper Elevation="0" Class="pa-4 mt-4 custom-card-all">
                         <MudExpansionPanels Class="box-shadow-0">
-                            <MudExpansionPanel Text="All Samples Preview">
+                            <MudExpansionPanel Text="All Samples Preview" @bind-Expanded="_detailsExpanded">
                                 <MudTable Items="@_allSamples.Take(100)"
                                           Hover="true"
                                           Class="box-shadow-0"
@@ -211,7 +211,7 @@
                                         <MudTh>Row</MudTh>
                                         <MudTh>Solution Label</MudTh>
                                         <MudTh>Dilution Factor</MudTh>
-                                        <MudTh>Status</MudTh>?
+                                        <MudTh>Status</MudTh>
                                     </HeaderContent>
                                     <RowTemplate>
                                         <MudTd>@context.RowNumber</MudTd>
@@ -267,6 +267,7 @@
     private bool _autoCorrect = false;
     private bool _isLoading = false;
     private int _totalSamples = 0;
+    private bool _detailsExpanded = true;
     private List<DfSample> _badDfSamples = new();
     private List<DfSample> _allSamples = new();
     private List<DfDistribution> _dfDistribution = new();

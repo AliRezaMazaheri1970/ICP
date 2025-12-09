@@ -1,5 +1,6 @@
-@page "/projects"
+﻿@page "/projects"
 @using WebUI.Services
+@using System.Globalization
 @inject ProjectService ProjectService
 @inject NavigationManager NavManager
 @inject ISnackbar Snackbar
@@ -16,7 +17,7 @@
                     Manage your ICP data projects
                 </MudText>
             </div>
-            <MudButton Variant="Variant.Filled" 
+            <MudButton Variant="Variant.Filled"
                        Color="Color.Primary"
                        StartIcon="@Icons.Material.Filled.Add"
                        OnClick="@(() => NavManager.NavigateTo("/import"))">
@@ -38,7 +39,7 @@
                           OnDebounceIntervalElapsed="SearchProjects"
                           Class="flex-grow-1"
                           Style="max-width: 400px;" />
-            
+
             <MudButton Variant="Variant.Outlined"
                        StartIcon="@Icons.Material.Filled.Refresh"
                        OnClick="LoadProjects"
@@ -64,8 +65,8 @@
         }
         else
         {
-            <MudTable Items="@_projects" 
-                      Hover="true" 
+            <MudTable Items="@_projects"
+                      Hover="true"
                       Striped="true"
                       Dense="true"
                       Loading="_isLoading"
@@ -93,30 +94,31 @@
                             @context.RowCount.ToString("N0")
                         </MudChip>
                     </MudTd>
-                    <MudTd DataLabel="Created">@context.CreatedAt.ToString("yyyy-MM-dd HH:mm")</MudTd>
-                    <MudTd DataLabel="Modified">@context.LastModifiedAt.ToString("yyyy-MM-dd HH:mm")</MudTd>
+                    @* convert date to shamsi *@
+                    <MudTd DataLabel="Created">@ToShamsi(context.CreatedAt)</MudTd>
+                    <MudTd DataLabel="Modified">@ToShamsi(context.LastModifiedAt)</MudTd>
                     <MudTd DataLabel="Actions">
                         <MudButtonGroup Size="Size.Small" Variant="Variant.Outlined">
                             <MudTooltip Text="Open Project">
-                                <MudIconButton Icon="@Icons.Material.Filled.OpenInNew" 
+                                <MudIconButton Icon="@Icons.Material.Filled.OpenInNew"
                                                Size="Size.Small"
                                                Color="Color.Primary"
                                                OnClick="@(() => OpenProject(context))" />
                             </MudTooltip>
                             <MudTooltip Text="Version History">
-                                <MudIconButton Icon="@Icons.Material.Filled.History" 
+                                <MudIconButton Icon="@Icons.Material.Filled.History"
                                                Size="Size.Small"
                                                Color="Color.Info"
                                                OnClick="@(() => OpenVersionHistory(context))" />
                             </MudTooltip>
                             <MudTooltip Text="Process Data">
-                                <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" 
+                                <MudIconButton Icon="@Icons.Material.Filled.PlayArrow"
                                                Size="Size.Small"
                                                Color="Color.Secondary"
                                                OnClick="@(() => ProcessProject(context))" />
                             </MudTooltip>
                             <MudTooltip Text="Delete Project">
-                                <MudIconButton Icon="@Icons.Material.Filled.Delete" 
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete"
                                                Size="Size.Small"
                                                Color="Color.Error"
                                                OnClick="@(() => DeleteProject(context))" />
@@ -150,7 +152,7 @@
         StateHasChanged();
 
         var result = await ProjectService.GetProjectsAsync(_currentPage, _pageSize, _searchText);
-        
+
         if (result.Succeeded && result.Data != null)
         {
             _projects = result.Data.Items;
@@ -212,5 +214,27 @@
     private void OpenVersionHistory(ProjectDto project)
     {
         NavManager.NavigateTo($"/project/{project.ProjectId}/versions");
+    }
+
+    // متد جدید اضافه شده برای تبدیل تاریخ
+    private string ToShamsi(DateTime date)
+    {
+        if (date == DateTime.MinValue) return "-";
+
+        var pc = new PersianCalendar();
+
+        TimeZoneInfo iranTimeZone;
+        try
+        {
+            iranTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Iran Standard Time");
+        }
+        catch
+        {
+            iranTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Tehran");
+        }
+
+        var iranTime = TimeZoneInfo.ConvertTimeFromUtc(date, iranTimeZone);
+
+        return $"{pc.GetYear(iranTime)}/{pc.GetMonth(iranTime):00}/{pc.GetDayOfMonth(iranTime):00} {iranTime.Hour:00}:{iranTime.Minute:00}";
     }
 }
