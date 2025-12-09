@@ -1,4 +1,4 @@
-@page "/process/df"
+﻿@page "/process/df"
 @using WebUI.Services
 @inject ProjectService ProjectService
 @inject CorrectionService CorrectionService
@@ -7,6 +7,7 @@
 
 <PageTitle>ICP - DF Check</PageTitle>
 <NavigationLock OnBeforeInternalNavigation="OnBeforeNavigation" ConfirmExternalNavigation="_isLoading" />
+
 @* Loading Overlay *@
 @if (_isLoading)
 {
@@ -14,10 +15,10 @@
         <MudPaper Elevation="4" Class="pa-6 d-flex flex-column align-center">
             <MudProgressCircular Color="Color.Primary" Size="Size.Large" Indeterminate="true" />
             <MudText Typo="Typo.h6" Class="mt-4">Processing...</MudText>
-
         </MudPaper>
     </div>
 }
+
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
     <MudPaper Elevation="0" Class="pa-4 mb-4 custom-card-all">
         <div class="d-flex justify-space-between align-center">
@@ -151,13 +152,22 @@
                     }
                     else if (_badDfSamples.Any())
                     {
-                        <MudText Typo="Typo.h6" Class="mb-2">Samples with Abnormal DF</MudText>
-                        <MudTable Items="@_badDfSamples"
+                        <div class="d-flex justify-space-between align-center mb-2">
+                            <MudText Typo="Typo.h6">Samples with Abnormal DF</MudText>
+                            @if (_totalBadCount > 0)
+                            {
+                                <MudText Typo="Typo.caption">
+                                    Showing @((_currentPage - 1) * _pageSize + 1) - @Math.Min(_currentPage * _pageSize, _totalBadCount) of @_totalBadCount
+                                </MudText>
+                            }
+                        </div>
+
+                        @* ✅ تغییر: بایند کردن به لیست صفحه‌بندی شده *@
+                        <MudTable Items="@_pagedBadSamples"
                                   Hover="true"
                                   Dense="true"
                                   Class="box-shadow-0"
-                                  FixedHeader="true"
-                                  Height="400px">
+                                  FixedHeader="true">
                             <HeaderContent>
                                 <MudTh>Row</MudTh>
                                 <MudTh>Solution Label</MudTh>
@@ -192,21 +202,49 @@
                                 </MudTd>
                             </RowTemplate>
                         </MudTable>
+
+                        @* ✅ اضافه کردن کنترل‌های صفحه‌بندی *@
+                        <MudDivider Class="my-4" />
+                        <div class="d-flex justify-center align-center gap-4">
+                            <MudSelect T="int" Value="_pageSize" ValueChanged="OnPageSizeChanged"
+                                       Label="Per Page" Variant="Variant.Outlined" Dense="true" Style="width: 100px;">
+                                <MudSelectItem Value="10">10</MudSelectItem>
+                                <MudSelectItem Value="20">20</MudSelectItem>
+                                <MudSelectItem Value="30">30</MudSelectItem>
+                                <MudSelectItem Value="40">40</MudSelectItem>
+                                <MudSelectItem Value="50">50</MudSelectItem>
+                                <MudSelectItem Value="60">60</MudSelectItem>
+                                <MudSelectItem Value="70">70</MudSelectItem>
+                                <MudSelectItem Value="80">80</MudSelectItem>
+                                <MudSelectItem Value="90">90</MudSelectItem>
+                                <MudSelectItem Value="100">100</MudSelectItem>
+                            </MudSelect>
+                            <MudPagination Count="@_totalPages"
+                                           Selected="_currentPage"
+                                           SelectedChanged="OnPageChanged"
+                                           ShowFirstButton="true"
+                                           ShowLastButton="true"
+                                           BoundaryCount="1"
+                                           MiddleCount="3" />
+                        </div>
                     }
                 </MudPaper>
 
                 @* All Samples Preview *@
                 @if (_allSamples.Any())
                 {
-                    <MudPaper Elevation="0" Class="pa-4 mt-4 custom-card-all">
-                        <MudExpansionPanels Class="box-shadow-0">
-                            <MudExpansionPanel Text="All Samples Preview" @bind-Expanded="_detailsExpanded">
+                    <MudPaper Elevation="0" Class="pa-4 mt-4 custom-card-all" Height="280px">
+                        <MudExpansionPanels Class="box-shadow-0" Style="overflow:hidden">
+                            <MudExpansionPanel Text="All Samples Preview"
+                                
+                                Style="overflow:clip;"
+                                @bind-Expanded="_detailsExpanded">
                                 <MudTable Items="@_allSamples.Take(100)"
                                           Hover="true"
                                           Class="box-shadow-0"
                                           Dense="true"
                                           FixedHeader="true"
-                                          Height="240px">
+                                          Style="height:180px">
                                     <HeaderContent>
                                         <MudTh>Row</MudTh>
                                         <MudTh>Solution Label</MudTh>
@@ -217,7 +255,7 @@
                                         <MudTd>@context.RowNumber</MudTd>
                                         <MudTd>@context.SolutionLabel</MudTd>
                                         <MudTd>
-                                            <MudChip T="string" Size="Size.Small" 
+                                            <MudChip T="string" Size="Size.Small"
                                                      Color="@(Math.Abs(context.CurrentDf - _expectedDf) <= _expectedDf * _tolerancePercent / 100 ? Color.Success : Color.Warning)">
                                                 @context.CurrentDf.ToString("F2")
                                             </MudChip>
@@ -255,6 +293,30 @@
         align-items: center;
         z-index: 9999;
     }
+
+    .mud-simple-table table {
+        width: 100%;
+        display: table;
+        border-spacing: 0;
+        border-collapse: collapse;
+        height: 200px;
+        overflow: scroll;
+    }
+
+    .mud-table-dense * .mud-table-row .mud-table-cell {
+        padding: 0px 15px 0px 16px;
+        padding-inline-start: 16px;
+        padding-inline-end: 24px;
+    }
+
+    .mud-table {
+        color: var(--mud-palette-text-primary);
+        background-color: var(--mud-palette-surface);
+        border-radius: var(--mud-default-borderradius);
+        transition: box-shadow 300ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;
+        height: 362px;
+        overflow: scroll;
+    }
 </style>
 @code {
     [SupplyParameterFromQuery]
@@ -263,14 +325,22 @@
     private Guid? _projectId;
     private string? _projectName;
     private decimal _expectedDf = 1m;
-    private decimal _tolerancePercent = 0m;  // Python uses exact match
+    private decimal _tolerancePercent = 0m;
     private bool _autoCorrect = false;
     private bool _isLoading = false;
     private int _totalSamples = 0;
     private bool _detailsExpanded = true;
+    
     private List<DfSample> _badDfSamples = new();
     private List<DfSample> _allSamples = new();
     private List<DfDistribution> _dfDistribution = new();
+
+    // ✅ متغیرهای صفحه‌بندی
+    private List<DfSample> _pagedBadSamples = new();
+    private int _currentPage = 1;
+    private int _pageSize = 10;
+    private int _totalBadCount = 0;
+    private int _totalPages => _totalBadCount == 0 ? 1 : (int)Math.Ceiling((double)_totalBadCount / _pageSize);
 
     protected override async Task OnInitializedAsync()
     {
@@ -290,7 +360,6 @@
     {
         if (_projectId == null) return;
 
-        // Use new DF samples API that reads directly from RawDataRows
         var result = await CorrectionService.GetDfSamplesAsync(_projectId.Value);
         if (result.Succeeded && result.Data != null)
         {
@@ -346,6 +415,11 @@
                     return deviation > _tolerancePercent;
                 })
                 .ToList();
+            
+            // ✅ تنظیم مقادیر اولیه صفحه‌بندی
+            _totalBadCount = _badDfSamples.Count;
+            _currentPage = 1;
+            UpdatePagedRows();
 
             if (_badDfSamples.Any())
             {
@@ -379,7 +453,13 @@
                 Snackbar.Add($"Corrected {result.Data.CorrectedRows} samples to DF = {_expectedDf}", Severity.Success);
                 
                 // Reload samples to show updated state
+                // نکته: برای اینکه جدول خالی شود یا آپدیت شود، باید دوباره Detect صدا زده شود یا لیست پاک شود
                 await LoadSamples();
+                
+                // لیست بدها را پاک میکنیم چون اصلاح شدند
+                _badDfSamples.Clear();
+                _totalBadCount = 0;
+                UpdatePagedRows();
             }
             else
             {
@@ -394,6 +474,34 @@
         {
             _isLoading = false;
         }
+    }
+
+    // ✅ متدهای صفحه‌بندی
+    private void UpdatePagedRows()
+    {
+        if (_badDfSamples == null)
+        {
+            _pagedBadSamples = new();
+            return;
+        }
+
+        _pagedBadSamples = _badDfSamples
+            .Skip((_currentPage - 1) * _pageSize)
+            .Take(_pageSize)
+            .ToList();
+    }
+
+    private void OnPageChanged(int page)
+    {
+        _currentPage = page;
+        UpdatePagedRows();
+    }
+
+    private void OnPageSizeChanged(int size)
+    {
+        _pageSize = size;
+        _currentPage = 1;
+        UpdatePagedRows();
     }
 
     public class DfSample
@@ -419,5 +527,6 @@
         {
             context.PreventNavigation();
         }
+        await Task.CompletedTask;
     }
 }
