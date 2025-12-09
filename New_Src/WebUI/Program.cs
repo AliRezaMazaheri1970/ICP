@@ -1,4 +1,5 @@
-﻿using MudBlazor.Services;
+﻿using Application.Services; // احتمالا به این فضای نام هم نیاز دارید
+using MudBlazor.Services;
 using WebUI.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -8,7 +9,7 @@ var builder = WebApplication.CreateBuilder(args);
 // ============================================
 builder.Services.AddRazorPages();
 builder.Services.AddServerSideBlazor();
-// در Program.cs بعد از AuthService
+
 // ============================================
 // 2. MudBlazor Services
 // ============================================
@@ -49,6 +50,10 @@ builder.Services.AddScoped<DriftService>();
 builder.Services.AddScoped<ReportService>();
 builder.Services.AddScoped<OptimizationService>();
 
+// ✅✅✅ خط زیر اضافه شد تا مشکل Version History حل شود:
+builder.Services.AddScoped<IVersionService, VersionService>();
+
+
 // ============================================
 // Build Application
 // ============================================
@@ -64,12 +69,7 @@ if (app.Environment.IsDevelopment())
 else
 {
     app.UseExceptionHandler("/Error");
-    // فقط در صورت استفاده از HTTPS
-    // app.UseHsts();
 }
-
-// اگه پشت Nginx با SSL هستی، این خط رو کامنت کن
-// app.UseHttpsRedirection();
 
 app.UseStaticFiles();
 app.UseRouting();
