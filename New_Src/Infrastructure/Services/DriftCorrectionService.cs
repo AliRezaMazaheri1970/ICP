@@ -702,7 +702,7 @@ public class DriftCorrectionService : IDriftCorrectionService
     }
 
     /// <summary>
-    /// Check if sample is a standard (should not be corrected)
+    /// Check if sample is a standard (RM/CRM/etc)
     /// </summary>
     private bool IsStandardSample(string solutionLabel)
     {
@@ -713,6 +713,15 @@ public class DriftCorrectionService : IDriftCorrectionService
                label.StartsWith("OREAS") ||
                label.StartsWith("STD") ||
                label.StartsWith("STANDARD");
+    }
+
+    /// <summary>
+    /// Check if sample is the START standard of a segment (should not be corrected)
+    /// Python behavior: only the FIRST RM of each segment stays unchanged
+    /// </summary>
+    private bool IsSegmentStartStandard(int sampleIndex, List<DriftSegment> segments)
+    {
+        return segments.Any(s => s.StartIndex == sampleIndex);
     }
 
     private List<CorrectedSampleDto> ApplyLinearCorrection(
@@ -727,7 +736,12 @@ public class DriftCorrectionService : IDriftCorrectionService
         for (int i = 0; i < data.Count; i++)
         {
             var segmentIndex = GetSegmentIndexForSample(i, segments);
-            var shouldCorrect = segmentIndex >= 0 && !IsStandardSample(data[i].SolutionLabel);
+
+            // Python behavior: correct everything EXCEPT:
+            // 1. Samples before first standard (segmentIndex < 0)
+            // 2. The START standard of each segment
+            var isStartStandard = IsSegmentStartStandard(i, segments);
+            var shouldCorrect = segmentIndex >= 0 && !isStartStandard;
 
             var correctedValues = new Dictionary<string, decimal?>();
             var correctionFactors = new Dictionary<string, decimal>();
@@ -778,7 +792,10 @@ public class DriftCorrectionService : IDriftCorrectionService
         {
             var segmentIndex = GetSegmentIndexForSample(i, segments);
             var segment = segmentIndex >= 0 ? segments.FirstOrDefault(s => s.SegmentIndex == segmentIndex) : null;
-            var shouldCorrect = segment != null && !IsStandardSample(data[i].SolutionLabel);
+
+            // Python behavior: correct everything EXCEPT start standard
+            var isStartStandard = IsSegmentStartStandard(i, segments);
+            var shouldCorrect = segment != null && !isStartStandard;
 
             var correctedValues = new Dictionary<string, decimal?>();
             var correctionFactors = new Dictionary<string, decimal>();
