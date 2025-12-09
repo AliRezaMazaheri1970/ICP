@@ -11,7 +11,8 @@ public record DriftCorrectionRequest(
     DriftMethod Method = DriftMethod.Linear,
     bool UseSegmentation = true,
     string? BasePattern = null,
-    string? ConePattern = null
+    string? ConePattern = null,
+    string? ChangedBy = null
 );
 
 /// <summary>

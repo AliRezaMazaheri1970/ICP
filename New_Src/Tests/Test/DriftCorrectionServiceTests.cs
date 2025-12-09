@@ -26,13 +26,14 @@ public class DriftCorrectionServiceTests : IDisposable
         var options = new DbContextOptionsBuilder<IsatisDbContext>()
             .UseInMemoryDatabase(databaseName: $"DriftTest_{Guid.NewGuid()}")
             .Options;
-
         _db = new IsatisDbContext(options);
+
         var logger = new Mock<ILogger<DriftCorrectionService>>();
+        var changeLogService = new Mock<IChangeLogService>();  // ← اضافه کن
 
-        _driftService = new DriftCorrectionService(_db, logger.Object);
+        _driftService = new DriftCorrectionService(_db, changeLogService.Object, logger.Object);  // ← اصلاح کن
+
         _testProjectId = Guid.NewGuid();
-
         SeedTestData();
     }
 
