@@ -120,13 +120,8 @@
                                       AdornmentIcon="@loginPasswordIcon"
                                       OnAdornmentClick="() => loginPasswordVisible = !loginPasswordVisible"
                                       AdornmentAriaLabel="Show Password"
+                                      OnKeyDown="HandleEnterKey"
                                       Class="mb-4" />
-
-                        <MudCheckBox @bind-Value="rememberMe"
-                                     Label="Remember Me"
-                                   
-                                     Size="Size.Small"
-                                     Class="mb-4" />
 
                      
                         <MudButton Variant="Variant.Filled"
@@ -288,5 +283,17 @@
         if (!string.IsNullOrEmpty(value) && value.Length < 6)
             return "Password must be at least 6 characters";
         return null;
+    }
+
+    private async Task HandleEnterKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" || e.Code == "Enter" || e.Code == "NumpadEnter")
+        {
+            // بررسی اینکه فرم معتبر باشد و در حال پردازش نباشد
+            if (IsLoginFormValid() && !loginProcessing)
+            {
+                await HandleLogin();
+            }
+        }
     }
 }
