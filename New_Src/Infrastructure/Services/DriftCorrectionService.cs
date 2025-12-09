@@ -1,7 +1,7 @@
 ﻿using Application.DTOs;
 using Application.Services;
+using Domain.Entities;
 using Infrastructure.Persistence;
-using MathNet.Numerics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Shared.Wrapper;
@@ -11,27 +11,31 @@ using System.Text.RegularExpressions;
 namespace Infrastructure.Services;
 
 /// <summary>
-/// Implementation of drift correction algorithms
-/// Based on Python RM_check.py logic - 100% Python Compatible
+/// Drift Correction Service - 100% Python Compatible (Optimized)
+/// 
+/// Key optimization: Only stores RM/Standard values as initial (like Python's initial_rm_df)
+/// Not the entire dataset - much faster!
 /// </summary>
 public class DriftCorrectionService : IDriftCorrectionService
 {
     private readonly IsatisDbContext _db;
+    private readonly IChangeLogService _changeLogService;
     private readonly ILogger<DriftCorrectionService> _logger;
 
-    // ============================================================
-    // Default patterns - PYTHON COMPATIBLE
-    // Python: keyword = "RM" (default in keyword_entry = QLineEdit("RM"))
-    // ============================================================
     private const string DefaultBasePattern = @"^RM";
-    private const string? DefaultConePattern = null;
+    private const string InitialRmStateDescription = "Initial:DriftRM";
 
-    // RmPattern for other standards (when custom pattern provided)
-    private static readonly Regex RmPattern = new(@"^(OREAS|SRM|CRM|STANDARD|STD)(?!\s*BLANK)\s*\d*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RmPattern = new(
+        @"^(OREAS|SRM|CRM|STANDARD|STD)(?!\s*BLANK)\s*\d*",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    public DriftCorrectionService(IsatisDbContext db, ILogger<DriftCorrectionService> logger)
+    public DriftCorrectionService(
+        IsatisDbContext db,
+        IChangeLogService changeLogService,
+        ILogger<DriftCorrectionService> logger)
     {
         _db = db;
+        _changeLogService = changeLogService;
         _logger = logger;
     }
 
@@ -48,33 +52,29 @@ public class DriftCorrectionService : IDriftCorrectionService
             if (project == null)
                 return Result<DriftCorrectionResult>.Fail("Project not found");
 
-            // Get raw data (PIVOTED - each sample is one row)
-            var rawData = await GetParsedDataAsync(request.ProjectId);
-            if (!rawData.Any())
+            var currentData = await GetParsedDataAsync(request.ProjectId);
+            if (!currentData.Any())
                 return Result<DriftCorrectionResult>.Fail("No data found for project");
 
-            _logger.LogInformation("AnalyzeDrift: {Count} samples loaded", rawData.Count);
+            var segments = DetectSegments(currentData, request.BasePattern, request.ConePattern);
+            var elements = request.SelectedElements ?? GetAllElements(currentData);
 
-            // Detect segments (Python-compatible)
-            var segments = DetectSegments(rawData, request.BasePattern, request.ConePattern);
+            // Get initial RM values (if saved)
+            var initialRmValues = await GetInitialRmValuesAsync(request.ProjectId);
 
-            // Get elements to analyze
-            var elements = request.SelectedElements ?? GetAllElements(rawData);
+            // Calculate ratios using initial values if available
+            var segmentRatios = CalculateSegmentRatios(currentData, segments, elements, initialRmValues);
 
-            // Calculate segment-specific ratios
-            var segmentRatios = CalculateSegmentRatios(rawData, segments, elements);
-
-            // Calculate drift info for each element
             var elementDrifts = new Dictionary<string, ElementDriftInfo>();
             foreach (var element in elements)
             {
-                var driftInfo = CalculateElementDriftPiecewise(rawData, element, segments, segmentRatios);
+                var driftInfo = CalculateElementDrift(currentData, element, segments, segmentRatios, initialRmValues);
                 if (driftInfo != null)
                     elementDrifts[element] = driftInfo;
             }
 
             var result = new DriftCorrectionResult(
-                TotalSamples: rawData.Count,
+                TotalSamples: currentData.Count,
                 CorrectedSamples: 0,
                 SegmentsFound: segments.Count,
                 Segments: segments,
@@ -96,56 +96,70 @@ public class DriftCorrectionService : IDriftCorrectionService
         try
         {
             var project = await _db.Projects
-                .AsNoTracking()
                 .FirstOrDefaultAsync(p => p.ProjectId == request.ProjectId);
 
             if (project == null)
                 return Result<DriftCorrectionResult>.Fail("Project not found");
 
-            var rawData = await GetParsedDataAsync(request.ProjectId);
-            if (!rawData.Any())
+            var currentData = await GetParsedDataAsync(request.ProjectId);
+            if (!currentData.Any())
                 return Result<DriftCorrectionResult>.Fail("No data found for project");
 
-            var segments = DetectSegments(rawData, request.BasePattern, request.ConePattern);
-            var elements = request.SelectedElements ?? GetAllElements(rawData);
-            var segmentRatios = CalculateSegmentRatios(rawData, segments, elements);
+            var segments = DetectSegments(currentData, request.BasePattern, request.ConePattern);
+            var elements = request.SelectedElements ?? GetAllElements(currentData);
+
+            // Save initial RM values if not exists (Python: initial_rm_df)
+            await SaveInitialRmValuesIfNotExistsAsync(request.ProjectId, currentData, segments);
+
+            // Get initial RM values
+            var initialRmValues = await GetInitialRmValuesAsync(request.ProjectId);
+
+            var segmentRatios = CalculateSegmentRatios(currentData, segments, elements, initialRmValues);
 
             var elementDrifts = new Dictionary<string, ElementDriftInfo>();
             foreach (var element in elements)
             {
-                var driftInfo = CalculateElementDriftPiecewise(rawData, element, segments, segmentRatios);
+                var driftInfo = CalculateElementDrift(currentData, element, segments, segmentRatios, initialRmValues);
                 if (driftInfo != null)
                     elementDrifts[element] = driftInfo;
             }
 
-            // Apply correction based on method
+            // Apply correction
             var correctedData = request.Method switch
             {
-                DriftMethod.Linear => ApplyLinearCorrectionPiecewise(rawData, segments, elements, segmentRatios),
-                DriftMethod.Stepwise => ApplyStepwiseCorrectionArithmetic(rawData, segments, elements, segmentRatios),
-                DriftMethod.Polynomial => ApplyPolynomialCorrection(rawData, elements),
-                _ => rawData.Select((d, i) => new CorrectedSampleDto(
-                    d.SolutionLabel,
-                    i,
-                    0,
-                    d.Values,
-                    d.Values,
-                    new Dictionary<string, decimal>()
-                )).ToList()
+                DriftMethod.Linear => ApplyLinearCorrection(currentData, segments, elements, segmentRatios),
+                DriftMethod.Stepwise => ApplyStepwiseCorrection(currentData, segments, elements, segmentRatios),
+                _ => ApplyLinearCorrection(currentData, segments, elements, segmentRatios)
             };
 
+            // Save undo state
+            await SaveUndoStateAsync(request.ProjectId, $"DriftCorrection_{request.Method}");
+
+            // Save to database
+            var savedCount = await SaveCorrectedDataToDatabase(request.ProjectId, correctedData, elements);
+
+            project.LastModifiedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+
+            await _changeLogService.LogChangeAsync(
+                request.ProjectId,
+                "DriftCorrection",
+                request.ChangedBy,
+                details: $"Applied {request.Method} drift correction. Segments: {segments.Count}, Corrected: {savedCount}"
+            );
+
+            _logger.LogInformation(
+                "Drift correction applied: Method={Method}, Segments={Segments}, Saved={Saved}",
+                request.Method, segments.Count, savedCount);
+
             var result = new DriftCorrectionResult(
-                TotalSamples: rawData.Count,
-                CorrectedSamples: correctedData.Count(c => c.CorrectionFactors.Any()),
+                TotalSamples: currentData.Count,
+                CorrectedSamples: savedCount,
                 SegmentsFound: segments.Count,
                 Segments: segments,
                 ElementDrifts: elementDrifts,
                 CorrectedData: correctedData
             );
-
-            _logger.LogInformation(
-                "Drift correction applied: Method={Method}, Segments={Segments}, CorrectedSamples={Corrected}",
-                request.Method, segments.Count, result.CorrectedSamples);
 
             return Result<DriftCorrectionResult>.Success(result);
         }
@@ -157,9 +171,7 @@ public class DriftCorrectionService : IDriftCorrectionService
     }
 
     public async Task<Result<List<DriftSegment>>> DetectSegmentsAsync(
-        Guid projectId,
-        string? basePattern = null,
-        string? conePattern = null)
+        Guid projectId, string? basePattern = null, string? conePattern = null)
     {
         try
         {
@@ -178,43 +190,27 @@ public class DriftCorrectionService : IDriftCorrectionService
     }
 
     public async Task<Result<Dictionary<string, List<decimal>>>> CalculateDriftRatiosAsync(
-        Guid projectId,
-        List<string>? elements = null)
+        Guid projectId, List<string>? elements = null)
     {
         try
         {
-            var rawData = await GetParsedDataAsync(projectId);
-            if (!rawData.Any())
+            var currentData = await GetParsedDataAsync(projectId);
+            if (!currentData.Any())
                 return Result<Dictionary<string, List<decimal>>>.Fail("No data found");
 
-            var allElements = elements ?? GetAllElements(rawData);
+            var allElements = elements ?? GetAllElements(currentData);
+            var segments = DetectSegments(currentData, null, null);
+            var initialRmValues = await GetInitialRmValuesAsync(projectId);
+            var segmentRatios = CalculateSegmentRatios(currentData, segments, allElements, initialRmValues);
+
             var ratios = new Dictionary<string, List<decimal>>();
-
-            var standardIndices = rawData
-                .Select((d, i) => (Data: d, Index: i))
-                .Where(x => IsStandardSample(x.Data.SolutionLabel))
-                .Select(x => x.Index)
-                .ToList();
-
             foreach (var element in allElements)
             {
-                var elementRatios = new List<decimal>();
-
-                for (int i = 1; i < standardIndices.Count; i++)
-                {
-                    var prevIdx = standardIndices[i - 1];
-                    var currIdx = standardIndices[i];
-
-                    var prevValue = GetElementValue(rawData[prevIdx], element);
-                    var currValue = GetElementValue(rawData[currIdx], element);
-
-                    if (prevValue.HasValue && currValue.HasValue && prevValue.Value != 0)
-                    {
-                        var ratio = currValue.Value / prevValue.Value;
-                        elementRatios.Add(ratio);
-                    }
-                }
-
+                var elementRatios = segments
+                    .Where(s => segmentRatios.ContainsKey(s.SegmentIndex) &&
+                                segmentRatios[s.SegmentIndex].ContainsKey(element))
+                    .Select(s => segmentRatios[s.SegmentIndex][element])
+                    .ToList();
                 ratios[element] = elementRatios;
             }
 
@@ -227,98 +223,186 @@ public class DriftCorrectionService : IDriftCorrectionService
         }
     }
 
-    public async Task<Result<SlopeOptimizationResult>> OptimizeSlopeAsync(SlopeOptimizationRequest request)
+    public Task<Result<SlopeOptimizationResult>> OptimizeSlopeAsync(SlopeOptimizationRequest request)
+        => Task.FromResult(Result<SlopeOptimizationResult>.Fail("Not implemented"));
+
+    public Task<Result<SlopeOptimizationResult>> ZeroSlopeAsync(Guid projectId, string element)
+        => Task.FromResult(Result<SlopeOptimizationResult>.Fail("Not implemented"));
+
+    #endregion
+
+    #region Private Methods - Initial RM Values (Python: initial_rm_df) - OPTIMIZED
+
+    /// <summary>
+    /// Save only RM values as initial - much smaller than full dataset
+    /// Python equivalent: initial_rm_df (only stores RM rows, not all data)
+    /// </summary>
+    private async Task SaveInitialRmValuesIfNotExistsAsync(
+        Guid projectId,
+        List<ParsedRow> data,
+        List<DriftSegment> segments)
     {
-        try
+        var existing = await _db.ProjectStates
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.ProjectId == projectId &&
+                                      s.Description == InitialRmStateDescription);
+
+        if (existing != null)
+            return;
+
+        // Extract only RM/Standard values at segment boundaries
+        var rmValues = new Dictionary<string, Dictionary<string, decimal?>>();
+
+        foreach (var segment in segments)
         {
-            var rawData = await GetParsedDataAsync(request.ProjectId);
-            if (!rawData.Any())
-                return Result<SlopeOptimizationResult>.Fail("No data found");
+            // Start standard
+            var startLabel = data[segment.StartIndex].SolutionLabel;
+            if (!rmValues.ContainsKey(startLabel))
+                rmValues[startLabel] = new Dictionary<string, decimal?>(data[segment.StartIndex].Values);
 
-            var values = rawData
-                .Select((d, i) => (Index: i, Value: GetElementValue(d, request.Element)))
-                .Where(x => x.Value.HasValue)
-                .ToList();
-
-            if (values.Count < 2)
-                return Result<SlopeOptimizationResult>.Fail("Not enough data points for slope optimization");
-
-            var xData = values.Select(v => (double)v.Index).ToArray();
-            var yData = values.Select(v => (double)v.Value!.Value).ToArray();
-
-            var (intercept, slope) = Fit.Line(xData, yData);
-
-            double newSlope = request.Action switch
-            {
-                SlopeAction.ZeroSlope => 0,
-                SlopeAction.RotateUp => slope + Math.Abs(slope) * 0.1,
-                SlopeAction.RotateDown => slope - Math.Abs(slope) * 0.1,
-                SlopeAction.SetCustom => (double)(request.TargetSlope ?? 0),
-                _ => slope
-            };
-
-            var centerX = xData.Average();
-            var centerY = yData.Average();
-            var newIntercept = centerY - newSlope * centerX;
-
-            var correctedData = new List<CorrectedSampleDto>();
-            for (int i = 0; i < rawData.Count; i++)
-            {
-                var originalValue = GetElementValue(rawData[i], request.Element);
-                var correctionFactor = 1.0m;
-
-                if (originalValue.HasValue)
-                {
-                    var originalFitted = intercept + slope * i;
-                    var newFitted = newIntercept + newSlope * i;
-
-                    if (originalFitted != 0)
-                        correctionFactor = (decimal)(newFitted / originalFitted);
-                }
-
-                var correctedValues = new Dictionary<string, decimal?>(rawData[i].Values);
-                if (originalValue.HasValue)
-                    correctedValues[request.Element] = originalValue.Value * correctionFactor;
-
-                correctedData.Add(new CorrectedSampleDto(
-                    rawData[i].SolutionLabel,
-                    i,
-                    0,
-                    rawData[i].Values,
-                    correctedValues,
-                    new Dictionary<string, decimal> { { request.Element, correctionFactor } }
-                ));
-            }
-
-            return Result<SlopeOptimizationResult>.Success(new SlopeOptimizationResult(
-                request.Element,
-                (decimal)slope,
-                (decimal)newSlope,
-                (decimal)intercept,
-                (decimal)newIntercept,
-                correctedData
-            ));
+            // End standard
+            var endLabel = data[segment.EndIndex].SolutionLabel;
+            if (!rmValues.ContainsKey(endLabel))
+                rmValues[endLabel] = new Dictionary<string, decimal?>(data[segment.EndIndex].Values);
         }
-        catch (Exception ex)
+
+        var stateJson = JsonSerializer.Serialize(rmValues);
+
+        _db.ProjectStates.Add(new ProjectState
         {
-            _logger.LogError(ex, "Failed to optimize slope for project {ProjectId}", request.ProjectId);
-            return Result<SlopeOptimizationResult>.Fail($"Failed to optimize slope: {ex.Message}");
-        }
+            ProjectId = projectId,
+            Data = stateJson,
+            Description = InitialRmStateDescription,
+            Timestamp = DateTime.UtcNow
+        });
+
+        await _db.SaveChangesAsync();
+
+        _logger.LogInformation("Saved initial RM values for project {ProjectId}, {Count} standards",
+            projectId, rmValues.Count);
     }
 
-    public async Task<Result<SlopeOptimizationResult>> ZeroSlopeAsync(Guid projectId, string element)
+    /// <summary>
+    /// Get initial RM values - fast lookup
+    /// </summary>
+    private async Task<Dictionary<string, Dictionary<string, decimal?>>?> GetInitialRmValuesAsync(Guid projectId)
     {
-        return await OptimizeSlopeAsync(new SlopeOptimizationRequest(projectId, element, SlopeAction.ZeroSlope));
+        var state = await _db.ProjectStates
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.ProjectId == projectId &&
+                                      s.Description == InitialRmStateDescription);
+
+        if (state == null)
+            return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, decimal?>>>(state.Data);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     #endregion
 
-    #region Private Helper Methods - Data Access (PIVOTED - Python Compatible)
+    #region Private Methods - Database Operations
 
-    /// <summary>
-    /// Get parsed data with PIVOT - each sample becomes one row with all elements
-    /// This matches Python's pivot_table behavior
-    /// </summary>
+    private async Task<int> SaveCorrectedDataToDatabase(
+        Guid projectId,
+        List<CorrectedSampleDto> correctedData,
+        List<string> elements)
+    {
+        var rawRows = await _db.RawDataRows
+            .Where(r => r.ProjectId == projectId)
+            .ToListAsync();
+
+        var savedCount = 0;
+
+        var corrections = new Dictionary<(string Label, string Element), decimal>();
+        foreach (var sample in correctedData)
+        {
+            if (sample.CorrectionFactors == null || !sample.CorrectionFactors.Any())
+                continue;
+
+            foreach (var element in elements)
+            {
+                if (sample.CorrectedValues.TryGetValue(element, out var correctedValue) && correctedValue.HasValue)
+                {
+                    corrections[(sample.SolutionLabel, element)] = correctedValue.Value;
+                }
+            }
+        }
+
+        foreach (var row in rawRows)
+        {
+            try
+            {
+                var dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(row.ColumnData);
+                if (dict == null) continue;
+
+                var solutionLabel = dict.TryGetValue("Solution Label", out var sl)
+                    ? sl.GetString() ?? row.SampleId ?? ""
+                    : row.SampleId ?? "";
+
+                string? elementName = null;
+                if (dict.TryGetValue("Element", out var elemProp))
+                    elementName = elemProp.GetString();
+
+                if (string.IsNullOrWhiteSpace(elementName))
+                    continue;
+
+                if (!corrections.TryGetValue((solutionLabel, elementName), out var newValue))
+                    continue;
+
+                var newDict = new Dictionary<string, object>();
+                foreach (var kvp in dict)
+                {
+                    if (kvp.Key == "Corr Con")
+                        newDict["Corr Con"] = newValue;
+                    else
+                        newDict[kvp.Key] = GetJsonValue(kvp.Value);
+                }
+
+                if (!newDict.ContainsKey("Corr Con"))
+                    newDict["Corr Con"] = newValue;
+
+                row.ColumnData = JsonSerializer.Serialize(newDict);
+                savedCount++;
+            }
+            catch { }
+        }
+
+        await _db.SaveChangesAsync();
+        return savedCount;
+    }
+
+    private async Task SaveUndoStateAsync(Guid projectId, string operation)
+    {
+        var rows = await _db.RawDataRows
+            .AsNoTracking()
+            .Where(r => r.ProjectId == projectId)
+            .Select(r => new SavedRowData(r.SampleId, r.ColumnData))
+            .ToListAsync();
+
+        var stateJson = JsonSerializer.Serialize(rows);
+
+        _db.ProjectStates.Add(new ProjectState
+        {
+            ProjectId = projectId,
+            Data = stateJson,
+            Description = $"Undo:{operation}",
+            Timestamp = DateTime.UtcNow
+        });
+
+        await _db.SaveChangesAsync();
+    }
+
+    #endregion
+
+    #region Private Methods - Data Access
+
     private async Task<List<ParsedRow>> GetParsedDataAsync(Guid projectId)
     {
         var rawRows = await _db.RawDataRows
@@ -327,7 +411,6 @@ public class DriftCorrectionService : IDriftCorrectionService
             .OrderBy(r => r.DataId)
             .ToListAsync();
 
-        // Step 1: Group by Solution Label and pivot
         var pivotedData = new Dictionary<string, Dictionary<string, decimal?>>();
         var sampleOrder = new List<string>();
 
@@ -338,184 +421,110 @@ public class DriftCorrectionService : IDriftCorrectionService
                 var data = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(row.ColumnData);
                 if (data == null) continue;
 
-                // Get Solution Label
                 var solutionLabel = data.TryGetValue("Solution Label", out var sl)
                     ? sl.GetString() ?? row.SampleId ?? $"Row_{row.DataId}"
                     : row.SampleId ?? $"Row_{row.DataId}";
 
-                // Get Element name
                 string? elementName = null;
                 if (data.TryGetValue("Element", out var elemProp))
-                {
                     elementName = elemProp.GetString();
-                }
 
                 if (string.IsNullOrWhiteSpace(elementName))
                     continue;
 
-                // Initialize sample if not exists
                 if (!pivotedData.ContainsKey(solutionLabel))
                 {
                     pivotedData[solutionLabel] = new Dictionary<string, decimal?>();
                     sampleOrder.Add(solutionLabel);
                 }
 
-                // Get value (prefer Soln Conc for drift, like Python uses Corr Con)
                 decimal? value = null;
-
-                // Try Corr Con first (Python uses this for RM check)
                 if (data.TryGetValue("Corr Con", out var corrCon))
-                {
                     value = ExtractDecimalValue(corrCon);
-                }
 
-                // Fallback to Soln Conc
                 if (!value.HasValue && data.TryGetValue("Soln Conc", out var solnConc))
-                {
                     value = ExtractDecimalValue(solnConc);
-                }
 
                 pivotedData[solutionLabel][elementName] = value;
             }
-            catch
-            {
-                // Skip malformed rows
-            }
+            catch { }
         }
 
-        // Step 2: Convert to ParsedRow list (maintaining original order)
         var result = new List<ParsedRow>();
-        foreach (var sampleLabel in sampleOrder)
+        foreach (var label in sampleOrder)
         {
-            if (pivotedData.TryGetValue(sampleLabel, out var values))
-            {
-                result.Add(new ParsedRow(sampleLabel, values));
-            }
+            if (pivotedData.TryGetValue(label, out var values))
+                result.Add(new ParsedRow(label, values));
         }
-
-        _logger.LogInformation("GetParsedDataAsync: {RawRows} raw rows → {Samples} samples (pivoted)",
-            rawRows.Count, result.Count);
 
         return result;
     }
 
-    private decimal? ExtractDecimalValue(JsonElement element)
+    private static decimal? ExtractDecimalValue(JsonElement element)
     {
         if (element.ValueKind == JsonValueKind.Number)
-        {
             return element.GetDecimal();
-        }
-        else if (element.ValueKind == JsonValueKind.String)
+
+        if (element.ValueKind == JsonValueKind.String)
         {
-            var strVal = element.GetString();
-            if (!string.IsNullOrWhiteSpace(strVal) && strVal != "-----" &&
-                decimal.TryParse(strVal, out var parsed))
-            {
-                return parsed;
-            }
+            var str = element.GetString();
+            if (!string.IsNullOrWhiteSpace(str) && str != "-----" && decimal.TryParse(str, out var val))
+                return val;
         }
         return null;
     }
 
+    private static object GetJsonValue(JsonElement element)
+    {
+        return element.ValueKind switch
+        {
+            JsonValueKind.String => element.GetString() ?? "",
+            JsonValueKind.Number => element.TryGetDecimal(out var d) ? d : element.GetDouble(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Null => null!,
+            _ => element.GetRawText()
+        };
+    }
+
     #endregion
 
-    #region Private Helper Methods - Segment Detection (Python-Compatible)
+    #region Private Methods - Segment Detection
 
-    /// <summary>
-    /// Detect segments based on RM/Standard positions
-    /// Python-compatible logic from RM_check.py
-    /// </summary>
     private List<DriftSegment> DetectSegments(List<ParsedRow> data, string? basePattern, string? conePattern)
     {
         var segments = new List<DriftSegment>();
-
-        // Use provided patterns or defaults
-        var effectiveBasePattern = basePattern ?? DefaultBasePattern;
-        var baseRegex = new Regex(effectiveBasePattern, RegexOptions.IgnoreCase);
+        var effectivePattern = basePattern ?? DefaultBasePattern;
+        var baseRegex = new Regex(effectivePattern, RegexOptions.IgnoreCase);
 
         Regex? coneRegex = null;
         if (!string.IsNullOrWhiteSpace(conePattern))
-        {
             coneRegex = new Regex(conePattern, RegexOptions.IgnoreCase);
-        }
 
-        // Step 1: Identify all RM/Standard positions with their types
-        var standardIndices = new List<(int Index, string Label, int RmNum, string RmType)>();
+        var standardIndices = new List<(int Index, string Label)>();
 
         for (int i = 0; i < data.Count; i++)
         {
             var label = data[i].SolutionLabel;
-            string rmType = "Unknown";
-            int rmNum = 0;
 
-            // Check basePattern first (Python: label.str.match(rf'^{keyword}'))
-            if (baseRegex.IsMatch(label))
+            if (baseRegex.IsMatch(label) ||
+                (coneRegex != null && coneRegex.IsMatch(label)) ||
+                RmPattern.IsMatch(label))
             {
-                (rmNum, rmType) = ExtractRmInfo(label, effectiveBasePattern.TrimStart('^').Split('|')[0].TrimStart('('));
-                standardIndices.Add((i, label, rmNum, rmType));
-            }
-            // Check conePattern if provided
-            else if (coneRegex != null && coneRegex.IsMatch(label))
-            {
-                (rmNum, _) = ExtractRmInfo(label, "CONE");
-                standardIndices.Add((i, label, rmNum, "Cone"));
-            }
-            // Check RmPattern for other standards (OREAS, CRM, etc.)
-            else if (RmPattern.IsMatch(label))
-            {
-                (rmNum, rmType) = ExtractRmInfo(label, "RM");
-                standardIndices.Add((i, label, rmNum, rmType));
+                standardIndices.Add((i, label));
             }
         }
 
-        _logger.LogInformation("DetectSegments: Found {Count} standards", standardIndices.Count);
-
         if (standardIndices.Count < 2)
         {
-            // Single segment for entire data
             segments.Add(new DriftSegment(0, 0, data.Count - 1, null, null, data.Count));
             return segments;
         }
 
-        // Step 2: Python-compatible segmentation with Cone detection
-        int currentSegmentIndex = 0;
-        int? refRmNum = null;
-        var segmentStarts = new List<int> { 0 };
-
-        for (int i = 0; i < standardIndices.Count; i++)
-        {
-            var (index, label, rmNum, rmType) = standardIndices[i];
-
-            // Cone detection → start new segment
-            if (rmType == "Cone")
-            {
-                currentSegmentIndex++;
-                refRmNum = null;
-                segmentStarts.Add(index);
-            }
-
-            // First Base/Check in segment becomes reference
-            if (refRmNum == null && (rmType == "Base" || rmType == "Check"))
-            {
-                refRmNum = rmNum;
-            }
-        }
-
-        // Step 3: Create segments between consecutive standards
         for (int i = 0; i < standardIndices.Count - 1; i++)
         {
             var start = standardIndices[i];
             var end = standardIndices[i + 1];
-
-            int segIdx = 0;
-            for (int s = segmentStarts.Count - 1; s >= 0; s--)
-            {
-                if (start.Index >= segmentStarts[s])
-                {
-                    segIdx = s;
-                    break;
-                }
-            }
 
             segments.Add(new DriftSegment(
                 segments.Count,
@@ -539,109 +548,186 @@ public class DriftCorrectionService : IDriftCorrectionService
             .ToList();
     }
 
-    private bool IsStandardSample(string label)
-    {
-        if (string.IsNullOrWhiteSpace(label))
-            return false;
-
-        // Check default RM pattern
-        var defaultRegex = new Regex(DefaultBasePattern, RegexOptions.IgnoreCase);
-        if (defaultRegex.IsMatch(label))
-            return true;
-
-        return RmPattern.IsMatch(label);
-    }
-
     private decimal? GetElementValue(ParsedRow row, string element)
     {
-        return row.Values.TryGetValue(element, out var val) ? val : null;
+        return row.Values.TryGetValue(element, out var value) ? value : null;
     }
 
     #endregion
 
-    #region Private Helper Methods - Ratio Calculation
+    #region Private Methods - Ratio Calculation
 
+    /// <summary>
+    /// Calculate ratios for drift correction - Python compatible
+    /// 
+    /// First time (no initial saved):
+    ///   ratio = endValue / startValue (drift within segment)
+    /// 
+    /// After correction (initial exists):
+    ///   ratio = currentValue / initialValue (should be ~1.0 if corrected)
+    /// </summary>
     private Dictionary<int, Dictionary<string, decimal>> CalculateSegmentRatios(
-        List<ParsedRow> data,
+        List<ParsedRow> currentData,
         List<DriftSegment> segments,
-        List<string> elements)
+        List<string> elements,
+        Dictionary<string, Dictionary<string, decimal?>>? initialRmValues)
     {
-        var ratios = new Dictionary<int, Dictionary<string, decimal>>();
+        var result = new Dictionary<int, Dictionary<string, decimal>>();
 
         foreach (var segment in segments)
         {
-            var segmentRatios = new Dictionary<string, decimal>();
+            var ratios = new Dictionary<string, decimal>();
+            var startLabel = currentData[segment.StartIndex].SolutionLabel;
+            var endLabel = currentData[segment.EndIndex].SolutionLabel;
 
             foreach (var element in elements)
             {
-                var startValue = GetElementValue(data[segment.StartIndex], element);
-                var endValue = GetElementValue(data[segment.EndIndex], element);
+                decimal? startValue;
+                decimal? endValue;
 
-                if (startValue.HasValue && endValue.HasValue && startValue.Value != 0)
+                if (initialRmValues != null)
                 {
-                    segmentRatios[element] = endValue.Value / startValue.Value;
+                    // After first correction: compare current to initial
+                    // ratio = current / initial (should be ~1.0 after correction)
+
+                    // Get initial start value
+                    if (initialRmValues.TryGetValue(startLabel, out var startRm) &&
+                        startRm.TryGetValue(element, out var initStart))
+                    {
+                        startValue = initStart;
+                    }
+                    else
+                    {
+                        startValue = GetElementValue(currentData[segment.StartIndex], element);
+                    }
+
+                    // Get current end value
+                    endValue = GetElementValue(currentData[segment.EndIndex], element);
                 }
                 else
                 {
-                    segmentRatios[element] = 1.0m;
+                    // First time: calculate drift within segment
+                    // ratio = endValue / startValue
+                    startValue = GetElementValue(currentData[segment.StartIndex], element);
+                    endValue = GetElementValue(currentData[segment.EndIndex], element);
+                }
+
+                if (startValue.HasValue && endValue.HasValue && startValue.Value != 0)
+                {
+                    ratios[element] = endValue.Value / startValue.Value;
+                }
+                else
+                {
+                    ratios[element] = 1.0m;
                 }
             }
 
-            ratios[segment.SegmentIndex] = segmentRatios;
+            result[segment.SegmentIndex] = ratios;
         }
 
-        return ratios;
+        return result;
     }
 
-    private ElementDriftInfo? CalculateElementDriftPiecewise(
-        List<ParsedRow> data,
+    private ElementDriftInfo? CalculateElementDrift(
+        List<ParsedRow> currentData,
         string element,
         List<DriftSegment> segments,
-        Dictionary<int, Dictionary<string, decimal>> segmentRatios)
+        Dictionary<int, Dictionary<string, decimal>> segmentRatios,
+        Dictionary<string, Dictionary<string, decimal?>>? initialRmValues)
     {
-        var values = data
-            .Select((d, i) => (Index: i, Value: GetElementValue(d, element)))
-            .Where(x => x.Value.HasValue)
-            .ToList();
+        if (segments.Count == 0) return null;
 
-        if (values.Count < 2)
+        var firstSegment = segments.First();
+        var lastSegment = segments.Last();
+
+        var startLabel = currentData[firstSegment.StartIndex].SolutionLabel;
+
+        // Get initial value
+        decimal? initialFirst = null;
+        if (initialRmValues != null &&
+            initialRmValues.TryGetValue(startLabel, out var rmValues) &&
+            rmValues.TryGetValue(element, out var initVal))
+        {
+            initialFirst = initVal;
+        }
+        else
+        {
+            initialFirst = GetElementValue(currentData[firstSegment.StartIndex], element);
+        }
+
+        var currentLast = GetElementValue(currentData[lastSegment.EndIndex], element);
+
+        if (!initialFirst.HasValue || !currentLast.HasValue || initialFirst.Value == 0)
             return null;
 
-        var xData = values.Select(v => (double)v.Index).ToArray();
-        var yData = values.Select(v => (double)v.Value!.Value).ToArray();
-
-        var (intercept, slope) = Fit.Line(xData, yData);
-
-        var firstValue = yData.First();
-        var lastValue = yData.Last();
-        var driftPercent = firstValue != 0 ? ((lastValue - firstValue) / Math.Abs(firstValue)) * 100 : 0;
+        var driftPercent = ((currentLast.Value - initialFirst.Value) / Math.Abs(initialFirst.Value)) * 100;
 
         return new ElementDriftInfo(
             element,
             1.0m,
             1.0m,
-            (decimal)driftPercent,
-            (decimal)slope,
-            (decimal)intercept
+            driftPercent,
+            0m,
+            initialFirst.Value
         );
     }
 
     #endregion
 
-    #region Private Helper Methods - Correction Application
+    #region Private Methods - Correction Application
 
-    private List<CorrectedSampleDto> ApplyLinearCorrectionPiecewise(
+    /// <summary>
+    /// Get segment index for a sample - Python compatible
+    /// Samples before first standard: -1 (no correction)
+    /// Samples after a standard: belong to that standard's segment
+    /// </summary>
+    private int GetSegmentIndexForSample(int sampleIndex, List<DriftSegment> segments)
+    {
+        if (segments.Count == 0)
+            return -1;
+
+        // Samples before first standard → no correction
+        if (sampleIndex < segments[0].StartIndex)
+            return -1;
+
+        // Find the segment this sample belongs to
+        // Sample belongs to segment if: segment.StartIndex <= sampleIndex < nextSegment.StartIndex
+        for (int i = segments.Count - 1; i >= 0; i--)
+        {
+            if (sampleIndex >= segments[i].StartIndex)
+                return segments[i].SegmentIndex;
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// Check if sample is a standard (should not be corrected)
+    /// </summary>
+    private bool IsStandardSample(string solutionLabel)
+    {
+        var label = solutionLabel.ToUpper();
+        return label.StartsWith("RM") ||
+               label.StartsWith("CRM") ||
+               label.StartsWith("SRM") ||
+               label.StartsWith("OREAS") ||
+               label.StartsWith("STD") ||
+               label.StartsWith("STANDARD");
+    }
+
+    private List<CorrectedSampleDto> ApplyLinearCorrection(
         List<ParsedRow> data,
         List<DriftSegment> segments,
         List<string> elements,
         Dictionary<int, Dictionary<string, decimal>> segmentRatios)
     {
         var result = new List<CorrectedSampleDto>();
+        const decimal tolerance = 0.0001m;
 
         for (int i = 0; i < data.Count; i++)
         {
-            var segment = segments.FirstOrDefault(s => i >= s.StartIndex && i <= s.EndIndex);
-            var segmentIndex = segment?.SegmentIndex ?? 0;
+            var segmentIndex = GetSegmentIndexForSample(i, segments);
+            var shouldCorrect = segmentIndex >= 0 && !IsStandardSample(data[i].SolutionLabel);
 
             var correctedValues = new Dictionary<string, decimal?>();
             var correctionFactors = new Dictionary<string, decimal>();
@@ -650,30 +736,15 @@ public class DriftCorrectionService : IDriftCorrectionService
             {
                 var originalValue = GetElementValue(data[i], element);
 
-                if (originalValue.HasValue && segment != null &&
+                if (shouldCorrect && originalValue.HasValue &&
                     segmentRatios.TryGetValue(segmentIndex, out var ratios) &&
-                    ratios.TryGetValue(element, out var ratio))
+                    ratios.TryGetValue(element, out var ratio) &&
+                    ratio != 0 && Math.Abs(ratio - 1.0m) > tolerance)
                 {
-                    int n = segment.EndIndex - segment.StartIndex;
-                    if (n > 0)
-                    {
-                        decimal progress = (decimal)(i - segment.StartIndex) / n;
-                        decimal effectiveRatio = 1.0m + (ratio - 1.0m) * progress;
-
-                        if (effectiveRatio != 0)
-                        {
-                            correctedValues[element] = originalValue.Value / effectiveRatio;
-                            correctionFactors[element] = 1.0m / effectiveRatio;
-                        }
-                        else
-                        {
-                            correctedValues[element] = originalValue;
-                        }
-                    }
-                    else
-                    {
-                        correctedValues[element] = originalValue;
-                    }
+                    // Linear: apply fixed ratio for entire segment
+                    var correctionFactor = 1.0m / ratio;
+                    correctedValues[element] = originalValue.Value * correctionFactor;
+                    correctionFactors[element] = correctionFactor;
                 }
                 else
                 {
@@ -684,7 +755,7 @@ public class DriftCorrectionService : IDriftCorrectionService
             result.Add(new CorrectedSampleDto(
                 data[i].SolutionLabel,
                 i,
-                segmentIndex,
+                Math.Max(0, segmentIndex),
                 data[i].Values,
                 correctedValues,
                 correctionFactors
@@ -694,18 +765,20 @@ public class DriftCorrectionService : IDriftCorrectionService
         return result;
     }
 
-    private List<CorrectedSampleDto> ApplyStepwiseCorrectionArithmetic(
+    private List<CorrectedSampleDto> ApplyStepwiseCorrection(
         List<ParsedRow> data,
         List<DriftSegment> segments,
         List<string> elements,
         Dictionary<int, Dictionary<string, decimal>> segmentRatios)
     {
         var result = new List<CorrectedSampleDto>();
+        const decimal tolerance = 0.0001m;
 
         for (int i = 0; i < data.Count; i++)
         {
-            var segment = segments.FirstOrDefault(s => i >= s.StartIndex && i <= s.EndIndex);
-            var segmentIndex = segment?.SegmentIndex ?? 0;
+            var segmentIndex = GetSegmentIndexForSample(i, segments);
+            var segment = segmentIndex >= 0 ? segments.FirstOrDefault(s => s.SegmentIndex == segmentIndex) : null;
+            var shouldCorrect = segment != null && !IsStandardSample(data[i].SolutionLabel);
 
             var correctedValues = new Dictionary<string, decimal?>();
             var correctionFactors = new Dictionary<string, decimal>();
@@ -714,33 +787,26 @@ public class DriftCorrectionService : IDriftCorrectionService
             {
                 var originalValue = GetElementValue(data[i], element);
 
-                if (originalValue.HasValue && segment != null &&
+                if (shouldCorrect && originalValue.HasValue &&
                     segmentRatios.TryGetValue(segmentIndex, out var ratios) &&
-                    ratios.TryGetValue(element, out var ratio))
+                    ratios.TryGetValue(element, out var ratio) &&
+                    Math.Abs(ratio - 1.0m) > tolerance)
                 {
-                    // Python formula from RM_check.py:
-                    // delta = ratio - 1.0
-                    // step_delta = delta / n
-                    // effective_ratio = 1.0 + step_delta * (step_index + 1)
-                    // corrected = original * effective_ratio
-
+                    // Stepwise: gradual correction within segment
                     decimal delta = ratio - 1.0m;
-                    int n = segment.EndIndex - segment.StartIndex;
+                    int n = segment!.EndIndex - segment.StartIndex;
                     decimal stepDelta = n > 0 ? delta / n : 0;
                     int stepIndex = i - segment.StartIndex;
 
                     decimal effectiveRatio;
-                    if (i == segment.StartIndex)
-                    {
-                        effectiveRatio = 1.0m;
-                    }
+                    if (stepIndex <= 0)
+                        effectiveRatio = 1.0m;  // At start standard, no correction
                     else
-                    {
                         effectiveRatio = 1.0m + (stepDelta * stepIndex);
-                    }
 
-                    correctedValues[element] = originalValue.Value * effectiveRatio;
-                    correctionFactors[element] = effectiveRatio;
+                    var correctionFactor = effectiveRatio != 0 ? 1.0m / effectiveRatio : 1.0m;
+                    correctedValues[element] = originalValue.Value * correctionFactor;
+                    correctionFactors[element] = correctionFactor;
                 }
                 else
                 {
@@ -751,7 +817,7 @@ public class DriftCorrectionService : IDriftCorrectionService
             result.Add(new CorrectedSampleDto(
                 data[i].SolutionLabel,
                 i,
-                segmentIndex,
+                Math.Max(0, segmentIndex),
                 data[i].Values,
                 correctedValues,
                 correctionFactors
@@ -759,108 +825,6 @@ public class DriftCorrectionService : IDriftCorrectionService
         }
 
         return result;
-    }
-
-    private List<CorrectedSampleDto> ApplyPolynomialCorrection(List<ParsedRow> data, List<string> elements)
-    {
-        var result = new List<CorrectedSampleDto>();
-        var polynomialFits = new Dictionary<string, (double[] Coefficients, double Mean)>();
-
-        foreach (var element in elements)
-        {
-            var values = data
-                .Select((d, i) => (Index: i, Value: GetElementValue(d, element)))
-                .Where(x => x.Value.HasValue)
-                .ToList();
-
-            if (values.Count >= 3)
-            {
-                var xData = values.Select(v => (double)v.Index).ToArray();
-                var yData = values.Select(v => (double)v.Value!.Value).ToArray();
-
-                var coefficients = Fit.Polynomial(xData, yData, 2);
-                var mean = yData.Average();
-
-                polynomialFits[element] = (coefficients, mean);
-            }
-        }
-
-        for (int i = 0; i < data.Count; i++)
-        {
-            var correctedValues = new Dictionary<string, decimal?>();
-            var correctionFactors = new Dictionary<string, decimal>();
-
-            foreach (var element in elements)
-            {
-                var originalValue = GetElementValue(data[i], element);
-
-                if (originalValue.HasValue && polynomialFits.TryGetValue(element, out var fit))
-                {
-                    var fittedValue = fit.Coefficients[0] + fit.Coefficients[1] * i + fit.Coefficients[2] * i * i;
-                    var factor = fittedValue != 0 ? (decimal)(fit.Mean / fittedValue) : 1.0m;
-
-                    correctedValues[element] = originalValue.Value * factor;
-                    correctionFactors[element] = factor;
-                }
-                else
-                {
-                    correctedValues[element] = originalValue;
-                }
-            }
-
-            result.Add(new CorrectedSampleDto(
-                data[i].SolutionLabel,
-                i,
-                0,
-                data[i].Values,
-                correctedValues,
-                correctionFactors
-            ));
-        }
-
-        return result;
-    }
-
-    #endregion
-
-    #region Private Helper Methods - RM Info Extraction (Python-Compatible)
-
-    /// <summary>
-    /// Extract RM number and type from Solution Label
-    /// Based on Python RM_check.py extract_rm_info() function
-    /// </summary>
-    private static (int RmNumber, string RmType) ExtractRmInfo(string label, string keyword = "RM")
-    {
-        label = (label ?? "").Trim();
-        var labelLower = label.ToLower();
-
-        var keywordPattern = new Regex($@"^{Regex.Escape(keyword)}\s*[-_]?\s*", RegexOptions.IgnoreCase);
-        var cleaned = keywordPattern.Replace(labelLower, "");
-
-        var rmType = "Base";
-        var rmNumber = 0;
-
-        var typeMatch = Regex.Match(cleaned, @"(chek|check|cone)");
-        string beforeText;
-
-        if (typeMatch.Success)
-        {
-            var typ = typeMatch.Groups[1].Value;
-            rmType = typ is "chek" or "check" ? "Check" : "Cone";
-            beforeText = cleaned.Substring(0, typeMatch.Index);
-        }
-        else
-        {
-            beforeText = cleaned;
-        }
-
-        var numbers = Regex.Matches(beforeText, @"\d+");
-        if (numbers.Count > 0)
-        {
-            rmNumber = int.Parse(numbers[numbers.Count - 1].Value);
-        }
-
-        return (rmNumber, rmType);
     }
 
     #endregion
@@ -868,6 +832,7 @@ public class DriftCorrectionService : IDriftCorrectionService
     #region Private Types
 
     private record ParsedRow(string SolutionLabel, Dictionary<string, decimal?> Values);
+    private record SavedRowData(string? SampleId, string ColumnData);
 
     #endregion
 }
