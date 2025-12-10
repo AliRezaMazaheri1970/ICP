@@ -100,8 +100,8 @@
 /* --- Base Styles --- */
 html, body {
     font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    background: var(--bg-surface);
-    color: var(--text-primary);
+    background-color: var(--mud-palette-background);
+    color: var(--mud-palette-text-primary);
     margin: 0;
     padding: 0;
 }
@@ -328,7 +328,7 @@ html, body {
 }
 
 .height-segmants {
-    height: 37vh;
+    height: 31vh;
     overflow: scroll;
 }
 

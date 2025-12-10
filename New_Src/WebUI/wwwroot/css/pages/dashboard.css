@@ -30,14 +30,21 @@
 }
 
 @media (max-width: 768px) {
-    .mud-button-label {
-        flex-direction: column;
-    }
+/*    .back-to-dashboard{
+        flex-direction:row;
+        font-size:.7rem;
+    }*/
 }
 
+@media (max-width: 600px) {
+    #h6-rasf {
+        font-size: .9rem;
+    }
+   
+}
 
 @media (max-width: 380px) {
-/*    .mud-button-label {
-        flex-direction: column;
-    }*/
+   #h6-rasf{
+        font-size: .7rem;
+    }
 }

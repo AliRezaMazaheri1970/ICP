@@ -42,7 +42,7 @@
 
             <MudButton Variant="Variant.Outlined"
                        StartIcon="@Icons.Material.Filled.Refresh"
-                       OnClick="LoadProjects"
+                       OnClick="ReloadProjects"
                        Disabled="_isLoading">
                 Refresh
             </MudButton>
@@ -70,7 +70,8 @@
                       Striped="true"
                       Dense="true"
                       Loading="_isLoading"
-                      LoadingProgressColor="Color.Primary">
+                      LoadingProgressColor="Color.Primary"
+                      Class="mb-4">
                 <HeaderContent>
                     <MudTh><MudTableSortLabel SortBy="@((ProjectDto x) => x.ProjectName)">Project Name</MudTableSortLabel></MudTh>
                     <MudTh><MudTableSortLabel SortBy="@((ProjectDto x) => x.Owner)">Owner</MudTableSortLabel></MudTh>
@@ -126,20 +127,92 @@
                         </MudButtonGroup>
                     </MudTd>
                 </RowTemplate>
-                <PagerContent>
-                    <MudTablePager PageSizeOptions="new int[] { 10, 25, 50, 100 }" />
-                </PagerContent>
+                @* ❌ حذف PagerContent قدیمی *@
             </MudTable>
+
+            @* ✅ افزودن کنترل‌های جدید صفحه‌بندی *@
+            <MudDivider Class="my-4" />
+            <div class="d-flex justify-center align-center gap-4 flex-wrap">
+                <MudSelect T="int" Value="_pageSize" ValueChanged="OnPageSizeChanged"
+                           Label="Per Page" Variant="Variant.Outlined" Dense="true" Style="width: 100px;">
+                    <MudSelectItem Value="10">10</MudSelectItem>
+                    <MudSelectItem Value="20">20</MudSelectItem>
+                    <MudSelectItem Value="30">30</MudSelectItem>
+                    <MudSelectItem Value="40">40</MudSelectItem>
+                    <MudSelectItem Value="50">50</MudSelectItem>
+                    <MudSelectItem Value="60">60</MudSelectItem>
+                    <MudSelectItem Value="70">70</MudSelectItem>
+                    <MudSelectItem Value="80">80</MudSelectItem>
+                    <MudSelectItem Value="90">90</MudSelectItem>
+                    <MudSelectItem Value="100">100</MudSelectItem>
+                </MudSelect>
+
+                <MudPagination Count="@_totalPages"
+                               Selected="_currentPage"
+                               SelectedChanged="OnPageChanged"
+                               ShowFirstButton="true"
+                               ShowLastButton="true"
+                               BoundaryCount="1"
+                               MiddleCount="3"
+                               Color="Color.Primary" />
+
+                <MudText Typo="Typo.caption" Class="mt-1">
+                    Total Projects: @_totalItems
+                </MudText>
+            </div>
         }
     </MudPaper>
 </MudContainer>
+<style>
+    .loading-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.2);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 9999;
+    }
+
+    .mud-simple-table table {
+        width: 100%;
+        display: table;
+        border-spacing: 0;
+        border-collapse: collapse;
+        height: 200px;
+        overflow: scroll;
+    }
+
+    .mud-table-dense * .mud-table-row .mud-table-cell {
+        padding: 5px 15px 5px 16px;
+        padding-inline-start: 16px;
+        padding-inline-end: 24px;
+    }
+
+    .mud-table {
+        color: var(--mud-palette-text-primary);
+        background-color: var(--mud-palette-surface);
+        border-radius: var(--mud-default-borderradius);
+        transition: box-shadow 300ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;
+        height: 500px;
+        overflow: scroll;
+    }
+</style>
 
 @code {
     private List<ProjectDto>? _projects;
     private bool _isLoading = true;
     private string _searchText = "";
+
+    // Pagination variables
     private int _currentPage = 1;
-    private int _pageSize = 20;
+    private int _pageSize = 10; // ✅ پیش‌فرض را روی 10 گذاشتیم تا اگر 15 آیتم دارید، صفحه دوم فعال شود
+    private int _totalItems = 0;
+    // محاسبه تعداد کل صفحات
+    private int _totalPages => _totalItems == 0 ? 1 : (int)Math.Ceiling((double)_totalItems / _pageSize);
 
     protected override async Task OnInitializedAsync()
     {
@@ -156,19 +229,43 @@
         if (result.Succeeded && result.Data != null)
         {
             _projects = result.Data.Items;
+            // ✅ دریافت تعداد کل آیتم‌ها از سرور برای محاسبه صفحات
+            _totalItems = result.Data.TotalCount;
         }
         else
         {
             Snackbar.Add(result.Message ?? "Failed to load projects", Severity.Error);
             _projects = new List<ProjectDto>();
+            _totalItems = 0;
         }
 
         _isLoading = false;
     }
 
+    private async Task ReloadProjects()
+    {
+        _currentPage = 1;
+        await LoadProjects();
+    }
+
     private async Task SearchProjects()
     {
         _currentPage = 1;
+        await LoadProjects();
+    }
+
+    // ✅ متد تغییر صفحه
+    private async Task OnPageChanged(int page)
+    {
+        _currentPage = page;
+        await LoadProjects();
+    }
+
+    // ✅ متد تغییر تعداد آیتم در صفحه
+    private async Task OnPageSizeChanged(int size)
+    {
+        _pageSize = size;
+        _currentPage = 1; // بازگشت به صفحه اول هنگام تغییر سایز
         await LoadProjects();
     }
 
@@ -202,6 +299,11 @@
             if (deleteResult.Succeeded)
             {
                 Snackbar.Add($"Project '{project.ProjectName}' deleted", Severity.Success);
+                // اگر در صفحه آخر بودیم و همه آیتم‌های آن صفحه حذف شدند، به صفحه قبل برگردیم
+                if (_projects?.Count == 1 && _currentPage > 1)
+                {
+                    _currentPage--;
+                }
                 await LoadProjects();
             }
             else
@@ -216,13 +318,11 @@
         NavManager.NavigateTo($"/project/{project.ProjectId}/versions");
     }
 
-    // متد جدید اضافه شده برای تبدیل تاریخ
     private string ToShamsi(DateTime date)
     {
         if (date == DateTime.MinValue) return "-";
 
         var pc = new PersianCalendar();
-
         TimeZoneInfo iranTimeZone;
         try
         {
@@ -234,7 +334,6 @@
         }
 
         var iranTime = TimeZoneInfo.ConvertTimeFromUtc(date, iranTimeZone);
-
         return $"{pc.GetYear(iranTime)}/{pc.GetMonth(iranTime):00}/{pc.GetDayOfMonth(iranTime):00} {iranTime.Hour:00}:{iranTime.Minute:00}";
     }
 }
