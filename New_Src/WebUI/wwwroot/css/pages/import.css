@@ -67,7 +67,7 @@
 }
 
     .mud-simple-table th {
-        background: #f1f5f9 !important;
+        /*        background: #f1f5f9 !important;*/
         font-weight: 600;
         white-space: nowrap;
     }
@@ -84,4 +84,82 @@
     .upload-zone {
         padding: 2rem 1rem;
     }
+
+
+
+}
+
+@media (max-width: 768px) {
+    .drop-file {
+        padding: 20px;
+        text-align: center;
+    }
+
+
+
+}
+
+@media (max-width: 600px) {
+    .back-to-dashboard {
+        font-size: .5rem;
+    }
+
+        .back-to-dashboard .mud-button-label {
+            gap: 0;
+        }
+
+            .back-to-dashboard .mud-button-label .mud-button-icon-start {
+                margin-left: 0;
+                margin-right: 0;
+                margin-inline-start: 0;
+                margin-inline-end: 0;
+            }
+
+    .h4-import-data {
+        font-size: 1.4rem;
+    }
+
+    .p-import-data {
+        font-size: .8rem;
+    }
+
+
+    .btn-preview{
+        display: none;
+    }
+    .button-import-data .mud-button-label {
+        gap: 0 !important;
+    }
+
+    .hidden-mobile{
+        display:none;
+    }
+}
+
+@media (max-width: 380px) {
+    .back-to-dashboard {
+        font-size: .5rem;
+    }
+        .back-to-dashboard .mud-button-label{
+            gap:0;
+        }
+
+        .back-to-dashboard .mud-button-label .mud-button-icon-start {
+            margin-left: 0;
+            margin-right: 0;
+            margin-inline-start: 0;
+            margin-inline-end: 0;
+        }
+
+    .h4-import-data {
+        font-size: 1.2rem;
+    }
+
+    .p-import-data {
+        font-size: .7rem;
+    }
+
+        .button-import-data .mud-button-label {
+            gap: 0 !important;
+        }
 }

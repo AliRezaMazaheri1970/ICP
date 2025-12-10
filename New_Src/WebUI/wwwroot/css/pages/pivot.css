@@ -1,0 +1,24 @@
+﻿/* ===================================
+   ICP - D Page Styles
+   =================================== */
+
+@media (max-width: 768px) {
+/*    .back-to-dashboard{
+        flex-direction:row;
+        font-size:.7rem;
+    }*/
+}
+
+@media (max-width: 600px) {
+    .btn-pivot {
+        font-size: .7rem;
+    }
+    .btn-change-export {
+        flex-wrap: wrap;
+    }
+   
+}
+
+@media (max-width: 380px) {
+  
+}

@@ -25,12 +25,13 @@
     
     <MudPaper Elevation="0" Class="pa-4 mb-4 d-flex justify-space-between align-center custom-card-all ">
         <div>
-            <MudText Typo="Typo.h4" Class="fw-bold">Import Data</MudText>
-            <MudText Typo="Typo.body2" Class="mud-text-secondary">Upload CSV or Excel files to create a new project</MudText>
+            <MudText Typo="Typo.h4" Class="fw-bold h4-import-data">Import Data</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary p-import-data">Upload CSV or Excel files to create a new project</MudText>
         </div>
         <MudButton Variant="Variant.Text" 
                    StartIcon="@Icons.Material.Filled.ArrowBack"
-                   OnClick="GoToDashboard">
+                   OnClick="GoToDashboard"
+        Class="back-to-dashboard">
             Back to Dashboard
         </MudButton>
     </MudPaper>
@@ -56,7 +57,7 @@
                         <MudPaper Height="200px" 
                                   Outlined="true" 
                                   Class="@GetDropZoneClass()">
-                            <div class="d-flex flex-column align-center justify-center" style="height: 100%;">
+                            <div class="d-flex flex-column align-center justify-center drop-file" style="height: 100%;">
                                 @if (fileContent == null)
                                 {
                                     <MudIcon Icon="@Icons.Material.Filled.CloudUpload" 
@@ -126,7 +127,7 @@
 
                 <div class="d-flex gap-3 mt-6">
                     <MudButton Variant="Variant.Outlined"
-                               Class="color-dark-blue"
+                               Class="color-dark-blue btn-preview"
                                StartIcon="@Icons.Material.Filled.Preview"
                                OnClick="PreviewFile"
                                Disabled="@(fileContent == null || isLoading)">
@@ -138,7 +139,7 @@
                                StartIcon="@Icons.Material.Filled.Upload"
                                OnClick="ImportFile"
                                Disabled="@(! CanImport)"
-                               Class="flex-grow-1 color-bg-dark-blue">
+                               Class="flex-grow-1 color-bg-dark-blue ">
                         @if (isLoading)
                         {
                             <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
@@ -159,7 +160,7 @@
             </MudPaper>
         </MudItem>
 
-        <MudItem xs="12" md="5">
+        <MudItem xs="12" md="5" Class="hidden-mobile">
             <MudPaper Elevation="0" Class="pa-4 custom-card-all" Style="min-height: 400px;">
                 <MudText Typo="Typo.h6" Class="mb-4">
                     <MudIcon Icon="@Icons.Material.Filled.TableView" Class="me-2" />
@@ -197,7 +198,7 @@
                     </div>
 
                     <MudText Typo="Typo.subtitle2" Class="mb-2">Sample Data:</MudText>
-                    <MudTable Items="@previewData.SampleRows.Take(5)" Dense="true" Hover="true" Bordered="true" Style="max-height: 200px;">
+                    <MudTable Items="@previewData.SampleRows.Take(5)" Dense="true" Hover="true" Bordered="true" >
                         <HeaderContent>
                             @foreach (var col in previewData.Columns.Take(5))
                             {
