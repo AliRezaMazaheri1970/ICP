@@ -68,6 +68,7 @@ public record ElementDriftInfo(
 /// </summary>
 public record CorrectedSampleDto(
     string SolutionLabel,
+    int GroupId,
     int OriginalIndex,
     int SegmentIndex,
     Dictionary<string, decimal?> OriginalValues,

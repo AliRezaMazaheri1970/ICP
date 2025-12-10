@@ -11,10 +11,15 @@ using System.Text.RegularExpressions;
 namespace Infrastructure.Services;
 
 /// <summary>
-/// Drift Correction Service - 100% Python Compatible (Optimized)
+/// Drift Correction Service - 100% Python Compatible
+/// Tested and verified against RM_check.py
 /// 
-/// Key optimization: Only stores RM/Standard values as initial (like Python's initial_rm_df)
-/// Not the entire dataset - much faster!
+/// Key Features:
+/// 1. Correct pivot table creation with GroupId support
+/// 2. Proper segment detection based on Cone samples
+/// 3. Stepwise formula: factor = 1.0 + step_delta * (j + 1)
+/// 4. Correct sample count (n) calculation
+/// 5. Proper database save with GroupId mapping
 /// </summary>
 public class DriftCorrectionService : IDriftCorrectionService
 {
@@ -22,12 +27,8 @@ public class DriftCorrectionService : IDriftCorrectionService
     private readonly IChangeLogService _changeLogService;
     private readonly ILogger<DriftCorrectionService> _logger;
 
-    private const string DefaultBasePattern = @"^RM";
+    private const string DefaultRmKeyword = "RM";
     private const string InitialRmStateDescription = "Initial:DriftRM";
-
-    private static readonly Regex RmPattern = new(
-        @"^(OREAS|SRM|CRM|STANDARD|STD)(?!\s*BLANK)\s*\d*",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public DriftCorrectionService(
         IsatisDbContext db,
@@ -52,32 +53,39 @@ public class DriftCorrectionService : IDriftCorrectionService
             if (project == null)
                 return Result<DriftCorrectionResult>.Fail("Project not found");
 
-            var currentData = await GetParsedDataAsync(request.ProjectId);
-            if (!currentData.Any())
+            // Load and process data (Python-compatible)
+            var processedData = await LoadAndProcessDataAsync(request.ProjectId);
+            if (processedData.PivotRows.Count == 0)
                 return Result<DriftCorrectionResult>.Fail("No data found for project");
 
-            var segments = DetectSegments(currentData, request.BasePattern, request.ConePattern);
-            var elements = request.SelectedElements ?? GetAllElements(currentData);
+            var keyword = ExtractKeyword(request.BasePattern);
+            var rmData = ExtractRmData(processedData.PivotRows, keyword);
+            var (positions, segments) = BuildPositionsAndSegments(rmData);
 
-            // Get initial RM values (if saved)
-            var initialRmValues = await GetInitialRmValuesAsync(request.ProjectId);
-
-            // Calculate ratios using initial values if available
-            var segmentRatios = CalculateSegmentRatios(currentData, segments, elements, initialRmValues);
+            var elements = request.SelectedElements ?? GetAllElements(processedData.PivotRows);
 
             var elementDrifts = new Dictionary<string, ElementDriftInfo>();
             foreach (var element in elements)
             {
-                var driftInfo = CalculateElementDrift(currentData, element, segments, segmentRatios, initialRmValues);
+                var driftInfo = CalculateElementDrift(processedData.PivotRows, rmData, positions, element);
                 if (driftInfo != null)
                     elementDrifts[element] = driftInfo;
             }
 
+            var driftSegments = segments.Select(s => new DriftSegment(
+                s.SegmentId,
+                s.Positions.First().Min,
+                s.Positions.Last().Max,
+                s.Positions.First().SolutionLabel,
+                s.Positions.Last().SolutionLabel,
+                s.Positions.Count
+            )).ToList();
+
             var result = new DriftCorrectionResult(
-                TotalSamples: currentData.Count,
+                TotalSamples: processedData.PivotRows.Count,
                 CorrectedSamples: 0,
                 SegmentsFound: segments.Count,
-                Segments: segments,
+                Segments: driftSegments,
                 ElementDrifts: elementDrifts,
                 CorrectedData: new List<CorrectedSampleDto>()
             );
@@ -101,42 +109,76 @@ public class DriftCorrectionService : IDriftCorrectionService
             if (project == null)
                 return Result<DriftCorrectionResult>.Fail("Project not found");
 
-            var currentData = await GetParsedDataAsync(request.ProjectId);
-            if (!currentData.Any())
+            // Load and process data
+            var processedData = await LoadAndProcessDataAsync(request.ProjectId);
+            if (processedData.PivotRows.Count == 0)
                 return Result<DriftCorrectionResult>.Fail("No data found for project");
 
-            var segments = DetectSegments(currentData, request.BasePattern, request.ConePattern);
-            var elements = request.SelectedElements ?? GetAllElements(currentData);
+            var keyword = ExtractKeyword(request.BasePattern);
+            var rmData = ExtractRmData(processedData.PivotRows, keyword);
+            var (positions, segments) = BuildPositionsAndSegments(rmData);
 
-            // Save initial RM values if not exists (Python: initial_rm_df)
-            await SaveInitialRmValuesIfNotExistsAsync(request.ProjectId, currentData, segments);
+            var elements = request.SelectedElements ?? GetAllElements(processedData.PivotRows);
 
-            // Get initial RM values
-            var initialRmValues = await GetInitialRmValuesAsync(request.ProjectId);
-
-            var segmentRatios = CalculateSegmentRatios(currentData, segments, elements, initialRmValues);
-
-            var elementDrifts = new Dictionary<string, ElementDriftInfo>();
-            foreach (var element in elements)
-            {
-                var driftInfo = CalculateElementDrift(currentData, element, segments, segmentRatios, initialRmValues);
-                if (driftInfo != null)
-                    elementDrifts[element] = driftInfo;
-            }
-
-            // Apply correction
-            var correctedData = request.Method switch
-            {
-                DriftMethod.Linear => ApplyLinearCorrection(currentData, segments, elements, segmentRatios),
-                DriftMethod.Stepwise => ApplyStepwiseCorrection(currentData, segments, elements, segmentRatios),
-                _ => ApplyLinearCorrection(currentData, segments, elements, segmentRatios)
-            };
-
-            // Save undo state
+            // Save undo state before modification
             await SaveUndoStateAsync(request.ProjectId, $"DriftCorrection_{request.Method}");
 
+            // Calculate corrections for all elements
+            var allCorrections = new Dictionary<(string Label, int GroupId, string Element), decimal>();
+            var correctedSamples = new List<CorrectedSampleDto>();
+
+            foreach (var element in elements)
+            {
+                var corrections = request.Method == DriftMethod.Stepwise
+                    ? CalculateStepwiseCorrections(processedData.PivotRows, rmData, positions, segments, element, keyword)
+                    : CalculateUniformCorrections(processedData.PivotRows, rmData, positions, segments, element, keyword);
+
+                foreach (var corr in corrections)
+                {
+                    allCorrections[(corr.Key.SolutionLabel, corr.Key.GroupId, element)] = corr.Value.CorrectedValue;
+                }
+            }
+
+            // Build CorrectedSampleDto list
+            foreach (var pivot in processedData.PivotRows)
+            {
+                var correctedValues = new Dictionary<string, decimal?>();
+                var correctionFactors = new Dictionary<string, decimal>();
+
+                foreach (var element in elements)
+                {
+                    if (allCorrections.TryGetValue((pivot.SolutionLabel, pivot.GroupId, element), out var corrected))
+                    {
+                        correctedValues[element] = corrected;
+                        var original = pivot.Values.GetValueOrDefault(element);
+                        if (original.HasValue && original.Value != 0)
+                            correctionFactors[element] = corrected / original.Value;
+                    }
+                    else
+                    {
+                        correctedValues[element] = pivot.Values.GetValueOrDefault(element);
+                    }
+                }
+
+                if (correctionFactors.Any())
+                {
+                    correctedSamples.Add(new CorrectedSampleDto(
+                        pivot.SolutionLabel,
+                        pivot.GroupId,
+                        pivot.OriginalIndex,
+                        0, // SegmentIndex - can be calculated if needed
+                        pivot.Values,
+                        correctedValues,
+                        correctionFactors
+                    ));
+                }
+            }
+
             // Save to database
-            var savedCount = await SaveCorrectedDataToDatabase(request.ProjectId, correctedData, elements);
+            var savedCount = await SaveCorrectionsToDatabase(
+                request.ProjectId,
+                processedData.RawRows,
+                allCorrections);
 
             project.LastModifiedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync();
@@ -152,13 +194,22 @@ public class DriftCorrectionService : IDriftCorrectionService
                 "Drift correction applied: Method={Method}, Segments={Segments}, Saved={Saved}",
                 request.Method, segments.Count, savedCount);
 
+            var driftSegments = segments.Select(s => new DriftSegment(
+                s.SegmentId,
+                s.Positions.First().Min,
+                s.Positions.Last().Max,
+                s.Positions.First().SolutionLabel,
+                s.Positions.Last().SolutionLabel,
+                s.Positions.Count
+            )).ToList();
+
             var result = new DriftCorrectionResult(
-                TotalSamples: currentData.Count,
+                TotalSamples: processedData.PivotRows.Count,
                 CorrectedSamples: savedCount,
                 SegmentsFound: segments.Count,
-                Segments: segments,
-                ElementDrifts: elementDrifts,
-                CorrectedData: correctedData
+                Segments: driftSegments,
+                ElementDrifts: new Dictionary<string, ElementDriftInfo>(),
+                CorrectedData: correctedSamples
             );
 
             return Result<DriftCorrectionResult>.Success(result);
@@ -175,12 +226,24 @@ public class DriftCorrectionService : IDriftCorrectionService
     {
         try
         {
-            var rawData = await GetParsedDataAsync(projectId);
-            if (!rawData.Any())
+            var processedData = await LoadAndProcessDataAsync(projectId);
+            if (processedData.PivotRows.Count == 0)
                 return Result<List<DriftSegment>>.Fail("No data found");
 
-            var segments = DetectSegments(rawData, basePattern, conePattern);
-            return Result<List<DriftSegment>>.Success(segments);
+            var keyword = ExtractKeyword(basePattern);
+            var rmData = ExtractRmData(processedData.PivotRows, keyword);
+            var (positions, segments) = BuildPositionsAndSegments(rmData);
+
+            var driftSegments = segments.Select(s => new DriftSegment(
+                s.SegmentId,
+                s.Positions.First().Min,
+                s.Positions.Last().Max,
+                s.Positions.First().SolutionLabel,
+                s.Positions.Last().SolutionLabel,
+                s.Positions.Count
+            )).ToList();
+
+            return Result<List<DriftSegment>>.Success(driftSegments);
         }
         catch (Exception ex)
         {
@@ -194,23 +257,43 @@ public class DriftCorrectionService : IDriftCorrectionService
     {
         try
         {
-            var currentData = await GetParsedDataAsync(projectId);
-            if (!currentData.Any())
+            var processedData = await LoadAndProcessDataAsync(projectId);
+            if (processedData.PivotRows.Count == 0)
                 return Result<Dictionary<string, List<decimal>>>.Fail("No data found");
 
-            var allElements = elements ?? GetAllElements(currentData);
-            var segments = DetectSegments(currentData, null, null);
-            var initialRmValues = await GetInitialRmValuesAsync(projectId);
-            var segmentRatios = CalculateSegmentRatios(currentData, segments, allElements, initialRmValues);
+            var keyword = DefaultRmKeyword;
+            var rmData = ExtractRmData(processedData.PivotRows, keyword);
+            var (positions, segments) = BuildPositionsAndSegments(rmData);
 
+            var allElements = elements ?? GetAllElements(processedData.PivotRows);
             var ratios = new Dictionary<string, List<decimal>>();
+
             foreach (var element in allElements)
             {
-                var elementRatios = segments
-                    .Where(s => segmentRatios.ContainsKey(s.SegmentIndex) &&
-                                segmentRatios[s.SegmentIndex].ContainsKey(element))
-                    .Select(s => segmentRatios[s.SegmentIndex][element])
-                    .ToList();
+                var elementRatios = new List<decimal>();
+
+                foreach (var segment in segments)
+                {
+                    for (int i = 0; i < segment.Positions.Count - 1; i++)
+                    {
+                        var posFrom = segment.Positions[i];
+                        var posTo = segment.Positions[i + 1];
+
+                        var rmFrom = rmData.FirstOrDefault(r => r.PivotIndex == posFrom.PivotIndex);
+                        var rmTo = rmData.FirstOrDefault(r => r.PivotIndex == posTo.PivotIndex);
+
+                        if (rmFrom == null || rmTo == null) continue;
+
+                        var valFrom = rmFrom.Values.GetValueOrDefault(element);
+                        var valTo = rmTo.Values.GetValueOrDefault(element);
+
+                        if (valFrom.HasValue && valTo.HasValue && valFrom.Value != 0)
+                        {
+                            elementRatios.Add(valTo.Value / valFrom.Value);
+                        }
+                    }
+                }
+
                 ratios[element] = elementRatios;
             }
 
@@ -231,179 +314,16 @@ public class DriftCorrectionService : IDriftCorrectionService
 
     #endregion
 
-    #region Private Methods - Initial RM Values (Python: initial_rm_df) - OPTIMIZED
+    #region Data Loading (Python-Compatible)
 
     /// <summary>
-    /// Save only RM values as initial - much smaller than full dataset
-    /// Python equivalent: initial_rm_df (only stores RM rows, not all data)
+    /// Load and process data exactly like Python:
+    /// 1. Filter Samp/Sample rows
+    /// 2. Calculate set_size per Solution Label
+    /// 3. Assign group_id based on cumcount // set_size
+    /// 4. Create pivot table grouped by (Solution Label, group_id)
     /// </summary>
-    private async Task SaveInitialRmValuesIfNotExistsAsync(
-        Guid projectId,
-        List<ParsedRow> data,
-        List<DriftSegment> segments)
-    {
-        var existing = await _db.ProjectStates
-            .AsNoTracking()
-            .FirstOrDefaultAsync(s => s.ProjectId == projectId &&
-                                      s.Description == InitialRmStateDescription);
-
-        if (existing != null)
-            return;
-
-        // Extract only RM/Standard values at segment boundaries
-        var rmValues = new Dictionary<string, Dictionary<string, decimal?>>();
-
-        foreach (var segment in segments)
-        {
-            // Start standard
-            var startLabel = data[segment.StartIndex].SolutionLabel;
-            if (!rmValues.ContainsKey(startLabel))
-                rmValues[startLabel] = new Dictionary<string, decimal?>(data[segment.StartIndex].Values);
-
-            // End standard
-            var endLabel = data[segment.EndIndex].SolutionLabel;
-            if (!rmValues.ContainsKey(endLabel))
-                rmValues[endLabel] = new Dictionary<string, decimal?>(data[segment.EndIndex].Values);
-        }
-
-        var stateJson = JsonSerializer.Serialize(rmValues);
-
-        _db.ProjectStates.Add(new ProjectState
-        {
-            ProjectId = projectId,
-            Data = stateJson,
-            Description = InitialRmStateDescription,
-            Timestamp = DateTime.UtcNow
-        });
-
-        await _db.SaveChangesAsync();
-
-        _logger.LogInformation("Saved initial RM values for project {ProjectId}, {Count} standards",
-            projectId, rmValues.Count);
-    }
-
-    /// <summary>
-    /// Get initial RM values - fast lookup
-    /// </summary>
-    private async Task<Dictionary<string, Dictionary<string, decimal?>>?> GetInitialRmValuesAsync(Guid projectId)
-    {
-        var state = await _db.ProjectStates
-            .AsNoTracking()
-            .FirstOrDefaultAsync(s => s.ProjectId == projectId &&
-                                      s.Description == InitialRmStateDescription);
-
-        if (state == null)
-            return null;
-
-        try
-        {
-            return JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, decimal?>>>(state.Data);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    #endregion
-
-    #region Private Methods - Database Operations
-
-    private async Task<int> SaveCorrectedDataToDatabase(
-        Guid projectId,
-        List<CorrectedSampleDto> correctedData,
-        List<string> elements)
-    {
-        var rawRows = await _db.RawDataRows
-            .Where(r => r.ProjectId == projectId)
-            .ToListAsync();
-
-        var savedCount = 0;
-
-        var corrections = new Dictionary<(string Label, string Element), decimal>();
-        foreach (var sample in correctedData)
-        {
-            if (sample.CorrectionFactors == null || !sample.CorrectionFactors.Any())
-                continue;
-
-            foreach (var element in elements)
-            {
-                if (sample.CorrectedValues.TryGetValue(element, out var correctedValue) && correctedValue.HasValue)
-                {
-                    corrections[(sample.SolutionLabel, element)] = correctedValue.Value;
-                }
-            }
-        }
-
-        foreach (var row in rawRows)
-        {
-            try
-            {
-                var dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(row.ColumnData);
-                if (dict == null) continue;
-
-                var solutionLabel = dict.TryGetValue("Solution Label", out var sl)
-                    ? sl.GetString() ?? row.SampleId ?? ""
-                    : row.SampleId ?? "";
-
-                string? elementName = null;
-                if (dict.TryGetValue("Element", out var elemProp))
-                    elementName = elemProp.GetString();
-
-                if (string.IsNullOrWhiteSpace(elementName))
-                    continue;
-
-                if (!corrections.TryGetValue((solutionLabel, elementName), out var newValue))
-                    continue;
-
-                var newDict = new Dictionary<string, object>();
-                foreach (var kvp in dict)
-                {
-                    if (kvp.Key == "Corr Con")
-                        newDict["Corr Con"] = newValue;
-                    else
-                        newDict[kvp.Key] = GetJsonValue(kvp.Value);
-                }
-
-                if (!newDict.ContainsKey("Corr Con"))
-                    newDict["Corr Con"] = newValue;
-
-                row.ColumnData = JsonSerializer.Serialize(newDict);
-                savedCount++;
-            }
-            catch { }
-        }
-
-        await _db.SaveChangesAsync();
-        return savedCount;
-    }
-
-    private async Task SaveUndoStateAsync(Guid projectId, string operation)
-    {
-        var rows = await _db.RawDataRows
-            .AsNoTracking()
-            .Where(r => r.ProjectId == projectId)
-            .Select(r => new SavedRowData(r.SampleId, r.ColumnData))
-            .ToListAsync();
-
-        var stateJson = JsonSerializer.Serialize(rows);
-
-        _db.ProjectStates.Add(new ProjectState
-        {
-            ProjectId = projectId,
-            Data = stateJson,
-            Description = $"Undo:{operation}",
-            Timestamp = DateTime.UtcNow
-        });
-
-        await _db.SaveChangesAsync();
-    }
-
-    #endregion
-
-    #region Private Methods - Data Access
-
-    private async Task<List<ParsedRow>> GetParsedDataAsync(Guid projectId)
+    private async Task<ProcessedData> LoadAndProcessDataAsync(Guid projectId)
     {
         var rawRows = await _db.RawDataRows
             .AsNoTracking()
@@ -411,8 +331,7 @@ public class DriftCorrectionService : IDriftCorrectionService
             .OrderBy(r => r.DataId)
             .ToListAsync();
 
-        var pivotedData = new Dictionary<string, Dictionary<string, decimal?>>();
-        var sampleOrder = new List<string>();
+        var parsedRows = new List<RawDataItem>();
 
         foreach (var row in rawRows)
         {
@@ -421,435 +340,624 @@ public class DriftCorrectionService : IDriftCorrectionService
                 var data = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(row.ColumnData);
                 if (data == null) continue;
 
-                var solutionLabel = data.TryGetValue("Solution Label", out var sl)
-                    ? sl.GetString() ?? row.SampleId ?? $"Row_{row.DataId}"
-                    : row.SampleId ?? $"Row_{row.DataId}";
+                var type = GetJsonString(data, "Type");
+                if (type != "Samp" && type != "Sample") continue;
 
-                string? elementName = null;
-                if (data.TryGetValue("Element", out var elemProp))
-                    elementName = elemProp.GetString();
+                var solutionLabel = GetJsonString(data, "Solution Label") ?? row.SampleId ?? $"Row_{row.DataId}";
+                var element = GetJsonString(data, "Element");
+                var corrCon = GetJsonDecimal(data, "Corr Con");
 
-                if (string.IsNullOrWhiteSpace(elementName))
-                    continue;
+                if (string.IsNullOrEmpty(element)) continue;
 
-                if (!pivotedData.ContainsKey(solutionLabel))
+                parsedRows.Add(new RawDataItem
                 {
-                    pivotedData[solutionLabel] = new Dictionary<string, decimal?>();
-                    sampleOrder.Add(solutionLabel);
-                }
-
-                decimal? value = null;
-                if (data.TryGetValue("Corr Con", out var corrCon))
-                    value = ExtractDecimalValue(corrCon);
-
-                if (!value.HasValue && data.TryGetValue("Soln Conc", out var solnConc))
-                    value = ExtractDecimalValue(solnConc);
-
-                pivotedData[solutionLabel][elementName] = value;
+                    DataId = row.DataId,
+                    SolutionLabel = solutionLabel,
+                    Element = element,
+                    CorrCon = corrCon,
+                    OriginalIndex = parsedRows.Count
+                });
             }
             catch { }
         }
 
-        var result = new List<ParsedRow>();
-        foreach (var label in sampleOrder)
+        // Calculate set_size for each Solution Label (Python: calculate_set_size)
+        var setSizes = CalculateSetSizes(parsedRows);
+
+        // Assign row_id and group_id (Python lines 199, 214)
+        var labelCounts = new Dictionary<string, int>();
+        foreach (var row in parsedRows)
         {
-            if (pivotedData.TryGetValue(label, out var values))
-                result.Add(new ParsedRow(label, values));
+            if (!labelCounts.ContainsKey(row.SolutionLabel))
+                labelCounts[row.SolutionLabel] = 0;
+
+            var setSize = setSizes.GetValueOrDefault(row.SolutionLabel, 1);
+            row.RowId = labelCounts[row.SolutionLabel];
+            row.GroupId = labelCounts[row.SolutionLabel] / setSize;
+            labelCounts[row.SolutionLabel]++;
+        }
+
+        // Create pivot table: group by (SolutionLabel, GroupId), aggregate first value per element
+        var pivotRows = CreatePivotTable(parsedRows);
+
+        return new ProcessedData(rawRows, parsedRows, pivotRows);
+    }
+
+    private Dictionary<string, int> CalculateSetSizes(List<RawDataItem> rows)
+    {
+        var result = new Dictionary<string, int>();
+
+        var groups = rows.GroupBy(r => r.SolutionLabel);
+        foreach (var group in groups)
+        {
+            var elementCounts = group.GroupBy(r => r.Element).Select(g => g.Count()).ToList();
+            if (elementCounts.Count == 0)
+            {
+                result[group.Key] = 1;
+                continue;
+            }
+
+            var gcd = elementCounts.Aggregate(GCD);
+            var total = group.Count();
+            result[group.Key] = (gcd > 0 && total % gcd == 0) ? total / gcd : total;
         }
 
         return result;
     }
 
-    private static decimal? ExtractDecimalValue(JsonElement element)
+    private int GCD(int a, int b)
     {
-        if (element.ValueKind == JsonValueKind.Number)
-            return element.GetDecimal();
-
-        if (element.ValueKind == JsonValueKind.String)
-        {
-            var str = element.GetString();
-            if (!string.IsNullOrWhiteSpace(str) && str != "-----" && decimal.TryParse(str, out var val))
-                return val;
-        }
-        return null;
+        while (b != 0) { var t = b; b = a % b; a = t; }
+        return a;
     }
 
-    private static object GetJsonValue(JsonElement element)
+    private List<PivotRow> CreatePivotTable(List<RawDataItem> rows)
     {
-        return element.ValueKind switch
+        var groups = rows.GroupBy(r => (r.SolutionLabel, r.GroupId));
+        var result = new List<PivotRow>();
+
+        foreach (var group in groups)
         {
-            JsonValueKind.String => element.GetString() ?? "",
-            JsonValueKind.Number => element.TryGetDecimal(out var d) ? d : element.GetDouble(),
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            JsonValueKind.Null => null!,
-            _ => element.GetRawText()
-        };
+            var pivot = new PivotRow
+            {
+                SolutionLabel = group.Key.SolutionLabel,
+                GroupId = group.Key.GroupId,
+                OriginalIndex = group.Min(r => r.OriginalIndex),
+                Values = new Dictionary<string, decimal?>()
+            };
+
+            // aggfunc='first' - take first non-null value for each element
+            foreach (var row in group.OrderBy(r => r.OriginalIndex))
+            {
+                if (!pivot.Values.ContainsKey(row.Element) && row.CorrCon.HasValue)
+                {
+                    pivot.Values[row.Element] = row.CorrCon;
+                }
+            }
+
+            result.Add(pivot);
+        }
+
+        // Sort by original_index and assign pivot_index
+        result = result.OrderBy(p => p.OriginalIndex).ToList();
+        for (int i = 0; i < result.Count; i++)
+        {
+            result[i].PivotIndex = i;
+        }
+
+        return result;
     }
 
     #endregion
 
-    #region Private Methods - Segment Detection
+    #region RM Detection and Segmentation
 
-    private List<DriftSegment> DetectSegments(List<ParsedRow> data, string? basePattern, string? conePattern)
+    private string ExtractKeyword(string? basePattern)
     {
-        var segments = new List<DriftSegment>();
-        var effectivePattern = basePattern ?? DefaultBasePattern;
-        var baseRegex = new Regex(effectivePattern, RegexOptions.IgnoreCase);
+        if (string.IsNullOrEmpty(basePattern))
+            return DefaultRmKeyword;
 
-        Regex? coneRegex = null;
-        if (!string.IsNullOrWhiteSpace(conePattern))
-            coneRegex = new Regex(conePattern, RegexOptions.IgnoreCase);
-
-        var standardIndices = new List<(int Index, string Label)>();
-
-        for (int i = 0; i < data.Count; i++)
-        {
-            var label = data[i].SolutionLabel;
-
-            if (baseRegex.IsMatch(label) ||
-                (coneRegex != null && coneRegex.IsMatch(label)) ||
-                RmPattern.IsMatch(label))
-            {
-                standardIndices.Add((i, label));
-            }
-        }
-
-        if (standardIndices.Count < 2)
-        {
-            segments.Add(new DriftSegment(0, 0, data.Count - 1, null, null, data.Count));
-            return segments;
-        }
-
-        for (int i = 0; i < standardIndices.Count - 1; i++)
-        {
-            var start = standardIndices[i];
-            var end = standardIndices[i + 1];
-
-            segments.Add(new DriftSegment(
-                segments.Count,
-                start.Index,
-                end.Index,
-                start.Label,
-                end.Label,
-                end.Index - start.Index
-            ));
-        }
-
-        return segments;
+        // Extract first keyword from pattern like "^(RM|CRM|OREAS)"
+        var match = Regex.Match(basePattern, @"\(([^|)]+)");
+        return match.Success ? match.Groups[1].Value : DefaultRmKeyword;
     }
 
-    private List<string> GetAllElements(List<ParsedRow> data)
+    private List<PivotRow> ExtractRmData(List<PivotRow> pivotRows, string keyword)
     {
-        return data
-            .SelectMany(d => d.Values.Keys)
-            .Distinct()
-            .OrderBy(e => e)
+        var pattern = $@"^{Regex.Escape(keyword)}";
+        var rmRows = pivotRows
+            .Where(p => Regex.IsMatch(p.SolutionLabel, pattern, RegexOptions.IgnoreCase))
             .ToList();
-    }
 
-    private decimal? GetElementValue(ParsedRow row, string element)
-    {
-        return row.Values.TryGetValue(element, out var value) ? value : null;
-    }
-
-    #endregion
-
-    #region Private Methods - Ratio Calculation
-
-    /// <summary>
-    /// Calculate ratios for drift correction - Python compatible
-    /// 
-    /// First time (no initial saved):
-    ///   ratio = endValue / startValue (drift within segment)
-    /// 
-    /// After correction (initial exists):
-    ///   ratio = currentValue / initialValue (should be ~1.0 if corrected)
-    /// </summary>
-    private Dictionary<int, Dictionary<string, decimal>> CalculateSegmentRatios(
-        List<ParsedRow> currentData,
-        List<DriftSegment> segments,
-        List<string> elements,
-        Dictionary<string, Dictionary<string, decimal?>>? initialRmValues)
-    {
-        var result = new Dictionary<int, Dictionary<string, decimal>>();
-
-        foreach (var segment in segments)
+        // Add rm_num and rm_type
+        foreach (var rm in rmRows)
         {
-            var ratios = new Dictionary<string, decimal>();
-            var startLabel = currentData[segment.StartIndex].SolutionLabel;
-            var endLabel = currentData[segment.EndIndex].SolutionLabel;
-
-            foreach (var element in elements)
-            {
-                decimal? startValue;
-                decimal? endValue;
-
-                if (initialRmValues != null)
-                {
-                    // After first correction: compare current to initial
-                    // ratio = current / initial (should be ~1.0 after correction)
-
-                    // Get initial start value
-                    if (initialRmValues.TryGetValue(startLabel, out var startRm) &&
-                        startRm.TryGetValue(element, out var initStart))
-                    {
-                        startValue = initStart;
-                    }
-                    else
-                    {
-                        startValue = GetElementValue(currentData[segment.StartIndex], element);
-                    }
-
-                    // Get current end value
-                    endValue = GetElementValue(currentData[segment.EndIndex], element);
-                }
-                else
-                {
-                    // First time: calculate drift within segment
-                    // ratio = endValue / startValue
-                    startValue = GetElementValue(currentData[segment.StartIndex], element);
-                    endValue = GetElementValue(currentData[segment.EndIndex], element);
-                }
-
-                if (startValue.HasValue && endValue.HasValue && startValue.Value != 0)
-                {
-                    ratios[element] = endValue.Value / startValue.Value;
-                }
-                else
-                {
-                    ratios[element] = 1.0m;
-                }
-            }
-
-            result[segment.SegmentIndex] = ratios;
+            var (rmNum, rmType) = ExtractRmInfo(rm.SolutionLabel, keyword);
+            rm.RmNum = rmNum;
+            rm.RmType = rmType;
         }
 
-        return result;
+        return rmRows.OrderBy(r => r.OriginalIndex).ToList();
     }
 
-    private ElementDriftInfo? CalculateElementDrift(
-        List<ParsedRow> currentData,
-        string element,
-        List<DriftSegment> segments,
-        Dictionary<int, Dictionary<string, decimal>> segmentRatios,
-        Dictionary<string, Dictionary<string, decimal?>>? initialRmValues)
+    private (int RmNum, string RmType) ExtractRmInfo(string label, string keyword)
     {
-        if (segments.Count == 0) return null;
+        // Python: extract_rm_info function
+        var cleaned = Regex.Replace(label.ToLower(), $@"^{keyword.ToLower()}\s*[-_]?\s*", "", RegexOptions.IgnoreCase);
 
-        var firstSegment = segments.First();
-        var lastSegment = segments.Last();
+        var rmType = "Base";
+        var rmNumber = 0;
 
-        var startLabel = currentData[firstSegment.StartIndex].SolutionLabel;
-
-        // Get initial value
-        decimal? initialFirst = null;
-        if (initialRmValues != null &&
-            initialRmValues.TryGetValue(startLabel, out var rmValues) &&
-            rmValues.TryGetValue(element, out var initVal))
+        var typeMatch = Regex.Match(cleaned, @"(chek|check|cone)", RegexOptions.IgnoreCase);
+        string beforeText;
+        if (typeMatch.Success)
         {
-            initialFirst = initVal;
+            var typ = typeMatch.Groups[1].Value.ToLower();
+            rmType = (typ == "chek" || typ == "check") ? "Check" : "Cone";
+            beforeText = cleaned.Substring(0, typeMatch.Index);
         }
         else
         {
-            initialFirst = GetElementValue(currentData[firstSegment.StartIndex], element);
+            beforeText = cleaned;
         }
 
-        var currentLast = GetElementValue(currentData[lastSegment.EndIndex], element);
+        var numbers = Regex.Matches(beforeText, @"\d+");
+        if (numbers.Count > 0)
+        {
+            rmNumber = int.Parse(numbers[^1].Value);
+        }
 
-        if (!initialFirst.HasValue || !currentLast.HasValue || initialFirst.Value == 0)
+        return (rmNumber, rmType);
+    }
+
+    private (List<Position> Positions, List<Segment> Segments) BuildPositionsAndSegments(List<PivotRow> rmData)
+    {
+        var positions = new List<Position>();
+        int currentSegment = 0;
+        int? refRmNum = null;
+
+        for (int idx = 0; idx < rmData.Count; idx++)
+        {
+            var row = rmData[idx];
+
+            // Cone triggers new segment
+            if (row.RmType == "Cone")
+            {
+                currentSegment++;
+                refRmNum = null;
+            }
+
+            // First Base/Check becomes reference
+            if (!refRmNum.HasValue && (row.RmType == "Base" || row.RmType == "Check"))
+            {
+                refRmNum = row.RmNum;
+            }
+
+            positions.Add(new Position
+            {
+                SolutionLabel = row.SolutionLabel,
+                PivotIndex = row.PivotIndex,
+                Min = idx > 0 ? rmData[idx - 1].OriginalIndex : -1,
+                Max = row.OriginalIndex,
+                RmNum = row.RmNum,
+                RmType = row.RmType,
+                SegmentId = currentSegment,
+                RefRmNum = refRmNum ?? row.RmNum
+            });
+        }
+
+        // Fix first position min
+        if (positions.Count > 0)
+            positions[0].Min = -1;
+
+        // Build segments
+        var segments = positions
+            .GroupBy(p => p.SegmentId)
+            .Select(g => new Segment
+            {
+                SegmentId = g.Key,
+                RefRmNum = g.First().RefRmNum,
+                Positions = g.ToList()
+            })
+            .OrderBy(s => s.SegmentId)
+            .ToList();
+
+        return (positions, segments);
+    }
+
+    #endregion
+
+    #region Correction Calculations
+
+    private Dictionary<PivotRow, CorrectionResult> CalculateStepwiseCorrections(
+        List<PivotRow> pivotData,
+        List<PivotRow> rmData,
+        List<Position> positions,
+        List<Segment> segments,
+        string element,
+        string keyword)
+    {
+        var corrections = new Dictionary<PivotRow, CorrectionResult>();
+        var rmByPivot = rmData.ToDictionary(r => r.PivotIndex, r => r);
+
+        foreach (var segment in segments)
+        {
+            var segPos = segment.Positions;
+
+            // Find start index
+            int startIdx = 0;
+            for (int i = 0; i < segPos.Count; i++)
+            {
+                if (segPos[i].RmNum == segment.RefRmNum)
+                {
+                    startIdx = i;
+                    break;
+                }
+            }
+
+            if (startIdx >= segPos.Count - 1) continue;
+
+            // Process each interval
+            for (int i = startIdx; i < segPos.Count - 1; i++)
+            {
+                var posFrom = segPos[i];
+                var posTo = segPos[i + 1];
+
+                if (!rmByPivot.TryGetValue(posFrom.PivotIndex, out var rmFrom) ||
+                    !rmByPivot.TryGetValue(posTo.PivotIndex, out var rmTo))
+                    continue;
+
+                var valFrom = rmFrom.Values.GetValueOrDefault(element);
+                var valTo = rmTo.Values.GetValueOrDefault(element);
+
+                if (!valFrom.HasValue || !valTo.HasValue || valFrom.Value == 0)
+                    continue;
+
+                var ratio = valTo.Value / valFrom.Value;
+                var minPos = posFrom.Max;
+                var maxPos = posTo.Max;
+
+                // Find samples to correct (Python filter)
+                var samplesToCorrect = pivotData
+                    .Where(p => p.OriginalIndex > minPos &&
+                               p.OriginalIndex < maxPos &&
+                               !Regex.IsMatch(p.SolutionLabel, $@"^{keyword}\d*$", RegexOptions.IgnoreCase) &&
+                               p.Values.ContainsKey(element) &&
+                               p.Values[element].HasValue)
+                    .OrderBy(p => p.OriginalIndex)
+                    .ToList();
+
+                int n = samplesToCorrect.Count;
+                if (n == 0) continue;
+
+                var delta = ratio - 1.0m;
+                var stepDelta = delta / n;
+
+                // Apply stepwise correction: factor = 1.0 + step_delta * (j + 1)
+                for (int j = 0; j < samplesToCorrect.Count; j++)
+                {
+                    var sample = samplesToCorrect[j];
+                    var originalValue = sample.Values[element]!.Value;
+                    var factor = 1.0m + stepDelta * (j + 1);
+                    var correctedValue = originalValue * factor;
+
+                    corrections[sample] = new CorrectionResult
+                    {
+                        OriginalValue = originalValue,
+                        CorrectionFactor = factor,
+                        CorrectedValue = correctedValue
+                    };
+                }
+            }
+        }
+
+        return corrections;
+    }
+
+    private Dictionary<PivotRow, CorrectionResult> CalculateUniformCorrections(
+        List<PivotRow> pivotData,
+        List<PivotRow> rmData,
+        List<Position> positions,
+        List<Segment> segments,
+        string element,
+        string keyword)
+    {
+        var corrections = new Dictionary<PivotRow, CorrectionResult>();
+        var rmByPivot = rmData.ToDictionary(r => r.PivotIndex, r => r);
+
+        foreach (var segment in segments)
+        {
+            var segPos = segment.Positions;
+
+            int startIdx = 0;
+            for (int i = 0; i < segPos.Count; i++)
+            {
+                if (segPos[i].RmNum == segment.RefRmNum)
+                {
+                    startIdx = i;
+                    break;
+                }
+            }
+
+            if (startIdx >= segPos.Count - 1) continue;
+
+            for (int i = startIdx; i < segPos.Count - 1; i++)
+            {
+                var posFrom = segPos[i];
+                var posTo = segPos[i + 1];
+
+                if (!rmByPivot.TryGetValue(posFrom.PivotIndex, out var rmFrom) ||
+                    !rmByPivot.TryGetValue(posTo.PivotIndex, out var rmTo))
+                    continue;
+
+                var valFrom = rmFrom.Values.GetValueOrDefault(element);
+                var valTo = rmTo.Values.GetValueOrDefault(element);
+
+                if (!valFrom.HasValue || !valTo.HasValue || valFrom.Value == 0)
+                    continue;
+
+                var ratio = valTo.Value / valFrom.Value;
+                var minPos = posFrom.Max;
+                var maxPos = posTo.Max;
+
+                var samplesToCorrect = pivotData
+                    .Where(p => p.OriginalIndex > minPos &&
+                               p.OriginalIndex < maxPos &&
+                               !Regex.IsMatch(p.SolutionLabel, $@"^{keyword}\d*$", RegexOptions.IgnoreCase) &&
+                               p.Values.ContainsKey(element) &&
+                               p.Values[element].HasValue)
+                    .OrderBy(p => p.OriginalIndex)
+                    .ToList();
+
+                foreach (var sample in samplesToCorrect)
+                {
+                    var originalValue = sample.Values[element]!.Value;
+                    var correctedValue = originalValue * ratio;
+
+                    corrections[sample] = new CorrectionResult
+                    {
+                        OriginalValue = originalValue,
+                        CorrectionFactor = ratio,
+                        CorrectedValue = correctedValue
+                    };
+                }
+            }
+        }
+
+        return corrections;
+    }
+
+    private ElementDriftInfo? CalculateElementDrift(
+        List<PivotRow> pivotData,
+        List<PivotRow> rmData,
+        List<Position> positions,
+        string element)
+    {
+        if (rmData.Count < 2) return null;
+
+        var firstRm = rmData.First();
+        var lastRm = rmData.Last();
+
+        var firstValue = firstRm.Values.GetValueOrDefault(element);
+        var lastValue = lastRm.Values.GetValueOrDefault(element);
+
+        if (!firstValue.HasValue || !lastValue.HasValue || firstValue.Value == 0)
             return null;
 
-        var driftPercent = ((currentLast.Value - initialFirst.Value) / Math.Abs(initialFirst.Value)) * 100;
+        var driftPercent = ((lastValue.Value - firstValue.Value) / Math.Abs(firstValue.Value)) * 100;
 
         return new ElementDriftInfo(
             element,
-            1.0m,
-            1.0m,
+            firstValue.Value,
+            lastValue.Value,
             driftPercent,
             0m,
-            initialFirst.Value
+            firstValue.Value
         );
     }
 
     #endregion
 
-    #region Private Methods - Correction Application
+    #region Database Operations
 
     /// <summary>
-    /// Get segment index for a sample - Python compatible
-    /// Samples before first standard: -1 (no correction)
-    /// Samples after a standard: belong to that standard's segment
+    /// Save corrections to database using (Label, GroupId, Element) as key
+    /// This fixes the bug where duplicate labels would overwrite each other
     /// </summary>
-    private int GetSegmentIndexForSample(int sampleIndex, List<DriftSegment> segments)
+    private async Task<int> SaveCorrectionsToDatabase(
+        Guid projectId,
+        List<RawDataRow> rawRows,
+        Dictionary<(string Label, int GroupId, string Element), decimal> corrections)
     {
-        if (segments.Count == 0)
-            return -1;
+        if (corrections.Count == 0) return 0;
 
-        // Samples before first standard → no correction
-        if (sampleIndex < segments[0].StartIndex)
-            return -1;
+        // Build GroupId mapping for raw rows
+        var labelCounts = new Dictionary<string, int>();
+        var setSizes = new Dictionary<string, int>();
 
-        // Find the segment this sample belongs to
-        // Sample belongs to segment if: segment.StartIndex <= sampleIndex < nextSegment.StartIndex
-        for (int i = segments.Count - 1; i >= 0; i--)
+        // First pass: calculate set sizes
+        var rowsByLabel = rawRows
+            .Select(r => {
+                var data = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(r.ColumnData);
+                var type = data != null ? GetJsonString(data, "Type") : null;
+                var label = data != null ? GetJsonString(data, "Solution Label") ?? r.SampleId : r.SampleId;
+                var element = data != null ? GetJsonString(data, "Element") : null;
+                return new { Row = r, Type = type, Label = label, Element = element };
+            })
+            .Where(x => x.Type == "Samp" || x.Type == "Sample")
+            .ToList();
+
+        foreach (var group in rowsByLabel.GroupBy(x => x.Label))
         {
-            if (sampleIndex >= segments[i].StartIndex)
-                return segments[i].SegmentIndex;
+            var elementCounts = group.GroupBy(x => x.Element).Select(g => g.Count()).ToList();
+            if (elementCounts.Count == 0) continue;
+            var gcd = elementCounts.Aggregate(GCD);
+            var total = group.Count();
+            setSizes[group.Key!] = (gcd > 0 && total % gcd == 0) ? total / gcd : total;
         }
 
-        return -1;
-    }
+        // Second pass: assign GroupId and update
+        var savedCount = 0;
+        labelCounts.Clear();
 
-    /// <summary>
-    /// Check if sample is a standard (RM/CRM/etc)
-    /// </summary>
-    private bool IsStandardSample(string solutionLabel)
-    {
-        var label = solutionLabel.ToUpper();
-        return label.StartsWith("RM") ||
-               label.StartsWith("CRM") ||
-               label.StartsWith("SRM") ||
-               label.StartsWith("OREAS") ||
-               label.StartsWith("STD") ||
-               label.StartsWith("STANDARD");
-    }
-
-    /// <summary>
-    /// Check if sample is the START standard of a segment (should not be corrected)
-    /// Python behavior: only the FIRST RM of each segment stays unchanged
-    /// </summary>
-    private bool IsSegmentStartStandard(int sampleIndex, List<DriftSegment> segments)
-    {
-        return segments.Any(s => s.StartIndex == sampleIndex);
-    }
-
-    private List<CorrectedSampleDto> ApplyLinearCorrection(
-        List<ParsedRow> data,
-        List<DriftSegment> segments,
-        List<string> elements,
-        Dictionary<int, Dictionary<string, decimal>> segmentRatios)
-    {
-        var result = new List<CorrectedSampleDto>();
-        const decimal tolerance = 0.0001m;
-
-        for (int i = 0; i < data.Count; i++)
+        foreach (var item in rowsByLabel)
         {
-            var segmentIndex = GetSegmentIndexForSample(i, segments);
+            if (item.Label == null || item.Element == null) continue;
 
-            // Python behavior: correct everything EXCEPT:
-            // 1. Samples before first standard (segmentIndex < 0)
-            // 2. The START standard of each segment
-            var isStartStandard = IsSegmentStartStandard(i, segments);
-            var shouldCorrect = segmentIndex >= 0 && !isStartStandard;
+            if (!labelCounts.ContainsKey(item.Label))
+                labelCounts[item.Label] = 0;
 
-            var correctedValues = new Dictionary<string, decimal?>();
-            var correctionFactors = new Dictionary<string, decimal>();
+            var setSize = setSizes.GetValueOrDefault(item.Label, 1);
+            var groupId = labelCounts[item.Label] / setSize;
+            labelCounts[item.Label]++;
 
-            foreach (var element in elements)
+            var key = (item.Label, groupId, item.Element);
+            if (corrections.TryGetValue(key, out var correctedValue))
             {
-                var originalValue = GetElementValue(data[i], element);
+                try
+                {
+                    var dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(item.Row.ColumnData);
+                    if (dict == null) continue;
 
-                if (shouldCorrect && originalValue.HasValue &&
-                    segmentRatios.TryGetValue(segmentIndex, out var ratios) &&
-                    ratios.TryGetValue(element, out var ratio) &&
-                    ratio != 0 && Math.Abs(ratio - 1.0m) > tolerance)
-                {
-                    // Linear: apply fixed ratio for entire segment
-                    var correctionFactor = 1.0m / ratio;
-                    correctedValues[element] = originalValue.Value * correctionFactor;
-                    correctionFactors[element] = correctionFactor;
+                    var mutableDict = dict.ToDictionary(kvp => kvp.Key, kvp => (object)kvp.Value);
+                    mutableDict["Corr Con"] = correctedValue;
+
+                    item.Row.ColumnData = JsonSerializer.Serialize(mutableDict);
+                    savedCount++;
                 }
-                else
+                catch (Exception ex)
                 {
-                    correctedValues[element] = originalValue;
+                    _logger.LogWarning(ex, "Failed to update row {DataId}", item.Row.DataId);
                 }
             }
-
-            result.Add(new CorrectedSampleDto(
-                data[i].SolutionLabel,
-                i,
-                Math.Max(0, segmentIndex),
-                data[i].Values,
-                correctedValues,
-                correctionFactors
-            ));
         }
 
-        return result;
+        await _db.SaveChangesAsync();
+        return savedCount;
     }
 
-    private List<CorrectedSampleDto> ApplyStepwiseCorrection(
-        List<ParsedRow> data,
-        List<DriftSegment> segments,
-        List<string> elements,
-        Dictionary<int, Dictionary<string, decimal>> segmentRatios)
+    private async Task SaveUndoStateAsync(Guid projectId, string description)
     {
-        var result = new List<CorrectedSampleDto>();
-        const decimal tolerance = 0.0001m;
+        var rawRows = await _db.RawDataRows
+            .AsNoTracking()
+            .Where(r => r.ProjectId == projectId)
+            .Select(r => new { r.SampleId, r.ColumnData })
+            .ToListAsync();
 
-        for (int i = 0; i < data.Count; i++)
+        var state = new ProjectState
         {
-            var segmentIndex = GetSegmentIndexForSample(i, segments);
-            var segment = segmentIndex >= 0 ? segments.FirstOrDefault(s => s.SegmentIndex == segmentIndex) : null;
+            ProjectId = projectId,
+            Data = JsonSerializer.Serialize(rawRows),
+            Description = $"Undo_{description}",
+            Timestamp = DateTime.UtcNow
+        };
 
-            // Python behavior: correct everything EXCEPT start standard
-            var isStartStandard = IsSegmentStartStandard(i, segments);
-            var shouldCorrect = segment != null && !isStartStandard;
-
-            var correctedValues = new Dictionary<string, decimal?>();
-            var correctionFactors = new Dictionary<string, decimal>();
-
-            foreach (var element in elements)
-            {
-                var originalValue = GetElementValue(data[i], element);
-
-                if (shouldCorrect && originalValue.HasValue &&
-                    segmentRatios.TryGetValue(segmentIndex, out var ratios) &&
-                    ratios.TryGetValue(element, out var ratio) &&
-                    Math.Abs(ratio - 1.0m) > tolerance)
-                {
-                    // Stepwise: gradual correction within segment
-                    decimal delta = ratio - 1.0m;
-                    int n = segment!.EndIndex - segment.StartIndex;
-                    decimal stepDelta = n > 0 ? delta / n : 0;
-                    int stepIndex = i - segment.StartIndex;
-
-                    decimal effectiveRatio;
-                    if (stepIndex <= 0)
-                        effectiveRatio = 1.0m;  // At start standard, no correction
-                    else
-                        effectiveRatio = 1.0m + (stepDelta * stepIndex);
-
-                    var correctionFactor = effectiveRatio != 0 ? 1.0m / effectiveRatio : 1.0m;
-                    correctedValues[element] = originalValue.Value * correctionFactor;
-                    correctionFactors[element] = correctionFactor;
-                }
-                else
-                {
-                    correctedValues[element] = originalValue;
-                }
-            }
-
-            result.Add(new CorrectedSampleDto(
-                data[i].SolutionLabel,
-                i,
-                Math.Max(0, segmentIndex),
-                data[i].Values,
-                correctedValues,
-                correctionFactors
-            ));
-        }
-
-        return result;
+        _db.ProjectStates.Add(state);
+        await _db.SaveChangesAsync();
     }
 
     #endregion
 
-    #region Private Types
+    #region Helpers
 
-    private record ParsedRow(string SolutionLabel, Dictionary<string, decimal?> Values);
-    private record SavedRowData(string? SampleId, string ColumnData);
+    private List<string> GetAllElements(List<PivotRow> pivotRows)
+    {
+        var elements = new HashSet<string>();
+        foreach (var row in pivotRows)
+        {
+            foreach (var key in row.Values.Keys)
+            {
+                elements.Add(key);
+            }
+        }
+        return elements.OrderBy(e => e).ToList();
+    }
+
+    private string? GetJsonString(Dictionary<string, JsonElement> data, string key)
+    {
+        if (data.TryGetValue(key, out var element))
+        {
+            if (element.ValueKind == JsonValueKind.String)
+                return element.GetString();
+            if (element.ValueKind != JsonValueKind.Null)
+                return element.ToString();
+        }
+        return null;
+    }
+
+    private decimal? GetJsonDecimal(Dictionary<string, JsonElement> data, string key)
+    {
+        if (data.TryGetValue(key, out var element))
+        {
+            if (element.ValueKind == JsonValueKind.Number)
+                return element.GetDecimal();
+            if (element.ValueKind == JsonValueKind.String)
+            {
+                var str = element.GetString();
+                if (decimal.TryParse(str, System.Globalization.NumberStyles.Any,
+                    System.Globalization.CultureInfo.InvariantCulture, out var val))
+                    return val;
+            }
+        }
+        return null;
+    }
+
+    #endregion
+
+    #region Internal Types
+
+    private record ProcessedData(
+        List<RawDataRow> RawRows,
+        List<RawDataItem> ParsedRows,
+        List<PivotRow> PivotRows);
+
+    private class RawDataItem
+    {
+        public long DataId { get; set; }
+        public string SolutionLabel { get; set; } = "";
+        public string Element { get; set; } = "";
+        public decimal? CorrCon { get; set; }
+        public int OriginalIndex { get; set; }
+        public int RowId { get; set; }
+        public int GroupId { get; set; }
+    }
+
+    private class PivotRow
+    {
+        public string SolutionLabel { get; set; } = "";
+        public int GroupId { get; set; }
+        public int OriginalIndex { get; set; }
+        public int PivotIndex { get; set; }
+        public int RmNum { get; set; }
+        public string RmType { get; set; } = "";
+        public Dictionary<string, decimal?> Values { get; set; } = new();
+    }
+
+    private class Position
+    {
+        public string SolutionLabel { get; set; } = "";
+        public int PivotIndex { get; set; }
+        public int Min { get; set; }
+        public int Max { get; set; }
+        public int RmNum { get; set; }
+        public string RmType { get; set; } = "";
+        public int SegmentId { get; set; }
+        public int RefRmNum { get; set; }
+    }
+
+    private class Segment
+    {
+        public int SegmentId { get; set; }
+        public int RefRmNum { get; set; }
+        public List<Position> Positions { get; set; } = new();
+    }
+
+    private class CorrectionResult
+    {
+        public decimal OriginalValue { get; set; }
+        public decimal CorrectionFactor { get; set; }
+        public decimal CorrectedValue { get; set; }
+    }
 
     #endregion
 }
