@@ -201,15 +201,6 @@ public class CorrectionService : ICorrectionService
 
     #endregion
 
-    // ============================================================
-    // FindEmptyRowsAsync - Final and reliable version
-    // ============================================================
-    // 
-    // Rules:
-    // - null = missing (e.g. '-----' in CSV)
-    // - 0 = actual zero value (e.g. Blank)
-    //
-    // ============================================================
 
     #region Find Empty Rows (FINAL - CORRECT VERSION)
 
@@ -394,7 +385,6 @@ public class CorrectionService : ICorrectionService
     #endregion
 
     #region Apply Corrections
-
 
 
     public async Task<Result<CorrectionResultDto>> ApplyWeightCorrectionAsync(WeightCorrectionRequest request)

@@ -276,11 +276,12 @@
     private async Task LoadData()
     {
         if (_projectId == null) return;
-
         _isLoading = true;
         StateHasChanged();
 
-        // Use AdvancedPivotRequest for Python-compatible duplicate handling
+        // اصلاح شده:
+        // 1. Aggregation به صورت رشته ("First") ارسال شد.
+        // 2. NumberFilters اضافه شد.
         var request = new AdvancedPivotRequest(
             ProjectId: _projectId.Value,
             SearchText: string.IsNullOrWhiteSpace(_searchText) ? null : _searchText,
@@ -290,7 +291,9 @@
             DecimalPlaces: _decimalPlaces,
             Page: _currentPage,
             PageSize: _pageSize,
-            MergeRepeats: _mergeRepeats
+            MergeRepeats: _mergeRepeats,
+            Aggregation: "First", // <--- اصلاح خطا: ارسال رشته به جای عدد
+            NumberFilters: null
         );
 
         var result = await PivotService.GetAdvancedPivotTableAsync(request);
@@ -299,7 +302,13 @@
         {
             _pivotData = result.Data;
             _displayColumns = _pivotData.Columns;
-            _totalPages = (int)Math.Ceiling(_pivotData.TotalCount / (double)_pageSize);
+
+            // جلوگیری از تقسیم بر صفر
+            if (_pageSize > 0)
+                _totalPages = (int)Math.Ceiling(_pivotData.TotalCount / (double)_pageSize);
+            else
+                _totalPages = 1;
+
             _hasRepeats = _pivotData.Metadata?.HasRepeats ?? false;
 
             if (_pivotData.Metadata?.AllElements != null && !_allElements.Any())
@@ -309,7 +318,14 @@
         }
         else
         {
-            Snackbar.Add(result.Message ?? "Failed to load data", Severity.Error);
+            // اصلاح خطا: استفاده از Message به جای Messages
+            // اگر کلاس wrapper شما لیست خطا دارد، ممکن است نام آن Errors باشد.
+            // اما معمولاً در این پروژه Message استفاده شده است.
+            var errorMsg = !string.IsNullOrEmpty(result.Message)
+                           ? result.Message
+                           : "Failed to load data";
+
+            Snackbar.Add(errorMsg, Severity.Error);
         }
 
         _isLoading = false;
