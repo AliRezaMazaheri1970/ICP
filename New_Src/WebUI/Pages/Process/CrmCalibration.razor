@@ -21,10 +21,10 @@
 }
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
     <MudPaper Elevation="0" Class="pa-4 mb-4 custom-card-all">
-        <div class="d-flex justify-space-between align-center">
-            <div>
-                <MudText Typo="Typo.h4" Class="fw-bold">CRM Calibration</MudText>
-                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+        <div class="justify-space-between align-center">
+            <div class="mb-4">
+                <MudText Typo="Typo.h4" Class="fw-bold h4-title">CRM Calibration</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary p-description">
                     @if (!string.IsNullOrEmpty(_projectName))
                     {
                         <span>Project: <strong>@_projectName</strong> | </span>
@@ -237,7 +237,7 @@
                         {
                             <MudDivider Class="my-4" />
                             <MudExpansionPanels>
-                                <MudExpansionPanel Text="Optimized Sample Details">
+                                <MudExpansionPanel Text="Optimized Sample Details" @bind-Expanded="_detailsExpanded">
                                     <MudTable Items="@_result.OptimizedData.Take(50)"
                                               Hover="true"
                                               Dense="true">
@@ -297,6 +297,30 @@
         align-items: center;
         z-index: 9999;
     }
+
+    .mud-simple-table table {
+        width: 100%;
+        display: table;
+        border-spacing: 0;
+        border-collapse: collapse;
+        height: 200px;
+        overflow: scroll;
+    }
+
+    .mud-table-dense * .mud-table-row .mud-table-cell {
+        padding: 0px 15px 0px 16px;
+        padding-inline-start: 16px;
+        padding-inline-end: 24px;
+    }
+
+    .mud-table {
+        color: var(--mud-palette-text-primary);
+        background-color: var(--mud-palette-surface);
+        border-radius: var(--mud-default-borderradius);
+        transition: box-shadow 300ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;
+        height: 362px;
+        overflow: scroll;
+    }
 </style>
 @code {
     [SupplyParameterFromQuery]
@@ -308,11 +332,13 @@
     private int _maxIterations = 100;
     private int _populationSize = 50;
     private bool _useMultiModel = true;
+    private bool _detailsExpanded = true;
     private IEnumerable<string> _selectedElements = new HashSet<string>();
     private List<string> _allElements = new();
     private BlankScaleOptimizationResult? _result;
     private bool _isLoading = false;
     private string? _projectName;
+
 
     protected override async Task OnInitializedAsync()
     {

@@ -21,10 +21,10 @@
 }
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
     <MudPaper Elevation="0" Class="pa-4 mb-4 custom-card-all">
-        <div class="d-flex justify-space-between align-center">
-            <div>
-                <MudText Typo="Typo.h4" Class="fw-bold">Final Results</MudText>
-                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+        <div class="justify-space-between align-center">
+            <div class="mb-4">
+                <MudText Typo="Typo.h4" Class="fw-bold h4-title">Final Results</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary p-description">
                     @if (!string.IsNullOrEmpty(_projectName))
                     {
                         <span>Project: <strong>@_projectName</strong> | </span>
@@ -48,7 +48,7 @@
             @* Controls Panel *@
             <MudItem xs="12" md="3">
                 <MudPaper Elevation="0" Class="pa-4 custom-card-all">
-                    <MudText Typo="Typo.h6" Class="mb-4">
+                    <MudText Typo="Typo.h6" Class="mb-0">
                         <MudIcon Icon="@Icons.Material.Filled.FilterAlt" Class="me-2" />
                         Data Filters
                     </MudText>
@@ -56,17 +56,17 @@
                     <MudCheckBox @bind-Value="_showOnlyRm"
                                  Label="Show Only RM Samples"
                                  Color="Color.Primary"
-                                 Class="mb-2" />
+                                 Class="mb-0 p-1" />
 
                     <MudCheckBox @bind-Value="_showBadSamples"
                                  Label="Highlight Bad Samples"
                                  Color="Color.Warning"
-                                 Class="mb-2" />
+                                 Class="mb-0 p-1" />
 
                     <MudCheckBox @bind-Value="_showDiff"
                                  Label="Show Diff Columns"
                                  Color="Color.Info"
-                                 Class="mb-4" />
+                                 Class="mb-0 p-0" />
 
                     <MudButton Variant="Variant.Filled"
                                Color="Color.Primary"
@@ -74,13 +74,13 @@
                                StartIcon="@Icons.Material.Filled.Refresh"
                                OnClick="LoadData"
                                Disabled="_isLoading"
-                               Class="mb-4">
+                               Class="mb-0">
                         Refresh Data
                     </MudButton>
 
-                    <MudDivider Class="my-4" />
+                    <MudDivider Class="my-2" />
 
-                    <MudText Typo="Typo.h6" Class="mb-4">
+                    <MudText Typo="Typo.h6" Class="mb-0">
                         <MudIcon Icon="@Icons.Material.Filled.Download" Class="me-2" />
                         Export
                     </MudText>
@@ -111,7 +111,7 @@
                                StartIcon="@Icons.Material.Filled.DataObject"
                                OnClick="@(() => ExportData("json"))"
                                Disabled="_isLoading"
-                               Class="mb-2">
+                               Class="mb-0">
                         Export JSON
                     </MudButton>
                 </MudPaper>

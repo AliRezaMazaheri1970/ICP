@@ -15,7 +15,7 @@
     </MudButtonGroup>
 </div>
 
-<div class="d-block d-lg-none">
+<div class="d-block d-lg-none ">
     <MudSelect T="string"
                Label="Step selection"
                Value="@CurrentStep"
@@ -28,12 +28,18 @@
         @foreach (var step in Steps)
         {
             <MudSelectItem Value="@step.Key">
-                <MudIcon Icon="@step.Icon" Size="Size.Small" Class="me-1" />
-                @step.Text
-                @if (CurrentStep == step.Key)
-                {
-                    <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Class="ms-auto" Color="Color.Success" />
-                }
+
+                @* 👈 تغییر اصلی اینجاست: استفاده از div با کلاس d-flex و align-center *@
+                <div class="d-flex align-center">
+                    <MudIcon Icon="@step.Icon" Size="Size.Small" Class="me-2" />
+                    <span>@step.Text</span>
+
+                    @* آیکون تیک باید به انتهای ردیف فلکس برود (با استفاده از ms-auto) *@
+                    @if (CurrentStep == step.Key)
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Class="ms-auto" Color="Color.Success" />
+                    }
+                </div>
             </MudSelectItem>
         }
     </MudSelect>

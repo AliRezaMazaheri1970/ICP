@@ -21,10 +21,10 @@
 
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
     <MudPaper Elevation="0" Class="pa-4 mb-4 custom-card-all">
-        <div class="d-flex justify-space-between align-center">
-            <div>
-                <MudText Typo="Typo.h4" Class="fw-bold">Dilution Factor Check</MudText>
-                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+        <div class="justify-space-between align-center">
+            <div class="mb-4">
+                <MudText Typo="Typo.h4" Class="fw-bold h4-title">Dilution Factor Check</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary p-description">
                     @if (!string.IsNullOrEmpty(_projectName))
                     {
                         <span>Project: <strong>@_projectName</strong> | </span>
@@ -233,7 +233,7 @@
                 @* All Samples Preview *@
                 @if (_allSamples.Any())
                 {
-                    <MudPaper Elevation="0" Class="pa-4 mt-4 custom-card-all" Height="280px">
+                    <MudPaper Elevation="0" Class="pa-4 mt-4 custom-card-all ">
                         <MudExpansionPanels Class="box-shadow-0" Style="overflow:hidden">
                             <MudExpansionPanel Text="All Samples Preview"
                                 

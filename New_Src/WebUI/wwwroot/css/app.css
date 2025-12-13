@@ -349,10 +349,13 @@ html, body {
     .p-description{
         font-size: .8rem;
     }
+   
 }
 
 @media (max-width: 600px) {
-  
+    .change-flex-item {
+        flex-direction: column;
+    }
 }
 
 @media (max-width: 380px) {
