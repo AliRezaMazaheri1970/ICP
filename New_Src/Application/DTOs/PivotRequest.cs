@@ -1,8 +1,17 @@
 ﻿namespace Application.DTOs;
 
 /// <summary>
-/// Request for creating/getting pivot table
+/// Represents a request to create or retrieve a pivot table.
 /// </summary>
+/// <param name="ProjectId">The project identifier.</param>
+/// <param name="SearchText">Optional text to filter rows.</param>
+/// <param name="SelectedSolutionLabels">Optional list of specific solution labels.</param>
+/// <param name="SelectedElements">Optional list of specific elements.</param>
+/// <param name="NumberFilters">Optional numeric filters per column.</param>
+/// <param name="UseOxide">Whether to convert to oxide values.</param>
+/// <param name="DecimalPlaces">Decimal precision for display.</param>
+/// <param name="Page">Page number.</param>
+/// <param name="PageSize">Page size.</param>
 public record PivotRequest(
     Guid ProjectId,
     string? SearchText = null,
@@ -16,16 +25,24 @@ public record PivotRequest(
 );
 
 /// <summary>
-/// Number filter for numeric columns (min/max)
+/// Represents a numeric range filter for a column.
 /// </summary>
+/// <param name="Min">Minimum value (inclusive).</param>
+/// <param name="Max">Maximum value (inclusive).</param>
 public record NumberFilter(
     decimal? Min = null,
     decimal? Max = null
 );
 
 /// <summary>
-/// Pivot table result
+/// Represents the result of a pivot table operation.
 /// </summary>
+/// <param name="Columns">List of column headers.</param>
+/// <param name="Rows">List of data rows.</param>
+/// <param name="TotalCount">Total number of rows.</param>
+/// <param name="Page">Current page number.</param>
+/// <param name="PageSize">Current page size.</param>
+/// <param name="Metadata">Metadata and statistics.</param>
 public record PivotResultDto(
     List<string> Columns,
     List<PivotRowDto> Rows,
@@ -36,8 +53,11 @@ public record PivotResultDto(
 );
 
 /// <summary>
-/// Single row in pivot table
+/// Represents a single row in a pivot table.
 /// </summary>
+/// <param name="SolutionLabel">The sample label.</param>
+/// <param name="Values">The dictionary of values per column.</param>
+/// <param name="OriginalIndex">The original row index.</param>
 public record PivotRowDto(
     string SolutionLabel,
     Dictionary<string, decimal?> Values,
@@ -45,8 +65,11 @@ public record PivotRowDto(
 );
 
 /// <summary>
-/// Metadata about the pivot table
+/// Contains metadata and statistics for the pivot table.
 /// </summary>
+/// <param name="AllSolutionLabels">List of all available solution labels.</param>
+/// <param name="AllElements">List of all available elements.</param>
+/// <param name="ColumnStats">Statistics for each column.</param>
 public record PivotMetadataDto(
     List<string> AllSolutionLabels,
     List<string> AllElements,
@@ -54,8 +77,13 @@ public record PivotMetadataDto(
 );
 
 /// <summary>
-/// Statistics for a column
+/// Represents statistics for a data column.
 /// </summary>
+/// <param name="Min">Minimum value.</param>
+/// <param name="Max">Maximum value.</param>
+/// <param name="Mean">Mean value.</param>
+/// <param name="StdDev">Standard deviation.</param>
+/// <param name="NonNullCount">Count of non-null values.</param>
 public record ColumnStatsDto(
     decimal? Min,
     decimal? Max,
@@ -65,17 +93,24 @@ public record ColumnStatsDto(
 );
 
 /// <summary>
-/// Duplicate detection request
+/// Represents a request to detect duplicate samples.
 /// </summary>
+/// <param name="ProjectId">The project identifier.</param>
+/// <param name="ThresholdPercent">The percentage threshold for difference.</param>
+/// <param name="DuplicatePatterns">Optional patterns to identify duplicates.</param>
 public record DuplicateDetectionRequest(
     Guid ProjectId,
     decimal ThresholdPercent = 10m,
-    List<string>? DuplicatePatterns = null  // e.g., ["TEK", "RET", "ret"]
+    List<string>? DuplicatePatterns = null
 );
 
 /// <summary>
-/// Duplicate detection result
+/// Represents the result of a duplicate check.
 /// </summary>
+/// <param name="MainSolutionLabel">The primary sample label.</param>
+/// <param name="DuplicateSolutionLabel">The duplicate sample label.</param>
+/// <param name="Differences">List of differences per element.</param>
+/// <param name="HasOutOfRangeDiff">Indicates if significant differences exist.</param>
 public record DuplicateResultDto(
     string MainSolutionLabel,
     string DuplicateSolutionLabel,
@@ -84,24 +119,24 @@ public record DuplicateResultDto(
 );
 
 /// <summary>
-/// Oxide conversion factors (from Python oxide_factors.py)
+/// Provides standard oxide conversion factors.
 /// </summary>
-// فایل: Application/DTOs/PivotRequest.cs
-
 public static class OxideFactors
 {
+    /// <summary>
+    /// Dictionary of element symbols to their oxide formula and conversion factor.
+    /// </summary>
     public static readonly Dictionary<string, (string Formula, decimal Factor)> Factors = new()
     {
-        // لیست کامل ۷۸ عنصر منطبق با پایتون
         { "Ag", ("Ag2O", 1.0741m) },
         { "Al", ("Al2O3", 1.8895m) },
         { "As", ("As2O5", 1.5339m) },
-        { "Au", ("Au2O3", 1.1218m) }, // محاسبه تقریبی بر اساس وزن اتمی
+        { "Au", ("Au2O3", 1.1218m) },
         { "B",  ("B2O3", 3.2199m) },
         { "Ba", ("BaO", 1.1165m) },
         { "Be", ("BeO", 2.7753m) },
         { "Bi", ("Bi2O3", 1.1148m) },
-        { "Br", ("Br", 1.0m) },      // معمولاً اکسید گزارش نمی‌شود یا فاکتور خاص دارد
+        { "Br", ("Br", 1.0m) },
         { "C",  ("CO2", 3.6641m) },
         { "Ca", ("CaO", 1.3992m) },
         { "Cd", ("CdO", 1.1423m) },

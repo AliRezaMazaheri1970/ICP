@@ -3,29 +3,44 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Domain.Entities;
 
-// Small entity to record processed/analysis outputs (optional)
+/// <summary>
+/// Represents a record of processed analysis outputs.
+/// </summary>
 public class ProcessedData
 {
-    // Primary key
+    /// <summary>
+    /// Gets or sets the unique database identifier.
+    /// </summary>
     [Key]
     public int Id { get; set; }
 
-    // A user-defined or internally incremented id for this processing run/type within a project
-    // (optional, can be used to group multiple processed records per analysis)
+    /// <summary>
+    /// Gets or sets a user-defined or scoped identifier for this processing run.
+    /// </summary>
     public int ProcessedId { get; set; }
 
-    // FK to Project
+    /// <summary>
+    /// Gets or sets the associated project identifier.
+    /// </summary>
     public Guid ProjectId { get; set; }
 
-    // e.g. "CRM", "RM", "QC" - keep short
+    /// <summary>
+    /// Gets or sets the type of analysis (e.g., "CRM", "QC").
+    /// </summary>
     public string AnalysisType { get; set; } = string.Empty;
 
-    // JSON payload of processed results (use nvarchar(max) mapping in EF config)
+    /// <summary>
+    /// Gets or sets the JSON payload containing the processed results.
+    /// </summary>
     public string Data { get; set; } = string.Empty;
 
-    // Created timestamp (set by CLR default; DB default also configured in EF config)
+    /// <summary>
+    /// Gets or sets the timestamp when the record was created.
+    /// </summary>
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-    // Optional navigation to Project (no assumption made that Project has a collection property)
+    /// <summary>
+    /// Gets or sets the associated project navigation property.
+    /// </summary>
     public Project? Project { get; set; }
 }

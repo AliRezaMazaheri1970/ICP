@@ -3,51 +3,93 @@
 namespace Domain.Entities;
 
 /// <summary>
-/// Persists import/processing job status so it survives restarts.
-/// Primary key is JobId (Guid).
+/// Represents a persistent job for importing or processing data.
 /// </summary>
 public class ProjectImportJob
 {
+    /// <summary>
+    /// Gets or sets the unique identifier for the job.
+    /// </summary>
     [Key]
     public Guid JobId { get; set; }
 
-    // For processing jobs: which project to process
+    /// <summary>
+    /// Gets or sets the identifier of the project to process.
+    /// </summary>
     public Guid? ProjectId { get; set; }
 
-    // Optional: the project that will be created/associated by import
+    /// <summary>
+    /// Gets or sets the identifier of the resulting project after import.
+    /// </summary>
     public Guid? ResultProjectId { get; set; }
 
-    // The project name requested by the user (optional, useful for listing)
+    /// <summary>
+    /// Gets or sets the user-provided name for the project.
+    /// </summary>
     public string? ProjectName { get; set; }
 
-    // Job type: "import" or "process" (could be made enum)
+    /// <summary>
+    /// Gets or sets the type of job (e.g., "import" or "process").
+    /// </summary>
     public string? JobType { get; set; }
 
-    // State stored as int (map to Shared.Models.ImportJobState)
+    /// <summary>
+    /// Gets or sets the current state of the job.
+    /// </summary>
     public int State { get; set; }
 
+    /// <summary>
+    /// Gets or sets the total number of rows to process.
+    /// </summary>
     public int TotalRows { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of rows already processed.
+    /// </summary>
     public int ProcessedRows { get; set; }
+
+    /// <summary>
+    /// Gets or sets the completion percentage of the job.
+    /// </summary>
     public int Percent { get; set; }
 
+    /// <summary>
+    /// Gets or sets a message describing the current status or error.
+    /// </summary>
     public string? Message { get; set; }
 
-    // NEW: path to temporary uploaded file on disk (optional)
+    /// <summary>
+    /// Gets or sets the path to the temporary uploaded file.
+    /// </summary>
     public string? TempFilePath { get; set; }
 
+    /// <summary>
+    /// Gets or sets the timestamp when the job was created.
+    /// </summary>
     public DateTime CreatedAt { get; set; }
+
+    /// <summary>
+    /// Gets or sets the timestamp when the job was last updated.
+    /// </summary>
     public DateTime? UpdatedAt { get; set; }
 
-    // --- NEW fields for idempotency / retries ---
-    // Optional operation identifier (useful when client provides an idempotency key)
+    /// <summary>
+    /// Gets or sets an optional operation identifier for idempotency.
+    /// </summary>
     public Guid? OperationId { get; set; }
 
-    // Number of attempts performed for this job
+    /// <summary>
+    /// Gets or sets the number of attempts made for this job.
+    /// </summary>
     public int Attempts { get; set; } = 0;
 
-    // Last error message recorded for this job (if any)
+    /// <summary>
+    /// Gets or sets the last error message encountered, if any.
+    /// </summary>
     public string? LastError { get; set; }
 
-    // When to try the next attempt (for backoff scheduling)
+    /// <summary>
+    /// Gets or sets the scheduled time for the next attempt.
+    /// </summary>
     public DateTime? NextAttemptAt { get; set; }
 }

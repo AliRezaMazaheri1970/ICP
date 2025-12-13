@@ -1,60 +1,67 @@
 namespace Domain.Entities;
 
 /// <summary>
-/// Audit log for tracking all changes to project data
-/// Equivalent to Python changes_log SQLite table
+/// Represents an audit log entry for tracking changes to project data.
 /// </summary>
 public class ChangeLog
 {
+    /// <summary>
+    /// Gets or sets the unique identifier for the change log entry.
+    /// </summary>
     public int Id { get; set; }
 
+    /// <summary>
+    /// Gets or sets the identifier of the associated project.
+    /// </summary>
     public Guid ProjectId { get; set; }
 
     /// <summary>
-    /// Type of change: Weight, Volume, DF, CRM, Drift, BlankScale, etc.
+    /// Gets or sets the type of change (e.g., Weight, Volume, Drift).
     /// </summary>
     public string ChangeType { get; set; } = string.Empty;
 
     /// <summary>
-    /// Solution Label / Sample ID that was changed
+    /// Gets or sets the solution label or sample identifier that was changed.
     /// </summary>
     public string? SolutionLabel { get; set; }
 
     /// <summary>
-    /// Element that was affected
+    /// Gets or sets the element that was affected by the change.
     /// </summary>
     public string? Element { get; set; }
 
     /// <summary>
-    /// Original value before change (JSON serialized if complex)
+    /// Gets or sets the original value before the change.
     /// </summary>
     public string? OldValue { get; set; }
 
     /// <summary>
-    /// New value after change (JSON serialized if complex)
+    /// Gets or sets the new value after the change.
     /// </summary>
     public string? NewValue { get; set; }
 
     /// <summary>
-    /// User who made the change
+    /// Gets or sets the username or identifier of the user who made the change.
     /// </summary>
     public string? ChangedBy { get; set; }
 
     /// <summary>
-    /// Timestamp of the change
+    /// Gets or sets the timestamp when the change occurred.
     /// </summary>
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 
     /// <summary>
-    /// Additional details about the change
+    /// Gets or sets additional details describing the change.
     /// </summary>
     public string? Details { get; set; }
 
     /// <summary>
-    /// Batch ID for grouping related changes
+    /// Gets or sets the batch identifier for grouping related changes.
     /// </summary>
     public Guid? BatchId { get; set; }
 
-    // Navigation
+    /// <summary>
+    /// Gets or sets the associated project navigation property.
+    /// </summary>
     public virtual Project? Project { get; set; }
 }
