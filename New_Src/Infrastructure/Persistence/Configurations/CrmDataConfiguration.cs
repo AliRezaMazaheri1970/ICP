@@ -4,6 +4,9 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace Infrastructure.Persistence.Configurations;
 
+/// <summary>
+/// Configures the database mapping for the CrmData entity.
+/// </summary>
 public class CrmDataConfiguration : IEntityTypeConfiguration<CrmData>
 {
     public void Configure(EntityTypeBuilder<CrmData> builder)

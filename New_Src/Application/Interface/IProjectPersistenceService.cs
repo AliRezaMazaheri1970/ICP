@@ -1,4 +1,6 @@
-﻿namespace Application.Services;
+﻿using Shared.Wrapper;
+
+namespace Application.Services;
 
 /// <summary>
 /// Represents raw column data for a project row.

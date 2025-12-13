@@ -9,6 +9,9 @@ using Shared.Wrapper;
 
 namespace Infrastructure.Services;
 
+/// <summary>
+/// Service for importing project data from various file formats.
+/// </summary>
 public class ImportService : IImportService
 {
     private const int DefaultChunkSize = 500;
@@ -16,6 +19,11 @@ public class ImportService : IImportService
     private readonly ILogger<ImportService> _logger;
     private readonly AdvancedFileParser _parser;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ImportService"/> class.
+    /// </summary>
+    /// <param name="persistence">The project persistence service.</param>
+    /// <param name="logger">The logger instance.</param>
     public ImportService(IProjectPersistenceService persistence, ILogger<ImportService> logger)
     {
         _persistence = persistence;
@@ -25,6 +33,7 @@ public class ImportService : IImportService
 
     #region Basic Import (existing)
 
+    /// <inheritdoc/>
     public async Task<Result<ProjectSaveResult>> ImportCsvAsync(
         Stream stream,
         string projectName,
@@ -144,6 +153,7 @@ public class ImportService : IImportService
 
     #region Advanced Import
 
+    /// <inheritdoc/>
     public async Task<Result<FileFormatDetectionResult>> DetectFormatAsync(Stream fileStream, string fileName)
     {
         try
@@ -158,6 +168,7 @@ public class ImportService : IImportService
         }
     }
 
+    /// <inheritdoc/>
     public async Task<Result<FilePreviewResult>> PreviewFileAsync(Stream fileStream, string fileName, int previewRows = 10)
     {
         try
@@ -225,6 +236,7 @@ public class ImportService : IImportService
         }
     }
 
+    /// <inheritdoc/>
     public async Task<Result<AdvancedImportResult>> ImportAdvancedAsync(
         Stream fileStream,
         string fileName,
@@ -378,25 +390,21 @@ public class ImportService : IImportService
             using var reader = new StreamReader(fileStream, System.Text.Encoding.UTF8, leaveOpen: true);
             using var csv = new CsvReader(reader, config);
 
-            // ==========================================
-            //  بخش اصلاح شده (Start of Fix)
-            // ==========================================
-
-            // ابتدا خط اول را می‌خوانیم
+            // Read first line
             if (!csv.Read())
             {
                 return Result<AdvancedImportResult>.Fail("File is empty or has no header");
             }
 
-            // چک می‌کنیم آیا این خط واقعاً هدر است؟
-            // معیار: وجود کلمات کلیدی مثل "Solution Label" یا "Sample"
+            // Check if this line is actually a header
+            // Criteria: presence of keywords like "Solution Label" or "Sample"
             var rawRecord = csv.Parser.RawRecord;
             bool looksLikeHeader = !string.IsNullOrEmpty(rawRecord) &&
                                    (rawRecord.Contains("Solution Label", StringComparison.OrdinalIgnoreCase) ||
                                     rawRecord.Contains("Sample", StringComparison.OrdinalIgnoreCase) ||
                                     rawRecord.Contains("Element", StringComparison.OrdinalIgnoreCase));
 
-            // اگر خط اول هدر نبود (مثل فایل‌های OES که متادیتا دارند)، یک خط دیگر جلو می‌رویم
+            // If the first line is not a header (like OES files with metadata), read one more line
             if (!looksLikeHeader)
             {
                 if (!csv.Read())
@@ -405,11 +413,8 @@ public class ImportService : IImportService
                 }
             }
 
-            // حالا هدر را می‌خوانیم
+            // Read the header
             csv.ReadHeader();
-            // ==========================================
-            //  پایان بخش اصلاح شده (End of Fix)
-            // ==========================================
 
             var headers = csv.HeaderRecord ?? Array.Empty<string>();
 
@@ -552,6 +557,7 @@ public class ImportService : IImportService
             return Result<AdvancedImportResult>.Fail($"Import failed: {ex.Message}");
         }
     }
+    /// <inheritdoc/>
     public async Task<Result<AdvancedImportResult>> ImportAdditionalAsync(
         Guid projectId,
         Stream fileStream,
@@ -569,6 +575,7 @@ public class ImportService : IImportService
         return result;
     }
 
+    /// <inheritdoc/>
     public async Task<Result<AdvancedImportResult>> ImportExcelAsync(
         Stream fileStream,
         string fileName,

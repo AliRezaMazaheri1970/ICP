@@ -1,4 +1,7 @@
-﻿namespace Application.Services;
+﻿using Application.DTOs;
+using Shared.Wrapper;
+
+namespace Application.Services;
 
 /// <summary>
 /// Defines services for data correction operations like weight, volume, and dilution factor adjustments.

@@ -455,7 +455,7 @@ public class RmCheckService : IRmCheckService
 
         foreach (var pattern in patterns)
         {
-            var regexPattern = $@"(? :CRM|OREAS)? [\s\-]*({Regex.Escape(pattern)}[a-zA-Z0-9]{{0,2}})\b";
+            var regexPattern = $@"(?:CRM|OREAS)?[\s\-]*({Regex.Escape(pattern)}[a-zA-Z0-9]{{0,2}})\b";
 
             try
             {

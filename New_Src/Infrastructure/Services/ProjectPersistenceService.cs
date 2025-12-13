@@ -6,15 +6,23 @@ using Shared.Wrapper;
 
 namespace Infrastructure.Services;
 
+/// <summary>
+/// Implements project persistence operations using Entity Framework Core.
+/// </summary>
 public class ProjectPersistenceService : IProjectPersistenceService
 {
     private readonly IsatisDbContext _db;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ProjectPersistenceService"/> class.
+    /// </summary>
+    /// <param name="db">The database context.</param>
     public ProjectPersistenceService(IsatisDbContext db)
     {
         _db = db;
     }
 
+    /// <inheritdoc/>
     public async Task<Result<ProjectSaveResult>> SaveProjectAsync(Guid projectId, string projectName, string? owner, List<RawDataDto>? rawRows, string? stateJson)
     {
         // Use execution strategy for retry-safe transactions
@@ -86,6 +94,7 @@ public class ProjectPersistenceService : IProjectPersistenceService
         });
     }
 
+    /// <inheritdoc/>
     public async Task<Result<ProjectLoadDto>> LoadProjectAsync(Guid projectId)
     {
         try
@@ -115,6 +124,7 @@ public class ProjectPersistenceService : IProjectPersistenceService
         }
     }
 
+    /// <inheritdoc/>
     public async Task<Result<List<ProjectListItemDto>>> ListProjectsAsync(int page = 1, int pageSize = 20)
     {
         try
@@ -147,6 +157,7 @@ public class ProjectPersistenceService : IProjectPersistenceService
         }
     }
 
+    /// <inheritdoc/>
     public async Task<Result<bool>> DeleteProjectAsync(Guid projectId)
     {
         var strategy = _db.Database.CreateExecutionStrategy();

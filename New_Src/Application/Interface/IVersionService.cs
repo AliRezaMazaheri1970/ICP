@@ -1,3 +1,6 @@
+using Domain.Entities;
+using Shared.Wrapper;
+
 namespace Application.Services;
 
 /// <summary>

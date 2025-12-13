@@ -547,9 +547,9 @@ public class OptimizationService : IOptimizationService
         var rawRows = await _db.RawDataRows.AsNoTracking().Where(r => r.ProjectId == projectId).ToListAsync();
         var result = new List<RmSampleData>();
 
-        // الگویی برای پیدا کردن نام‌های استاندارد (CRM, OREAS, RM, PAR, etc.)
+        // Pattern to find standard names (CRM, OREAS, RM, PAR, etc.)
         var rmPattern = new System.Text.RegularExpressions.Regex(@"^(OREAS|SRM|CRM|NIST|BCR|TILL|GBW|RM|PAR)[\s\-_]*(\d+|BLANK)?", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        // الگویی برای استخراج نام عنصر تمیز (Ag 328 -> Ag)
+        // Pattern to extract clean element name (Ag 328 -> Ag)
         var elementPattern = new System.Text.RegularExpressions.Regex(@"([A-Za-z]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
         foreach (var row in rawRows)
@@ -558,12 +558,12 @@ public class OptimizationService : IOptimizationService
             {
                 var solutionLabel = row.SampleId ?? "";
 
-                // چک کردن اینکه آیا نمونه استاندارد است؟ (شامل لیست شما هم می‌شود)
-                // اگر لیبل خالی بود یا جزو پترن‌ها نبود، رد شود
+                // Check if it is a standard sample?
+                // If label is empty or doesn't match patterns, skip
                 if (string.IsNullOrEmpty(solutionLabel) || !rmPattern.IsMatch(solutionLabel))
                 {
-                    // یک شانس دیگر: شاید کاربر دستی لیبل "252 par" زده باشد که پترن بالا نگیرد
-                    // می‌توانید شرط‌های خاص خود را اینجا اضافه کنید
+                    // Second chance: maybe user manually entered "252 par" which above pattern doesn't catch
+                    // Can add specific conditions here
                     if (!solutionLabel.Contains("par", StringComparison.OrdinalIgnoreCase) &&
                         !solutionLabel.Contains("RM", StringComparison.OrdinalIgnoreCase))
                         continue;
@@ -574,8 +574,8 @@ public class OptimizationService : IOptimizationService
 
                 var values = new Dictionary<string, decimal?>();
 
-                // --- منطق جدید برای فایل‌های OES (Long Format) ---
-                // ۱. پیدا کردن نام عنصر از ستون Element
+                // --- New logic for OES files (Long Format) ---
+                // 1. Find element name from Element column
                 string cleanElement = string.Empty;
                 if (data.TryGetValue("Element", out var elemVal) && elemVal.ValueKind == JsonValueKind.String)
                 {
@@ -587,7 +587,7 @@ public class OptimizationService : IOptimizationService
                     }
                 }
 
-                // ۲. پیدا کردن مقدار غلظت (اولویت با Corr Con است)
+                // 2. Find concentration value (priority with Corr Con)
                 decimal? concentration = null;
                 if (data.TryGetValue("Corr Con", out var cc))
                 {
@@ -601,8 +601,8 @@ public class OptimizationService : IOptimizationService
                     else if (sc.ValueKind == JsonValueKind.String && decimal.TryParse(sc.GetString(), out var d)) concentration = d;
                 }
 
-                // ۳. اگر عنصر و غلظت داشتیم، به عنوان یک ستون مجازی اضافه کن
-                // این باعث می‌شود سیستم فکر کند ستونی به نام "Ag" وجود دارد
+                // 3. If we have element and concentration, add as a virtual column
+                // This makes the system think there is a column named "Ag"
                 if (!string.IsNullOrEmpty(cleanElement) && concentration.HasValue)
                 {
                     // مثلاً: values["Ag"] = 0.009
@@ -610,7 +610,7 @@ public class OptimizationService : IOptimizationService
                 }
                 // ---------------------------------------------------
 
-                // کپی کردن سایر ستون‌ها (برای اطمینان)
+                // Copy other columns (for safety)
                 foreach (var kvp in data)
                 {
                     if (kvp.Key == "Solution Label" || kvp.Key == "Element") continue;
@@ -640,13 +640,13 @@ public class OptimizationService : IOptimizationService
                 var values = JsonSerializer.Deserialize<Dictionary<string, decimal>>(crm.ElementValues);
                 if (values == null) continue;
 
-                // اگر این CRM قبلاً اضافه نشده، دیکشنری جدید بساز
+                // If this CRM is not added yet, create new dictionary
                 if (!result.ContainsKey(crm.CrmId))
                 {
                     result[crm.CrmId] = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
                 }
 
-                // منطق ادغام: تمام عناصر را چک کن و اگر مقدار بزرگتری بود، جایگزین کن
+                // Merge logic: Check all elements and replace if value is greater
                 foreach (var kvp in values)
                 {
                     if (!result[crm.CrmId].ContainsKey(kvp.Key))
@@ -655,7 +655,7 @@ public class OptimizationService : IOptimizationService
                     }
                     else
                     {
-                        // اگر مقدار جدید بیشتر بود (مثلاً هضم کامل‌تر)، آپدیت کن
+                        // If new value is greater (e.g. more complete digestion), update
                         if (kvp.Value > result[crm.CrmId][kvp.Key])
                         {
                             result[crm.CrmId][kvp.Key] = kvp.Value;

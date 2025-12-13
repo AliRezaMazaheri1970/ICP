@@ -21,25 +21,31 @@
 
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
     <MudPaper Elevation="0" Class="pa-4 mb-4 custom-card-all">
-        <div class="d-flex justify-space-between align-center">
+        <div class="
+justify-space-between align-center">
             <div>
-                <MudText Typo="Typo.h4" Class="fw-bold">Volume Check</MudText>
-                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                <MudText Typo="Typo.h4" Class="fw-bold h4-title">Volume Check</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary p-description">
                     @if (!string.IsNullOrEmpty(_projectName))
                     {
-                        <span>Project: <strong>@_projectName</strong> | </span>
+
+                        <span>
+                            Project: <strong>@_projectName</strong> |
+                        </span>
                     }
                     Find and correct samples with incorrect volumes
                 </MudText>
             </div>
             <ProcessNav CurrentStep="volume" />
         </div>
+
     </MudPaper>
 
     @if (_projectId == null)
     {
         <MudAlert Severity="Severity.Warning">
-            Please select a project first. <MudLink Href="/projects">Go to Projects</MudLink>
+            Please select a project first.
+            <MudLink Href="/projects">Go to Projects</MudLink>
         </MudAlert>
     }
     else
@@ -48,7 +54,8 @@
             @* Settings *@
             <MudItem xs="12" md="4">
                 <MudPaper Elevation="0" Class="pa-4 custom-card-all">
-                    <MudText Typo="Typo.h6" Class="mb-4">
+                    <MudText Typo="Typo.h6"
+                             Class="mb-4">
                         <MudIcon Icon="@Icons.Material.Filled.Settings" Class="me-2" />
                         Settings
                     </MudText>
@@ -64,16 +71,19 @@
                                FullWidth="true"
                                StartIcon="@Icons.Material.Filled.Search"
                                OnClick="FindBadVolumes"
-                               Disabled="@(_isLoading || _isApplying)">
-                        @if (_isLoading)
+                               Disabled="@(_isLoading ||
+                               _isApplying)">
+                    @if (_isLoading)
                         {
                             <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
+
                         }
                         Find Bad Volumes
                     </MudButton>
 
                     @if (_badSamples != null && _badSamples.Any())
                     {
+
                         <MudDivider Class="my-4" />
 
                         <MudNumericField @bind-Value="_newVolume"
@@ -87,14 +97,17 @@
                                    FullWidth="true"
                                    StartIcon="@Icons.Material.Filled.Build"
                                    OnClick="ApplyCorrection"
-                                   Disabled="@(!_selectedSamples.Any() || _isApplying)">
-                            @if (_isApplying)
+                                   Disabled="@(!_selectedSamples.Any() ||
+                                   _isApplying)">
+                    @if (_isApplying)
                             {
                                 <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
+
                             }
                             Apply to Selected (@_selectedSamples.Count)
                         </MudButton>
                     }
+
                 </MudPaper>
             </MudItem>
 
@@ -103,21 +116,26 @@
                 <MudPaper Elevation="0" Class="pa-4 custom-card-all">
 
                     <div class="d-flex justify-space-between align-center mb-4">
+
                         <MudText Typo="Typo.h6">
                             <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Class="me-2" />
                             Bad Volume Samples
+
                         </MudText>
                         @if (_badSamples != null)
                         {
                             <MudText Typo="Typo.caption">
+
                                 Showing @((_currentPage - 1) * _pageSize + 1) -
                                 @Math.Min(_currentPage * _pageSize, _totalCount)
                                 of @_totalCount
+
                             </MudText>
                         }
                     </div>
 
                     @if (_badSamples == null)
+
                     {
                         <MudAlert Severity="Severity.Info">
                             Click "Find Bad Volumes" to search for samples with incorrect volumes.
@@ -126,6 +144,7 @@
                     else if (!_badSamples.Any())
                     {
                         <MudAlert Severity="Severity.Success">
+
                             All samples have correct volumes!
                         </MudAlert>
                     }
@@ -135,29 +154,36 @@
                                   Hover="true"
                                   Class="height-inner"
                                   Dense="true"
-                                  MultiSelection="true"
+                                  Breakpoint="Breakpoint.None" HorizontalScrollbar="true" MultiSelection="true"
                                   @bind-SelectedItems="_selectedSamples">
                             <HeaderContent>
+
                                 <MudTh>Solution Label</MudTh>
                                 <MudTh>Actual Volume</MudTh>
                                 <MudTh>Expected</MudTh>
+
                                 <MudTh>Deviation</MudTh>
                             </HeaderContent>
                             <RowTemplate>
+
                                 <MudTd>@context.SolutionLabel</MudTd>
                                 <MudTd>
                                     <MudText Color="Color.Error">@context.ActualValue.ToString("F2")</MudText>
+
                                 </MudTd>
                                 <MudTd>@context.ExpectedValue.ToString("F2")</MudTd>
                                 <MudTd>
+
                                     <MudChip T="string" Size="Size.Small" Color="Color.Warning">
                                         @context.Deviation.ToString("F1")%
                                     </MudChip>
+
                                 </MudTd>
                             </RowTemplate>
                         </MudTable>
 
                         @* Pagination *@
+
                         <div class="d-flex justify-center align-center mt-4 gap-4">
                             <MudSelect T="int" Value="_pageSize" ValueChanged="OnPageSizeChanged"
                                        Label="Per Page"
@@ -166,13 +192,16 @@
                                        Style="width: 100px;">
                                 <MudSelectItem Value="15">15</MudSelectItem>
                                 <MudSelectItem Value="30">30</MudSelectItem>
+
                                 <MudSelectItem Value="45">45</MudSelectItem>
                                 <MudSelectItem Value="60">60</MudSelectItem>
                                 <MudSelectItem Value="75">75</MudSelectItem>
+
                                 <MudSelectItem Value="90">90</MudSelectItem>
                                 <MudSelectItem Value="105">105</MudSelectItem>
                                 <MudSelectItem Value="120">120</MudSelectItem>
-                                
+
+
                             </MudSelect>
 
                             <MudPagination Count="@_totalPages"
@@ -185,20 +214,24 @@
                         </div>
 
                         <div class="d-flex justify-end mt-4 gap-2">
+
                             <MudButton Variant="Variant.Outlined"
                                        Size="Size.Small"
-                                       Disabled="@(_isLoading || _isApplying)"
-                                       OnClick="SelectAll">
-                                Select All
+                                       Disabled="@(_isLoading ||
+                                       _isApplying)"
+                               OnClick="SelectAll">
+                        Select All
+
                             </MudButton>
                             <MudButton Variant="Variant.Outlined"
                                        Size="Size.Small"
                                        Disabled="@(_isLoading || _isApplying)"
                                        OnClick="ClearSelection">
                                 Clear Selection
+
                             </MudButton>
                         </div>
-                    }
+                                }
                 </MudPaper>
             </MudItem>
         </MudGrid>
@@ -218,7 +251,8 @@
         z-index: 9999;
     }
 
-    .mud-simple-table table {
+    .mud-simple-table
+    table {
         width: 100%;
         display: table;
         border-spacing: 0;
@@ -245,14 +279,16 @@
 
 @code {
     [SupplyParameterFromQuery]
-    public Guid? projectId { get; set; }
+    public Guid? projectId
+    {
+        get; set;
+    }
 
     private Guid? _projectId;
     private string? _projectName;
 
     private decimal _expectedVolume = 50m;
     private decimal _newVolume = 50m;
-
     private List<BadSampleDto>? _badSamples;
     private List<BadSampleDto> _pagedRows = new();
     private HashSet<BadSampleDto> _selectedSamples = new();
@@ -265,12 +301,13 @@
     private int _pageSize = 15;
     private int _totalCount = 0;
     private int _totalPages => _totalCount == 0
-        ? 1
+        ?
+ 1
         : (int)Math.Ceiling((double)_totalCount / _pageSize);
-
     protected override async Task OnInitializedAsync()
     {
-        _projectId = projectId ?? ProjectService.CurrentProjectId;
+        _projectId = projectId ??
+ ProjectService.CurrentProjectId;
 
         if (_projectId.HasValue)
         {
@@ -285,13 +322,11 @@
     private async Task FindBadVolumes()
     {
         if (_projectId == null) return;
-
         _isLoading = true;
         _selectedSamples.Clear();
         StateHasChanged();
 
         var result = await CorrectionService.FindBadVolumesAsync(_projectId.Value, _expectedVolume);
-
         if (result.Succeeded && result.Data != null)
         {
             _badSamples = result.Data;
@@ -306,7 +341,6 @@
 
         _currentPage = 1;
         UpdatePagedRows();
-
         _isLoading = false;
     }
 
@@ -342,13 +376,11 @@
     private async Task ApplyCorrection()
     {
         if (_projectId == null || !_selectedSamples.Any()) return;
-
         _isApplying = true;
         StateHasChanged();
 
         var labels = _selectedSamples.Select(s => s.SolutionLabel).ToList();
         var result = await CorrectionService.ApplyVolumeCorrectionAsync(_projectId.Value, labels, _newVolume);
-
         if (result.Succeeded)
         {
             Snackbar.Add($"Corrected {result.Data?.CorrectedRows ?? 0} samples", Severity.Success);

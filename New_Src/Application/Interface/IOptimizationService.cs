@@ -1,4 +1,7 @@
-﻿namespace Application.Services;
+﻿using Application.DTOs;
+using Shared.Wrapper;
+
+namespace Application.Services;
 
 /// <summary>
 /// Defines services for optimizing data correction parameters (Blank &amp; Scale) using evolutionary algorithms.

@@ -202,12 +202,12 @@ public class CorrectionService : ICorrectionService
     #endregion
 
     // ============================================================
-    // FindEmptyRowsAsync - نسخه نهایی و مطمئن
+    // FindEmptyRowsAsync - Final and reliable version
     // ============================================================
     // 
-    // قانون:
-    // - null = missing (مثل '-----' در CSV)
-    // - 0 = مقدار واقعی صفر (مثل Blank)
+    // Rules:
+    // - null = missing (e.g. '-----' in CSV)
+    // - 0 = actual zero value (e.g. Blank)
     //
     // ============================================================
 
@@ -223,12 +223,12 @@ public class CorrectionService : ICorrectionService
                 .ToListAsync();
 
             if (!rawRows.Any())
-                return Result<List<EmptyRowDto>>.Fail("هیچ داده‌ای برای این پروژه یافت نشد.");
+                return Result<List<EmptyRowDto>>.Fail("No data found for this project.");
 
             var pivotedData = new Dictionary<string, Dictionary<string, decimal?>>();
             var allElements = new HashSet<string>();
 
-            // پیش‌فرض: Na, Ca, Al, Mg, K
+            // Default: Na, Ca, Al, Mg, K
             var elementsToCheck = request.ElementsToCheck?.Any() == true
                 ? request.ElementsToCheck.ToHashSet(StringComparer.OrdinalIgnoreCase)
                 : new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Na", "Ca", "Al", "Mg", "K" };
@@ -258,7 +258,7 @@ public class CorrectionService : ICorrectionService
                     if (!elementsToCheck.Contains(elementPrefix))
                         continue;
 
-                    // استخراج Soln Conc
+                    // Extract Soln Conc
                     decimal? value = null;
                     if (root.TryGetProperty("Soln Conc", out var solnConcElement))
                     {
@@ -277,7 +277,7 @@ public class CorrectionService : ICorrectionService
                                 value = parsed;
                             }
                         }
-                        // اگر null بود در JSON، value همون null میمونه
+                        // If it was null in JSON, value remains null
                     }
 
                     if (!pivotedData.ContainsKey(sampleId))
@@ -295,7 +295,7 @@ public class CorrectionService : ICorrectionService
             if (!pivotedData.Any())
                 return Result<List<EmptyRowDto>>.Success(new List<EmptyRowDto>());
 
-            // محاسبه میانگین (فقط مقادیر غیر null)
+            // Calculate mean (only non-null values)
             var columnMeans = new Dictionary<string, decimal>();
             foreach (var elem in allElements)
             {
@@ -336,11 +336,11 @@ public class CorrectionService : ICorrectionService
                     decimal threshold = mean * thresholdFactor;
                     rowValuesNullable[elem] = valNullable;
 
-                    // همه elements شمرده میشن
+                    // Count all elements
                     totalElementsChecked++;
 
-                    // ✅ فقط null = missing
-                    // 0 یک مقدار واقعی هست (مثل Blank)
+                    // ✅ Only null = missing
+                    // 0 is a real value (like Blank)
                     if (!valNullable.HasValue)
                     {
                         details[elem] = 0;
@@ -395,124 +395,7 @@ public class CorrectionService : ICorrectionService
 
     #region Apply Corrections
 
-    //public async Task<Result<CorrectionResultDto>> ApplyWeightCorrectionAsync(WeightCorrectionRequest request)
-    //{
-    //    try
-    //    {
-    //        if (request.NewWeight <= 0)
-    //            return Result<CorrectionResultDto>.Fail("New weight must be positive");
 
-    //        var rawRows = await _db.RawDataRows
-    //            .Where(r => r.ProjectId == request.ProjectId)
-    //            .ToListAsync();
-
-    //        if (!rawRows.Any())
-    //            return Result<CorrectionResultDto>.Fail("No data found for project");
-
-    //        await SaveUndoStateAsync(request.ProjectId, "WeightCorrection");
-
-    //        var correctedSamples = new List<CorrectedSampleInfo>();
-    //        var changeLogEntries = new List<(string? SolutionLabel, string? Element, string? OldValue, string? NewValue)>();
-    //        var correctedRows = 0;
-
-    //        foreach (var row in rawRows)
-    //        {
-    //            try
-    //            {
-    //                using var doc = JsonDocument.Parse(row.ColumnData);
-    //                var root = doc.RootElement;
-
-    //                var solutionLabel = root.TryGetProperty("Solution Label", out var labelElement)
-    //                    ? labelElement.GetString() ?? row.SampleId
-    //                    : row.SampleId;
-
-    //                if (solutionLabel == null || !request.SolutionLabels.Contains(solutionLabel))
-    //                    continue;
-
-    //                if (root.TryGetProperty("Type", out var typeElement) &&
-    //                    typeElement.GetString() != "Samp")
-    //                {
-    //                    // Optional: logic to skip non-samples
-    //                }
-
-    //                if (!root.TryGetProperty("Act Wgt", out var weightElement))
-    //                    continue;
-
-    //                if (weightElement.ValueKind == JsonValueKind.Null)
-    //                    continue;
-
-    //                decimal oldWeight;
-    //                if (weightElement.ValueKind == JsonValueKind.Number)
-    //                    oldWeight = weightElement.GetDecimal();
-    //                else if (weightElement.ValueKind == JsonValueKind.String &&
-    //                         decimal.TryParse(weightElement.GetString(), out var parsedWeight))
-    //                    oldWeight = parsedWeight;
-    //                else
-    //                    continue;
-
-    //                if (oldWeight == 0) continue;
-
-    //                decimal oldCorrCon = 0m;
-    //                if (root.TryGetProperty("Corr Con", out var corrConElement) &&
-    //                    corrConElement.ValueKind != JsonValueKind.Null)
-    //                {
-    //                    if (corrConElement.ValueKind == JsonValueKind.Number)
-    //                        oldCorrCon = corrConElement.GetDecimal();
-    //                    else if (corrConElement.ValueKind == JsonValueKind.String &&
-    //                             decimal.TryParse(corrConElement.GetString(), out var parsedCorrCon))
-    //                        oldCorrCon = parsedCorrCon;
-    //                }
-
-    //                // --- FIX: Correct Formula (Inverse Proportionality) ---
-    //                // Correct: NewCorr = OldCorr * (OldWeight / NewWeight)
-    //                var newCorrCon = oldCorrCon * (oldWeight / request.NewWeight);
-    //                // ------------------------------------------------------
-
-    //                var dict = JsonSerializer.Deserialize<Dictionary<string, object>>(row.ColumnData);
-    //                if (dict != null)
-    //                {
-    //                    dict["Act Wgt"] = request.NewWeight;
-    //                    dict["Corr Con"] = newCorrCon;
-
-    //                    var newJson = JsonSerializer.Serialize(dict);
-    //                    row.ColumnData = newJson;
-
-    //                    correctedRows++;
-
-    //                    if (!correctedSamples.Any(s => s.SolutionLabel == solutionLabel))
-    //                    {
-    //                        correctedSamples.Add(new CorrectedSampleInfo(
-    //                            solutionLabel,
-    //                            oldWeight,
-    //                            request.NewWeight,
-    //                            oldCorrCon,
-    //                            newCorrCon
-    //                        ));
-    //                    }
-
-    //                    var element = dict.ContainsKey("Element") ? dict["Element"]?.ToString() : "Unknown";
-    //                    changeLogEntries.Add((solutionLabel, element, oldWeight.ToString(), request.NewWeight.ToString()));
-    //                }
-    //            }
-    //            catch { }
-    //        }
-
-    //        await _db.SaveChangesAsync();
-    //        await _changeLogService.LogBatchChangesAsync(request.ProjectId, "WeightCorrection", changeLogEntries);
-
-    //        // Example fix if the first int is total count and second is corrected count:
-    //        return Result<CorrectionResultDto>.Success(new CorrectionResultDto(
-    //            rawRows.Count, // Missing argument (Total rows processed)
-    //            correctedRows, // Corrected rows count
-    //            correctedSamples.Take(50).ToList()
-    //        ));
-    //    }
-    //    catch (Exception ex)
-    //    {
-    //        _logger.LogError(ex, "Failed to apply weight correction");
-    //        return Result<CorrectionResultDto>.Fail($"Error: {ex.Message}");
-    //    }
-    //}
 
     public async Task<Result<CorrectionResultDto>> ApplyWeightCorrectionAsync(WeightCorrectionRequest request)
     {

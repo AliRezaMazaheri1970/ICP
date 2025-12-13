@@ -4,6 +4,9 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace Infrastructure.Persistence.Configurations;
 
+/// <summary>
+/// Configures the database mapping for the ProjectImportJob entity.
+/// </summary>
 public class ProjectImportJobConfiguration : IEntityTypeConfiguration<ProjectImportJob>
 {
     public void Configure(EntityTypeBuilder<ProjectImportJob> builder)

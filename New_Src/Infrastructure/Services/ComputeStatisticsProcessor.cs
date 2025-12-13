@@ -4,20 +4,19 @@ using System.Text.Json;
 namespace Infrastructure.Services.Processors;
 
 /// <summary>
-/// For numeric columns in rows, compute count, mean and stddev.
-/// Assumes row values are numbers or strings parseable to double.
-/// Results written into accumulator with keys like: stats_{column}_count, stats_{column}_mean, stats_{column}_std
+/// Processor that computes statistical metrics (count, mean, standard deviation) for numeric columns in data rows.
+/// Uses Welford's online algorithm for single-pass variance calculation.
 /// </summary>
 public class ComputeStatisticsProcessor : IRowProcessor
 {
-    // hold intermediate stats per column using lists or Welford's algorithm
     private class StatAccum
     {
         public long Count;
         public double Mean;
-        public double M2; // for variance algorithm
+        public double M2; // For variance algorithm
     }
 
+    /// <inheritdoc/>
     public void ProcessRow(Dictionary<string, object?> row, Dictionary<string, object?> accumulator)
     {
         // Use a nested dictionary in accumulator to keep per-column stats (create if missing)
@@ -35,12 +34,12 @@ public class ComputeStatisticsProcessor : IRowProcessor
 
             if (val is JsonElement je)
             {
-                // try to convert JsonElement to numeric or string
-                if (je.ValueKind == System.Text.Json.JsonValueKind.Number && je.TryGetDouble(out var dnum))
+                // Try to convert JsonElement to numeric or string
+                if (je.ValueKind == JsonValueKind.Number && je.TryGetDouble(out var dnum))
                 {
                     AddValue(stats, col, dnum);
                 }
-                else if (je.ValueKind == System.Text.Json.JsonValueKind.String)
+                else if (je.ValueKind == JsonValueKind.String)
                 {
                     var s = je.GetString();
                     if (double.TryParse(s, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d2))
@@ -68,10 +67,10 @@ public class ComputeStatisticsProcessor : IRowProcessor
                 if (double.TryParse(ss, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d3))
                     AddValue(stats, col, d3);
             }
-            // else ignore non-numeric columns
         }
     }
 
+    /// <inheritdoc/>
     public void Finalize(Dictionary<string, object?> accumulator)
     {
         if (!accumulator.TryGetValue("__stats_internal", out var obj) || obj is not Dictionary<string, StatAccum> stats) return;
@@ -90,7 +89,7 @@ public class ComputeStatisticsProcessor : IRowProcessor
             accumulator[$"stats_{col}_std"] = std;
         }
 
-        // remove internal
+        // Remove internal state
         accumulator.Remove("__stats_internal");
     }
 

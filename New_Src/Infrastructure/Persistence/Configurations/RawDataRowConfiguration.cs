@@ -4,6 +4,9 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace Infrastructure.Persistence.Configurations;
 
+/// <summary>
+/// Configures the database mapping for the RawDataRow entity.
+/// </summary>
 public class RawDataRowConfiguration : IEntityTypeConfiguration<RawDataRow>
 {
     public void Configure(EntityTypeBuilder<RawDataRow> builder)

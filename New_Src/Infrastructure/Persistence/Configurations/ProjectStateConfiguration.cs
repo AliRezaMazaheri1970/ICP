@@ -4,6 +4,9 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace Infrastructure.Persistence.Configurations;
 
+/// <summary>
+/// Configures the database mapping for the ProjectState entity.
+/// </summary>
 public class ProjectStateConfiguration : IEntityTypeConfiguration<ProjectState>
 {
     public void Configure(EntityTypeBuilder<ProjectState> builder)
