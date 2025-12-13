@@ -2,7 +2,7 @@
 using Application.Services;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Isatis.Api.Controllers;
+namespace Api.Controllers;
 
 [ApiController]
 [Route("api/reports")]
@@ -11,7 +11,7 @@ public class ReportController : ControllerBase
     private readonly IReportService _reportService;
     private readonly ILogger<ReportController> _logger;
 
-    // ✅ بدون هیچ فاصله‌ای! 
+    // No spaces allowed! 
     private const string ExcelContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     private const string CsvContentType = "text/csv";
     private const string JsonContentType = "application/json";

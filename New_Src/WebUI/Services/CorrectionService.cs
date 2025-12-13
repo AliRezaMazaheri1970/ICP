@@ -224,13 +224,13 @@ public class CorrectionService
 
             if (response.IsSuccessStatusCode)
             {
-                // ✅ تغییر مهم: استفاده صریح از Application.DTOs.EmptyRowDto
+                // ✅ Important Change: Explicitly using Application.DTOs.EmptyRowDto
                 var result = JsonSerializer.Deserialize<ApiResult<List<Application.DTOs.EmptyRowDto>>>(content,
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
                 if (result?.Succeeded == true && result.Data != null)
                 {
-                    // حالا result.Data از نوع درست است و بدون خطا تبدیل می‌شود
+                    // Now result.Data is of the correct type and will cast without error
                     return ServiceResult<List<Application.DTOs.EmptyRowDto>>.Success(result.Data);
                 }
 

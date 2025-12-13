@@ -14,7 +14,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
     {
         builder.ConfigureServices(services =>
         {
-            // 1) همه رجیستریشن‌های قبلی مربوط به IsatisDbContext را حذف کن
+            // 1) Remove all previous IsatisDbContext registrations
             var descriptorsToRemove = services
                 .Where(d =>
                     d.ServiceType == typeof(DbContextOptions<IsatisDbContext>) ||
@@ -26,7 +26,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 services.Remove(descriptor);
             }
 
-            // 2) اگر TEST_SQL_CONNECTION ست شده بود، از SQL Server برای تست استفاده کن
+            // 2) If TEST_SQL_CONNECTION is set, use SQL Server for testing
             var sqlConn = Environment.GetEnvironmentVariable("TEST_SQL_CONNECTION");
             if (!string.IsNullOrWhiteSpace(sqlConn))
             {
@@ -34,12 +34,12 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 {
                     options.UseSqlServer(sqlConn, sqlOptions =>
                     {
-                        // در صورت نیاز برای CI/تست‌های سنگین
+                        // Increase timeout for CI/heavy tests
                         sqlOptions.CommandTimeout(180);
                     });
                 });
 
-                // ساخت provider و اعمال مایگریشن‌ها
+                // Build provider and apply migrations
                 using var sp = services.BuildServiceProvider();
                 using var scope = sp.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<IsatisDbContext>();
@@ -48,13 +48,13 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
             }
             else
             {
-                // 3) حالت پیش‌فرض: استفاده از InMemory برای تست‌ها
+                // 3) Default: Use InMemory for tests
                 services.AddDbContext<IsatisDbContext>(options =>
                 {
                     options.UseInMemoryDatabase("Isatis_TestDb");
                 });
 
-                // ساخت provider و پاک/ایجاد دیتابیس InMemory
+                // Build provider and clean/create InMemory database
                 using var sp = services.BuildServiceProvider();
                 using var scope = sp.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<IsatisDbContext>();
@@ -62,7 +62,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 db.Database.EnsureDeleted();
                 db.Database.EnsureCreated();
 
-                // اگر لازم شد، اینجا می‌توانی Seed هم انجام بدهی
+                // You can perform data seeding here if necessary
                 // SeedTestData.Initialize(db);
             }
         });

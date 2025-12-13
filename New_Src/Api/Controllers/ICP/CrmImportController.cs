@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using System.Globalization;
 using System.Text.Json;
 
-namespace Api.Controllers.ICP;
+namespace Api.Controllers;
 
 [ApiController]
 [Route("api/crm")]

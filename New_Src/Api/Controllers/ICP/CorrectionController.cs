@@ -2,7 +2,7 @@
 using Application.Services;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Isatis.Api.Controllers;
+namespace Api.Controllers;
 
 [ApiController]
 [Route("api/correction")]

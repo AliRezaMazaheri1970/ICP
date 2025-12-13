@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Shared.Models;
 using Shared.Wrapper;
 
-namespace Isatis.Api.Controllers;
+namespace Api.Controllers;
 
 [ApiController]
 [Route("api/projects/import")]

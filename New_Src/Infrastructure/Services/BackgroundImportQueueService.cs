@@ -399,76 +399,42 @@ namespace Infrastructure.Services
             else if (string.Equals(req.JobType, "import", StringComparison.OrdinalIgnoreCase))
             {
                 using var scope = CreateScope();
-                var importServiceObj = scope.ServiceProvider.GetService(typeof(Application.Services.IImportService));
-                if (importServiceObj == null)
-                {
-                    throw new NotImplementedException("Import processing not implemented on server. Register an IImportService or implement import handling.");
-                }
+                var importService = scope.ServiceProvider.GetRequiredService<IImportService>();
 
-                // Try to find an ImportAsync method via reflection (flexible against different signatures)
-                var importType = importServiceObj.GetType();
-                var importMethod = importType.GetMethod("ImportAsync") ?? importType.GetMethod("Import");
-                if (importMethod == null)
-                {
-                    throw new NotImplementedException("IImportService is registered but no ImportAsync/Import method found. Update service contract or BackgroundImportQueueService.");
-                }
+                _logger.LogInformation("Starting import job {JobId} project {ProjectName}", req.JobId, req.ProjectName);
+                
+                // Use the new IImportService method which likely takes Stream, name, owner, state
+                // Assuming ImportCsvAsync(Stream stream, string projectName, string? owner, string? stateJson)
+                // If IImportService has been updated to use DTO, adjust accordingly.
+                // Based on ImportController, it uses ImportCsvAsync.
+                
+                if (req.Stream == null) throw new InvalidOperationException("Import stream is null");
 
-                // Prepare parameters: attempt common signatures (Stream, projectName, owner, CancellationToken)
-                var parameters = importMethod.GetParameters();
-                var args = new List<object?>();
-                foreach (var p in parameters)
-                {
-                    if (p.ParameterType == typeof(Stream) || p.ParameterType == typeof(MemoryStream))
-                        args.Add(req.Stream);
-                    else if (p.ParameterType == typeof(string))
-                    {
-                        // Prefer projectName then owner
-                        if (args.Count == 0) args.Add(req.ProjectName);
-                        else args.Add(req.Owner);
-                    }
-                    else if (p.ParameterType == typeof(CancellationToken))
-                        args.Add(cancellationToken);
-                    else
-                        args.Add(null); // Unknown param -> pass null (may fail)
-                }
+                var result = await importService.ImportCsvAsync(req.Stream, req.ProjectName!, req.Owner, req.StateJson);
 
-                // Invoke
-                var invoked = importMethod.Invoke(importServiceObj, args.ToArray());
-                if (invoked == null) throw new InvalidOperationException("Import method returned null");
-
-                // If returned a Task or Task<T>, await and get Result via reflection
-                object? importResult = null;
-                if (invoked is Task task)
+                if (!result.Succeeded)
                 {
-                    await task.ConfigureAwait(false);
-                    var resultProp = task.GetType().GetProperty("Result");
-                    importResult = resultProp?.GetValue(task);
-                }
-                else
-                {
-                    importResult = invoked;
-                }
-
-                if (importResult == null) throw new InvalidOperationException("Import returned null result");
-
-                // Check Succeeded
-                var succProp = importResult.GetType().GetProperty("Succeeded");
-                var succeeded = succProp != null && (bool?)succProp.GetValue(importResult) == true;
-                if (!succeeded)
-                {
-                    var msg = ExtractMessageFromResult(importResult) ?? "Import failed";
+                    var msg = (result.Messages?.FirstOrDefault()) ?? "Import failed";
                     throw new InvalidOperationException(msg);
                 }
 
-                // Try to extract ProjectId from result
-                var projProp = importResult.GetType().GetProperty("ProjectId") ?? importResult.GetType().GetProperty("ResultProjectId");
-                if (projProp != null)
+                if (result.Data != null)
                 {
-                    var pidVal = projProp.GetValue(importResult);
-                    if (pidVal is Guid g) return g;
-                    if (Guid.TryParse(pidVal?.ToString(), out var parsed)) return parsed;
+                     // Result is ProjectSaveResult
+                     // Serializing/Deserializing is a robust way to handle the object if we don't want to add reference to DTOs here
+                     // But we have access to Application!
+                     // Actually, ImportCsvAsync returns Result<ProjectSaveResult>.
+                     // But Wait! IImportService interface defines it.
+                     // The interface likely returns Task<Result<ProjectSaveResult>>.
+
+                     // However, since we are using `var result` from the interface call, we KNOW the type if we look at the interface.
+                     // The issue is IImportService.ImportCsvAsync returns Result<ProjectSaveResult>.
+                     // So we can just access result.Data.ProjectId directly!
+                     
+                     return result.Data.ProjectId;
                 }
 
+                // If we can't get ID, returns null but job succeeds
                 return null;
             }
 

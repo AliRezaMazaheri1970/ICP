@@ -3,7 +3,7 @@ using Application.Services;
 using Microsoft.AspNetCore.Mvc;
 using Shared.Wrapper;
 
-namespace Isatis.Api.Controllers;
+namespace Api.Controllers;
 
 [ApiController]
 [Route("api/import")]
