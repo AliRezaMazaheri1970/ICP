@@ -8,7 +8,7 @@
 
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
     <MudPaper Elevation="0" Class="pa-4 mb-4 custom-card-all">
-        <div class="d-flex justify-space-between align-center">
+        <div class="d-flex justify-space-between align-center flex-wrap">
             <div>
                 <MudText Typo="Typo.h4" Class="fw-bold">Elements Configuration</MudText>
                 <MudText Typo="Typo.body2" Class="mud-text-secondary">
@@ -19,6 +19,7 @@
                        Color="Color.Primary"
                        StartIcon="@Icons.Material.Filled.Save"
                        OnClick="SaveChanges"
+                       Class="mt-3"
                        Disabled="_isSaving">
                 Save Changes
             </MudButton>
@@ -35,7 +36,8 @@
     {
         <MudGrid>
             @* Element List *@
-            <MudItem xs="12" md="8">
+            <MudItem xs="12" md="8" Class="available-elements">
+              
                 <MudPaper Elevation="0" Class="pa-4 custom-card-all">
                     <MudText Typo="Typo.h6" Class="mb-4">
                         <MudIcon Icon="@Icons.Material.Filled.Science" Class="me-2" />
@@ -50,32 +52,35 @@
                     }
                     else
                     {
-                        <MudTable T="ElementConfig" 
+                        <MudTable T="ElementConfig"
                                   Items="@_elements"
                                   Hover="true"
                                   Dense="true"
                                   FixedHeader="true"
                                   Height="490px"
+                                  Breakpoint="Breakpoint.None"
+                                  HorizontalScrollbar="true"
                                   @bind-SelectedItem="_selectedElement">
                             <HeaderContent>
                                 <MudTh>Element</MudTh>
                                 <MudTh>Symbol</MudTh>
                                 <MudTh>Unit</MudTh>
-                                <MudTh>Oxide Factor</MudTh>
+                                <MudTh Style="min-width: 120px;">Oxide Factor</MudTh>
                                 <MudTh>Min Range</MudTh>
                                 <MudTh>Max Range</MudTh>
                                 <MudTh>Active</MudTh>
                             </HeaderContent>
                             <RowTemplate Context="element">
-                                <MudTd>@element.Name</MudTd>
-                                <MudTd><MudChip T="string" Size="Size.Small" Color="Color.Primary">@element.Symbol</MudChip></MudTd>
-                                <MudTd>@element.Unit</MudTd>
-                                <MudTd>@element.OxideFactor.ToString("F4")</MudTd>
-                                <MudTd>@element.MinRange.ToString("F2")</MudTd>
-                                <MudTd>@element.MaxRange.ToString("F2")</MudTd>
-                                <MudTd>
-                                    <MudSwitch T="bool" @bind-Value="element.IsActive"
-                                               Color="Color.Primary" />
+                                <MudTd DataLabel="Element">@element.Name</MudTd>
+                                <MudTd DataLabel="Symbol">
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Primary">@element.Symbol</MudChip>
+                                </MudTd>
+                                <MudTd DataLabel="Unit">@element.Unit</MudTd>
+                                <MudTd DataLabel="Oxide Factor">@element.OxideFactor.ToString("F4")</MudTd>
+                                <MudTd DataLabel="Min Range">@element.MinRange.ToString("F2")</MudTd>
+                                <MudTd DataLabel="Max Range">@element.MaxRange.ToString("F2")</MudTd>
+                                <MudTd DataLabel="Active">
+                                    <MudSwitch T="bool" @bind-Value="element.IsActive" Color="Color.Primary" />
                                 </MudTd>
                             </RowTemplate>
                         </MudTable>
@@ -103,8 +108,8 @@
 
 
             @* Element Details / Editor *@
-            <MudItem xs="12" md="4">
-                <MudPaper Elevation="0" Class="pa-4 custom-card-all">
+            <MudItem xs="12" md="4" Class="edit-elements">
+                <MudPaper Elevation="0" Class="pa-4 custom-card-all card-element">
                     <MudText Typo="Typo.h6" Class="mb-4">
                         <MudIcon Icon="@Icons.Material.Filled.Edit" Class="me-2" />
                         Edit Element
@@ -182,7 +187,7 @@
 
 
                 @* Oxide Factor Calculator *@
-                <MudPaper Elevation="0" Class="pa-4 mt-4 custom-card-all">
+                <MudPaper Elevation="0" Class="pa-4 mt-4 custom-card-all card-element">
                     <MudText Typo="Typo.h6" Class="mb-4">
                         <MudIcon Icon="@Icons.Material.Filled.Calculate" Class="me-2" />
                         Oxide Factor Calculator

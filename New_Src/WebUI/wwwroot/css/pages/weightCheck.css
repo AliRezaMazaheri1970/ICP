@@ -1,0 +1,21 @@
+﻿/* ===================================
+   ICP - Elements Page Styles
+   =================================== */
+
+
+
+/* Responsive */
+@media (min-width: 960px) and (max-width: 1445px) {
+    .table-weight {
+        min-width: 100%;
+    }
+
+}
+@media (max-width: 600px) {
+    .table-weight {
+        min-width: 100%;
+    }
+}
+@media (max-width: 380px) {
+   
+}

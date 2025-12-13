@@ -340,3 +340,24 @@ html, body {
 /*    padding:11px 14px;*/
 
 }
+/* all items*/
+
+@media (max-width: 768px) {
+    .h4-title {
+        font-size: 1rem;
+    }
+    .p-description{
+        font-size: .8rem;
+    }
+}
+
+@media (max-width: 600px) {
+  
+}
+
+@media (max-width: 380px) {
+   
+}
+
+
+
