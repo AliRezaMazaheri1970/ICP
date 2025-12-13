@@ -1,4 +1,6 @@
-﻿namespace Application.Services;
+﻿using Domain.Entities;
+
+namespace Application.Services;
 
 /// <summary>
 /// Defines services for logging and retrieving project modifications.

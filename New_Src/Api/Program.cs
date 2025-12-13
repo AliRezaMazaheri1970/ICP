@@ -61,9 +61,9 @@ builder.Services.AddAuthorization();
 
 builder.Services.AddCors(options =>
 {
-    // اجازه دسترسی به کلاینت‌های مختلف
+    // Allow access to different clients
     options.AddPolicy("AllowClient",
-        b => b.AllowAnyOrigin() // برای تست، اجازه به همه آدرس‌ها
+        b => b.AllowAnyOrigin() // For testing, allow all origins
               .AllowAnyMethod()
               .AllowAnyHeader()
               .WithExposedHeaders("Content-Disposition"));

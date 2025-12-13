@@ -11,11 +11,11 @@ using System.Text.RegularExpressions;
 namespace Infrastructure.Services;
 
 /// <summary>
-/// سرویس اصلاح دریفت - نسخه نهایی و کامل
-/// ویژگی‌ها:
-/// 1. ویرایش مخرب (Destructive): داده‌های اصلی را تغییر می‌دهد (مانند پایتون).
-/// 2. مدیریت وضعیت (Stateful): امکان Undo دارد.
-/// 3. منطق پایتون: تمام فرمول‌های ریاضی و گروه‌بندی‌ها دقیقاً پیاده‌سازی شده‌اند.
+/// Drift correction service - final and complete version
+/// Features:
+/// 1. Destructive editing: Modifies original data (like Python).
+/// 2. Stateful: Supports Undo.
+/// 3. Python logic: All mathematical formulas and groupings are exactly implemented.
 /// </summary>
 public class DriftCorrectionService : IDriftCorrectionService
 {
@@ -41,7 +41,7 @@ public class DriftCorrectionService : IDriftCorrectionService
     {
         try
         {
-            // بارگذاری داده‌ها
+            // Load data
             var processedData = await LoadAndProcessDataAsync(request.ProjectId);
             if (processedData.PivotRows.Count == 0)
                 return Result<DriftCorrectionResult>.Fail("No data found for project");
@@ -63,7 +63,7 @@ public class DriftCorrectionService : IDriftCorrectionService
                 if (driftInfo != null)
                     elementDrifts[element] = driftInfo;
 
-                // شبیه‌سازی اصلاح (پر کردن CorrectedData بدون ذخیره در دیتابیس)
+                // Simulate correction (populate CorrectedData without saving to database)
                 var corrections = request.Method == DriftMethod.Stepwise
                     ? CalculateStepwiseCorrections(processedData.PivotRows, rmData, positions, segments, element, keyword)
                     : CalculateUniformCorrections(processedData.PivotRows, rmData, positions, segments, element, keyword);
@@ -124,10 +124,10 @@ public class DriftCorrectionService : IDriftCorrectionService
             var project = await _db.Projects.FirstOrDefaultAsync(p => p.ProjectId == request.ProjectId);
             if (project == null) return Result<DriftCorrectionResult>.Fail("Project not found");
 
-            // 1. ذخیره وضعیت فعلی برای Undo
+            // 1. Save current state for Undo
             await SaveUndoStateAsync(request.ProjectId, $"Drift Correction ({request.Method})");
 
-            // 2. بارگذاری و پردازش داده‌ها
+            // 2. Load and process data
             var processedData = await LoadAndProcessDataAsync(request.ProjectId);
             if (processedData.PivotRows.Count == 0)
                 return Result<DriftCorrectionResult>.Fail("No data found");
@@ -137,7 +137,7 @@ public class DriftCorrectionService : IDriftCorrectionService
             var (positions, segments) = BuildPositionsAndSegments(rmData);
             var elements = request.SelectedElements ?? GetAllElements(processedData.PivotRows);
 
-            // 3. محاسبه اصلاحات
+            // 3. Calculate corrections
             var allCorrections = new Dictionary<(string Label, int GroupId, string Element), decimal>();
             var elementDrifts = new Dictionary<string, ElementDriftInfo>();
             var correctedSamplesDto = new List<CorrectedSampleDto>();
@@ -178,10 +178,10 @@ public class DriftCorrectionService : IDriftCorrectionService
                 correctedSamplesDto.Add(new CorrectedSampleDto(sample.SolutionLabel, sample.GroupId, sample.OriginalIndex, sample.PivotIndex, origValues, corrValues, factors));
             }
 
-            // 4. اعمال تغییرات روی دیتابیس (Destructive Update)
+            // 4. Apply changes to database (Destructive Update)
             var savedCount = await SaveCorrectionsToDatabase(request.ProjectId, processedData.RawRows, allCorrections);
 
-            // 5. ثبت لاگ و به‌روزرسانی پروژه
+            // 5. Log and update project
             project.LastModifiedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync();
 
@@ -192,7 +192,7 @@ public class DriftCorrectionService : IDriftCorrectionService
                 $"Applied {request.Method} correction to {savedCount} values."
             );
 
-            // 6. آماده‌سازی خروجی
+            // 6. Prepare result
             var driftSegments = segments.Select(s => new DriftSegment(
                 s.SegmentId,
                 s.Positions.First().Min,
@@ -221,14 +221,14 @@ public class DriftCorrectionService : IDriftCorrectionService
     }
 
     /// <summary>
-    /// بازگردانی آخرین تغییرات (Undo)
+    /// Undo last action
     /// </summary>
     public async Task<Result<string>> UndoLastActionAsync(Guid projectId)
     {
         using var transaction = await _db.Database.BeginTransactionAsync();
         try
         {
-            // دریافت آخرین وضعیت ذخیره شده
+            // Get last saved state
             var lastState = await _db.ProjectStates
                 .Where(s => s.ProjectId == projectId)
                 .OrderByDescending(s => s.Timestamp)
@@ -237,12 +237,12 @@ public class DriftCorrectionService : IDriftCorrectionService
             if (lastState == null)
                 return Result<string>.Fail("No previous state found to undo.");
 
-            // بازگردانی داده‌ها
+            // Restore data
             var snapshotItems = JsonSerializer.Deserialize<List<SnapshotItem>>(lastState.Data);
             if (snapshotItems == null || !snapshotItems.Any())
                 return Result<string>.Fail("Saved state data is empty or invalid.");
 
-            // دریافت ردیف‌های فعلی برای آپدیت
+            // Get current rows for update
             var currentRows = await _db.RawDataRows
                 .Where(r => r.ProjectId == projectId)
                 .ToListAsync();
@@ -260,7 +260,7 @@ public class DriftCorrectionService : IDriftCorrectionService
                 }
             }
 
-            // حذف وضعیت استفاده شده (Pop from stack)
+            // Remove used state (Pop from stack)
             _db.ProjectStates.Remove(lastState);
 
             await _db.SaveChangesAsync();

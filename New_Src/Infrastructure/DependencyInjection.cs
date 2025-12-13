@@ -8,11 +8,20 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Infrastructure;
 
+/// <summary>
+/// Provides extension methods for registering infrastructure layer services.
+/// </summary>
 public static class DependencyInjection
 {
+    /// <summary>
+    /// Registers the infrastructure services, including database context and service implementations.
+    /// </summary>
+    /// <param name="services">The service collection to add services to.</param>
+    /// <param name="configuration">The application configuration properties.</param>
+    /// <returns>The updated service collection.</returns>
     public static IServiceCollection AddInfrastructureServices(this IServiceCollection services, IConfiguration configuration)
     {
-        // Database
+        // Database Context
         var connectionString = configuration.GetConnectionString("DefaultConnection");
         services.AddDbContext<IsatisDbContext>(options =>
             options.UseSqlServer(connectionString, sqlOptions =>
@@ -21,49 +30,33 @@ public static class DependencyInjection
                 sqlOptions.EnableRetryOnFailure(3);
             }));
 
-        // Persistence implementations
+        // Persistence Services
         services.AddScoped<IProjectPersistenceService, ProjectPersistenceService>();
 
-        // Import service
+        // Import Services
         services.AddScoped<IImportService, ImportService>();
 
-        // Background import queue
+        // Background Queue Services
         services.AddSingleton<BackgroundImportQueueService>();
         services.AddSingleton<IImportQueueService>(sp => sp.GetRequiredService<BackgroundImportQueueService>());
         services.AddHostedService(sp => sp.GetRequiredService<BackgroundImportQueueService>());
 
-        // Processing services
+        // Processing Services
         services.AddScoped<IProcessingService, ProcessingService>();
         services.AddScoped<IRowProcessor, ComputeStatisticsProcessor>();
 
-        // CRM Service
+        // Data Management Services
         services.AddScoped<ICrmService, CrmService>();
-
-        // Pivot Service
         services.AddScoped<IPivotService, PivotService>();
-
-        // RM Check Service
         services.AddScoped<IRmCheckService, RmCheckService>();
-
-        // Report Service
         services.AddScoped<IReportService, ReportService>();
-
-        // Drift Correction Service
         services.AddScoped<IDriftCorrectionService, DriftCorrectionService>();
-
-        // Optimization Service
         services.AddScoped<IOptimizationService, OptimizationService>();
-
-        // Add to Infrastructure/DependencyInjection.cs
         services.AddScoped<ICorrectionService, CorrectionService>();
-
-        // ChangeLog Service
         services.AddScoped<IChangeLogService, ChangeLogService>();
-
-        // Version Service (Project Version Tree)
         services.AddScoped<IVersionService, VersionService>();
 
-        // Cleanup hosted service
+        // Background Maintenance Services
         services.AddSingleton<CleanupHostedService>();
         services.AddHostedService(sp => sp.GetRequiredService<CleanupHostedService>());
 

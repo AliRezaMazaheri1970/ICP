@@ -1,5 +1,4 @@
-﻿using System.Text.Json;
-using Application.Services;
+﻿using Application.Services;
 using Domain.Entities;
 using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -7,17 +6,26 @@ using Microsoft.Extensions.Logging;
 
 namespace Infrastructure.Services;
 
+/// <summary>
+/// Implements the change logging service using the core database context.
+/// </summary>
 public class ChangeLogService : IChangeLogService
 {
     private readonly IsatisDbContext _db;
     private readonly ILogger<ChangeLogService> _logger;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ChangeLogService"/> class.
+    /// </summary>
+    /// <param name="db">The database context.</param>
+    /// <param name="logger">The logger instance.</param>
     public ChangeLogService(IsatisDbContext db, ILogger<ChangeLogService> logger)
     {
         _db = db;
         _logger = logger;
     }
 
+    /// <inheritdoc/>
     public async Task LogChangeAsync(Guid projectId, string changeType, string? solutionLabel = null,
         string? element = null, string? oldValue = null, string? newValue = null,
         string? changedBy = null, string? details = null, Guid? batchId = null)
@@ -49,6 +57,7 @@ public class ChangeLogService : IChangeLogService
         }
     }
 
+    /// <inheritdoc/>
     public async Task LogBatchChangesAsync(Guid projectId, string changeType,
         IEnumerable<(string? SolutionLabel, string? Element, string? OldValue, string? NewValue)> changes,
         string? changedBy = null, string? details = null)
@@ -74,6 +83,7 @@ public class ChangeLogService : IChangeLogService
         _logger.LogInformation("Logged batch of {Count} changes for project {ProjectId}", logs.Count, projectId);
     }
 
+    /// <inheritdoc/>
     public async Task<List<ChangeLog>> GetChangeLogAsync(Guid projectId, int page = 1, int pageSize = 50)
     {
         return await _db.ChangeLogs
@@ -84,6 +94,7 @@ public class ChangeLogService : IChangeLogService
             .ToListAsync();
     }
 
+    /// <inheritdoc/>
     public async Task<List<ChangeLog>> GetChangesByTypeAsync(Guid projectId, string changeType)
     {
         return await _db.ChangeLogs
@@ -92,6 +103,7 @@ public class ChangeLogService : IChangeLogService
             .ToListAsync();
     }
 
+    /// <inheritdoc/>
     public async Task<List<ChangeLog>> GetChangesBySampleAsync(Guid projectId, string solutionLabel)
     {
         return await _db.ChangeLogs

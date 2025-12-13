@@ -14,7 +14,7 @@ public class AuthController : ControllerBase
     private readonly IConfiguration _configuration;
     private readonly ILogger<AuthController> _logger;
 
-    // در نسخه واقعی از دیتابیس استفاده کن
+    // In real version use database
     private static readonly List<UserRecord> _users = new()
     {
         new UserRecord("admin", "admin123", "Administrator", "Admin"),
@@ -37,7 +37,7 @@ public class AuthController : ControllerBase
     {
         _logger.LogInformation("Login attempt for user: {Username}", request.Username);
 
-        // پیدا کردن کاربر
+        // Find user
         var user = _users.FirstOrDefault(u =>
             u.Username.Equals(request.Username, StringComparison.OrdinalIgnoreCase) &&
             u.Password == request.Password);
@@ -48,7 +48,7 @@ public class AuthController : ControllerBase
             return Unauthorized(new LoginResponse(false, "Invalid username or password"));
         }
 
-        // ساخت JWT Token
+        // Generate JWT Token
         var token = GenerateJwtToken(user);
 
         _logger.LogInformation("Successful login for user: {Username}", request.Username);
@@ -69,13 +69,13 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     public ActionResult<RegisterResponse> Register([FromBody] RegisterRequest request)
     {
-        // چک کردن اینکه کاربر از قبل وجود نداره
+        // Check if user already exists
         if (_users.Any(u => u.Username.Equals(request.Username, StringComparison.OrdinalIgnoreCase)))
         {
             return Conflict(new RegisterResponse(false, "Username already exists"));
         }
 
-        // اضافه کردن کاربر جدید
+        // Add new user
         var newUser = new UserRecord(
             request.Username,
             request.Password,
@@ -90,7 +90,7 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// GET /api/auth/me - دریافت اطلاعات کاربر فعلی
+    /// GET /api/auth/me - Get current user info
     /// </summary>
     [HttpGet("me")]
     [Authorize]
@@ -110,13 +110,13 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// GET /api/auth/check-session - بررسی session فعال
+    /// GET /api/auth/check-session - Check active session
     /// </summary>
     [HttpGet("check-session")]
     [AllowAnonymous]
     public ActionResult CheckSession()
     {
-        // در نسخه واقعی از Cookie یا Session استفاده کن
+        // In real version use Cookie or Session
         return Ok(new LoginResponse(false, "No active session"));
     }
 
@@ -127,7 +127,7 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     public ActionResult Logout()
     {
-        // در نسخه واقعی Cookie/Session رو پاک کن
+        // In real version clear Cookie/Session
         return Ok(new { Message = "Logged out successfully" });
     }
 

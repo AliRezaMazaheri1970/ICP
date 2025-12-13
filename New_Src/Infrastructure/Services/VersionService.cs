@@ -1,27 +1,33 @@
 using Application.Services;
 using Domain.Entities;
 using Infrastructure.Persistence;
+using Shared.Wrapper;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Shared.Wrapper;
 
 namespace Infrastructure.Services;
 
 /// <summary>
-/// Service for managing project versions with tree structure
-/// Like Git: each version has a parent, allowing branching and history navigation
+/// Service for managing project versions with a tree-based structure.
+/// Allows branching and history navigation similar to version control systems.
 /// </summary>
 public class VersionService : IVersionService
 {
     private readonly IsatisDbContext _db;
     private readonly ILogger<VersionService> _logger;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="VersionService"/> class.
+    /// </summary>
+    /// <param name="db">The database context.</param>
+    /// <param name="logger">The logger instance.</param>
     public VersionService(IsatisDbContext db, ILogger<VersionService> logger)
     {
         _db = db;
         _logger = logger;
     }
 
+    /// <inheritdoc/>
     public async Task<Result<ProjectState>> CreateVersionAsync(CreateVersionDto dto, CancellationToken ct = default)
     {
         try
@@ -69,6 +75,7 @@ public class VersionService : IVersionService
         }
     }
 
+    /// <inheritdoc/>
     public async Task<Result<List<VersionNodeDto>>> GetVersionTreeAsync(Guid projectId, CancellationToken ct = default)
     {
         try
@@ -116,6 +123,7 @@ public class VersionService : IVersionService
         }
     }
 
+    /// <inheritdoc/>
     public async Task<Result<List<ProjectState>>> GetAllVersionsAsync(Guid projectId, CancellationToken ct = default)
     {
         try
@@ -134,6 +142,7 @@ public class VersionService : IVersionService
         }
     }
 
+    /// <inheritdoc/>
     public async Task<Result<ProjectState?>> GetActiveVersionAsync(Guid projectId, CancellationToken ct = default)
     {
         try
@@ -160,6 +169,7 @@ public class VersionService : IVersionService
         }
     }
 
+    /// <inheritdoc/>
     public async Task<Result<bool>> SwitchToVersionAsync(Guid projectId, int stateId, CancellationToken ct = default)
     {
         try
@@ -192,6 +202,7 @@ public class VersionService : IVersionService
         }
     }
 
+    /// <inheritdoc/>
     public async Task<Result<ProjectState?>> GetVersionAsync(int stateId, CancellationToken ct = default)
     {
         try
@@ -208,6 +219,7 @@ public class VersionService : IVersionService
         }
     }
 
+    /// <inheritdoc/>
     public async Task<Result<List<ProjectState>>> GetVersionPathAsync(int stateId, CancellationToken ct = default)
     {
         try
@@ -235,6 +247,7 @@ public class VersionService : IVersionService
         }
     }
 
+    /// <inheritdoc/>
     public async Task<Result<bool>> DeleteVersionAsync(int stateId, bool deleteChildren = false, CancellationToken ct = default)
     {
         try
@@ -284,6 +297,7 @@ public class VersionService : IVersionService
         }
     }
 
+    /// <inheritdoc/>
     public async Task<Result<ProjectState>> ForkVersionAsync(int parentStateId, string processingType, string data, string? description = null, CancellationToken ct = default)
     {
         try

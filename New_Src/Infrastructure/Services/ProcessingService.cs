@@ -1,23 +1,27 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
-using Application.Services;
+﻿using Application.Services;
 using Domain.Entities;
 using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace Infrastructure.Services
 {
+    /// <summary>
+    /// Service for processing project data and generating analytics.
+    /// </summary>
     public class ProcessingService : IProcessingService
     {
         private readonly IsatisDbContext _db;
         private readonly IImportQueueService _queue;
         private readonly ILogger<ProcessingService> _logger;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ProcessingService"/> class.
+        /// </summary>
+        /// <param name="db">The database context.</param>
+        /// <param name="queue">The import queue service for background jobs.</param>
+        /// <param name="logger">The logger instance.</param>
         public ProcessingService(IsatisDbContext db, IImportQueueService queue, ILogger<ProcessingService> logger)
         {
             _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -25,6 +29,7 @@ namespace Infrastructure.Services
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
+        /// <inheritdoc/>
         public async Task<ProcessingResult> EnqueueProcessProjectAsync(Guid projectId, CancellationToken cancellationToken = default)
         {
             if (projectId == Guid.Empty)
@@ -42,6 +47,7 @@ namespace Infrastructure.Services
             }
         }
 
+        /// <inheritdoc/>
         public async Task<ProcessingResult> ProcessProjectAsync(Guid projectId, bool overwriteLatestState = true, CancellationToken cancellationToken = default)
         {
             if (projectId == Guid.Empty)

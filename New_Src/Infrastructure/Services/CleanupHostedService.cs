@@ -1,5 +1,4 @@
-﻿using Domain.Entities;
-using Infrastructure.Persistence;
+﻿using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -8,6 +7,9 @@ using Microsoft.Extensions.Logging;
 
 namespace Infrastructure.Services;
 
+/// <summary>
+/// A hosted background service that periodically cleans up old import jobs and temporary files.
+/// </summary>
 public class CleanupHostedService : BackgroundService
 {
     private readonly IServiceProvider _serviceProvider;
@@ -15,6 +17,12 @@ public class CleanupHostedService : BackgroundService
     private readonly TimeSpan _interval;
     private readonly TimeSpan _ttl;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CleanupHostedService"/> class.
+    /// </summary>
+    /// <param name="serviceProvider">The service provider to create scopes.</param>
+    /// <param name="logger">The logger instance.</param>
+    /// <param name="configuration">The configuration to read settings from.</param>
     public CleanupHostedService(IServiceProvider serviceProvider, ILogger<CleanupHostedService> logger, IConfiguration configuration)
     {
         _serviceProvider = serviceProvider;
@@ -23,6 +31,10 @@ public class CleanupHostedService : BackgroundService
         _ttl = TimeSpan.TryParse(configuration?["Cleanup:JobTTL"], out var t) ? t : TimeSpan.FromDays(30);
     }
 
+    /// <summary>
+    /// Executes the background cleanup task.
+    /// </summary>
+    /// <param name="stoppingToken">The token to monitor for cancellation requests.</param>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("CleanupHostedService started. Interval={Interval}, TTL={TTL}", _interval, _ttl);

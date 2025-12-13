@@ -4,17 +4,20 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace Infrastructure.Persistence.Configurations;
 
+/// <summary>
+/// Configures the database mapping for the ChangeLog entity.
+/// </summary>
 public class ChangeLogConfiguration : IEntityTypeConfiguration<ChangeLog>
 {
     public void Configure(EntityTypeBuilder<ChangeLog> builder)
     {
-        // نام جدول
+        // Table Name
         builder.ToTable("ChangeLogs");
 
-        // کلید اصلی
+        // Primary Key
         builder.HasKey(e => e.Id);
 
-        // ایندکس‌ها برای جستجوی سریع
+        // Indexes for fast lookup
         builder.HasIndex(e => e.ProjectId)
             .HasDatabaseName("IX_ChangeLogs_ProjectId");
 
@@ -30,7 +33,7 @@ public class ChangeLogConfiguration : IEntityTypeConfiguration<ChangeLog>
         builder.HasIndex(e => e.BatchId)
             .HasDatabaseName("IX_ChangeLogs_BatchId");
 
-        // تنظیمات Property ها
+        // Property Configurations
         builder.Property(e => e.ChangeType)
             .HasMaxLength(50)
             .IsRequired();
@@ -57,7 +60,7 @@ public class ChangeLogConfiguration : IEntityTypeConfiguration<ChangeLog>
             .IsRequired()
             .HasDefaultValueSql("GETUTCDATE()");
 
-        // رابطه با Project
+        // Relationships
         builder.HasOne(e => e.Project)
             .WithMany()
             .HasForeignKey(e => e.ProjectId)

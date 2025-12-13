@@ -100,7 +100,7 @@ public class CrmService : ICrmService
     {
         try
         {
-            // 1. دریافت همه رکوردهای مربوط به این شناسه
+            // 1. Retrieve all records related to this ID
             var query = _db.CrmData.AsNoTracking().Where(c => c.CrmId == crmId);
 
             if (!string.IsNullOrEmpty(analysisMethod))
@@ -113,10 +113,10 @@ public class CrmService : ICrmService
             if (!crmRecords.Any())
                 return Result<List<CrmListItemDto>>.Fail($"CRM {crmId} not found");
 
-            // 2. منطق ادغام (Merge Logic)
+            // 2. Merge Logic
             var mergedElements = new Dictionary<string, decimal>();
 
-            // انتخاب رکورد پایه
+            // Select base record
             var preferredMethods = new[] { "4-Acid Digestion", "Aqua Regia Digestion" };
             var primaryRecord = crmRecords
                 .OrderByDescending(c => preferredMethods.Any(pm => c.AnalysisMethod?.Contains(pm) == true))
@@ -141,17 +141,17 @@ public class CrmService : ICrmService
                 }
             }
 
-            // 3. ساخت شیء CrmData (اصلاح شده: حذف فیلدهای اضافی)
+            // 3. Create CrmData object (Modified: removed extra fields)
             var mergedEntity = new CrmData
             {
                 Id = primaryRecord.Id,
                 CrmId = primaryRecord.CrmId,
                 AnalysisMethod = primaryRecord.AnalysisMethod + " (Combined)",
                 ElementValues = System.Text.Json.JsonSerializer.Serialize(mergedElements)
-                // فیلدهای CertDate, Supplier, Unit حذف شدند
+                // CertDate, Supplier, Unit fields were removed
             };
 
-            // 4. تبدیل به DTO
+            // 4. Convert to DTO
             var dto = MapToDto(mergedEntity);
 
             return Result<List<CrmListItemDto>>.Success(new List<CrmListItemDto> { dto });

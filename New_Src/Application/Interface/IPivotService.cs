@@ -1,4 +1,7 @@
-﻿namespace Application.Services;
+﻿using Application.DTOs;
+using Shared.Wrapper;
+
+namespace Application.Services;
 
 /// <summary>
 /// Defines services for generating and managing pivot tables from project data.

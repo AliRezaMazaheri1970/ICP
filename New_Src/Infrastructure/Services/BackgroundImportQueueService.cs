@@ -1,21 +1,17 @@
-﻿using System;
-using System.IO;
-using System.Threading;
-using System.Threading.Channels;
-using System.Threading.Tasks;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using Infrastructure.Persistence;
-using Application.Services;
+﻿using Application.Services;
 using Domain.Entities;
+using Infrastructure.Persistence;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
+using System.Threading.Channels;
 
 namespace Infrastructure.Services
 {
+    /// <summary>
+    /// Background service that manages the import queue and processes import jobs.
+    /// </summary>
     public class BackgroundImportQueueService : BackgroundService, IImportQueueService, IDisposable
     {
         private readonly Channel<ImportRequest> _channel;
@@ -23,6 +19,11 @@ namespace Infrastructure.Services
         private readonly ILogger<BackgroundImportQueueService> _logger;
         private readonly ConcurrentDictionary<Guid, Shared.Models.ImportJobStatusDto> _statuses;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="BackgroundImportQueueService"/> class.
+        /// </summary>
+        /// <param name="serviceProvider">The service provider to access scoped services.</param>
+        /// <param name="logger">The logger instance.</param>
         public BackgroundImportQueueService(IServiceProvider serviceProvider, ILogger<BackgroundImportQueueService> logger)
         {
             _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
@@ -31,6 +32,7 @@ namespace Infrastructure.Services
             _statuses = new ConcurrentDictionary<Guid, Shared.Models.ImportJobStatusDto>();
         }
 
+        /// <inheritdoc/>
         public async Task<Guid> EnqueueImportAsync(Stream csvStream, string projectName, string? owner = null, string? stateJson = null)
         {
             if (string.IsNullOrWhiteSpace(projectName)) throw new ArgumentException("projectName is required", nameof(projectName));
@@ -96,11 +98,12 @@ namespace Infrastructure.Services
             return jobId;
         }
 
+        /// <inheritdoc/>
         public async Task<Guid> EnqueueProcessJobAsync(Guid projectId)
         {
             if (projectId == Guid.Empty) throw new ArgumentException("projectId is required", nameof(projectId));
 
-            // validate project exists
+            // Validate project exists
             using (var scopeVal = CreateScope())
             {
                 var dbVal = scopeVal.ServiceProvider.GetRequiredService<IsatisDbContext>();
@@ -160,6 +163,7 @@ namespace Infrastructure.Services
 
         private IServiceScope CreateScope() => _serviceProvider.CreateScope();
 
+        /// <inheritdoc/>
         public async Task<Shared.Models.ImportJobStatusDto?> GetStatusAsync(Guid jobId)
         {
             if (_statuses.TryGetValue(jobId, out var st)) return st;
@@ -187,6 +191,7 @@ namespace Infrastructure.Services
             }
         }
 
+        /// <inheritdoc/>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             _logger.LogInformation("BackgroundImportQueueService started.");
@@ -204,7 +209,7 @@ namespace Infrastructure.Services
                             break;
                         }
 
-                        // mark running in-memory and DB (best-effort)
+                        // Mark running in-memory and DB (best-effort)
                         _statuses[req.JobId] = new Shared.Models.ImportJobStatusDto(req.JobId, Shared.Models.ImportJobState.Running, 0, 0, "Running", null, 0);
                         try
                         {
@@ -231,7 +236,7 @@ namespace Infrastructure.Services
                         {
                             var resultProjectId = await ProcessRequestAsync(req, stoppingToken);
 
-                            // persist completion
+                            // Persist completion
                             try
                             {
                                 using var scopeDb = CreateScope();
@@ -358,9 +363,11 @@ namespace Infrastructure.Services
         }
 
         /// <summary>
-        /// Process a single request.
-        /// Returns optional resultProjectId (for import).
+        /// Processes a single import request.
         /// </summary>
+        /// <param name="req">The import request.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>The result project identifier, if applicable.</returns>
         private async Task<Guid?> ProcessRequestAsync(ImportRequest req, CancellationToken cancellationToken)
         {
             if (req == null) throw new ArgumentNullException(nameof(req));
@@ -386,7 +393,7 @@ namespace Infrastructure.Services
                     throw new InvalidOperationException(msg);
                 }
 
-                // return the project id as the result
+                // Return the project id as the result
                 return req.ProjectId;
             }
             else if (string.Equals(req.JobType, "import", StringComparison.OrdinalIgnoreCase))
@@ -415,14 +422,14 @@ namespace Infrastructure.Services
                         args.Add(req.Stream);
                     else if (p.ParameterType == typeof(string))
                     {
-                        // prefer projectName then owner
+                        // Prefer projectName then owner
                         if (args.Count == 0) args.Add(req.ProjectName);
                         else args.Add(req.Owner);
                     }
                     else if (p.ParameterType == typeof(CancellationToken))
                         args.Add(cancellationToken);
                     else
-                        args.Add(null); // unknown param -> pass null (may fail)
+                        args.Add(null); // Unknown param -> pass null (may fail)
                 }
 
                 // Invoke
