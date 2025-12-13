@@ -29,9 +29,9 @@ public class DriftCorrectionServiceTests : IDisposable
         _db = new IsatisDbContext(options);
 
         var logger = new Mock<ILogger<DriftCorrectionService>>();
-        var changeLogService = new Mock<IChangeLogService>();  // ← اضافه کن
+        var changeLogService = new Mock<IChangeLogService>();  // ← Add
 
-        _driftService = new DriftCorrectionService(_db, changeLogService.Object, logger.Object);  // ← اصلاح کن
+        _driftService = new DriftCorrectionService(_db, changeLogService.Object, logger.Object);  // ← Fix
 
         _testProjectId = Guid.NewGuid();
         SeedTestData();

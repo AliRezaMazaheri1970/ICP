@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 namespace WebUI.Services;
 
 // ============================================
-// DTOs - مطابق با فرمت API جدید
+// DTOs - consistent with new API format
 // ============================================
 
 public class LoginRequest
@@ -37,7 +37,7 @@ public class RegisterRequest
 
 public class ApiLoginResponse
 {
-    // فرمت واقعی API
+    // Real API format
     [JsonPropertyName("isAuthenticated")]
     public bool IsAuthenticated { get; set; }
 
@@ -124,7 +124,7 @@ public class AuthService
     }
 
     /// <summary>
-    /// ورود کاربر
+    /// User login
     /// </summary>
     public async Task<AuthResult> LoginAsync(string username, string password, bool rememberMe = false)
     {
@@ -187,7 +187,7 @@ public class AuthService
     }
 
     /// <summary>
-    /// ثبت‌نام کاربر جدید
+    /// User registration
     /// </summary>
     public async Task<AuthResult> RegisterAsync(string username, string password, string? fullName, string? position)
     {
@@ -233,7 +233,7 @@ public class AuthService
     }
 
     /// <summary>
-    /// بررسی session فعال از توکن در حافظه
+    /// Check for active session from token in memory
     /// </summary>
     public Task<AuthResult> CheckAutoLoginAsync()
     {
@@ -246,7 +246,7 @@ public class AuthService
     }
 
     /// <summary>
-    /// دریافت اطلاعات کاربر از API با توکن موجود
+    /// Refresh user info from API using current token
     /// </summary>
     public async Task<AuthResult?> RefreshCurrentUserAsync()
     {
@@ -288,7 +288,7 @@ public class AuthService
     }
 
     /// <summary>
-    /// خروج
+    /// Logout
     /// </summary>
     public async Task LogoutAsync()
     {
@@ -308,12 +308,12 @@ public class AuthService
     }
 
     /// <summary>
-    /// دریافت کاربر فعلی
+    /// Get current user
     /// </summary>
     public AuthResult? GetCurrentUser() => _currentUser;
 
     /// <summary>
-    /// دریافت Access Token
+    /// Get Assess Token
     /// </summary>
     public string? GetAccessToken() => _currentUser?.Token;
 }

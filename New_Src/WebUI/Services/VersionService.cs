@@ -20,7 +20,7 @@ namespace WebUI.Services
             {
                 var response = await _httpClient.PostAsJsonAsync("api/versions", dto, ct);
                 var result = await response.Content.ReadFromJsonAsync<Result<ProjectState>>(cancellationToken: ct);
-                // تغییر: استفاده از Fail بدون await
+                // Change: Use Fail without await
                 return result ?? Result<ProjectState>.Fail("Failed to create version.");
             }
             catch (Exception ex)
