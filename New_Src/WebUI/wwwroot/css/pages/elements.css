@@ -1,0 +1,43 @@
+﻿/* ===================================
+   ICP - Elements Page Styles
+   =================================== */
+
+
+
+/* Responsive */
+@media (min-width: 960px) and (max-width: 1445px) {
+    .available-elements{
+        min-width:100%;
+    }
+    .edit-elements {
+        min-width: 100%;
+        display: flex;
+        gap: 2%;
+    }
+    .card-element {
+        width: 49%;
+        margin-top: 0 !important;
+    }
+}
+
+@media (max-width: 960px) {
+    
+
+
+
+}
+
+@media (max-width: 768px) {
+   
+
+
+
+}
+
+@media (max-width: 600px) {
+  
+}
+
+@media (max-width: 380px) {
+    
+}
