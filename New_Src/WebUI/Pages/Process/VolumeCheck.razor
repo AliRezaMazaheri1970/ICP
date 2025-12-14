@@ -213,7 +213,11 @@ justify-space-between align-center">
                                            ShowFirstButton="true"
                                            ShowLastButton="true"
                                            BoundaryCount="1"
-                                           MiddleCount="3" />
+                                           MiddleCount="3"
+                                           Color="Color.Primary" />
+                            @* <MudText Typo="Typo.caption" Class="mt-1">
+                                Total Projects: @_totalCount
+                            </MudText> *@
                         </div>
 
                         @* <div class="d-flex justify-end mt-4 gap-2">
@@ -303,10 +307,8 @@ justify-space-between align-center">
     private int _currentPage = 1;
     private int _pageSize = 10;
     private int _totalCount = 0;
-    private int _totalPages => _totalCount == 0
-        ?
- 1
-        : (int)Math.Ceiling((double)_totalCount / _pageSize);
+    private int _totalPages => _totalCount == 0 ? 1 : (int)Math.Ceiling((double)_totalCount / _pageSize);
+
     protected override async Task OnInitializedAsync()
     {
         _projectId = projectId ??
