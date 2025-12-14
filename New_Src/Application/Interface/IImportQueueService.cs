@@ -1,31 +1,31 @@
 ﻿namespace Application.Services;
 
 /// <summary>
-/// Defines services for queuing import and processing jobs for background execution.
+/// Defines the contract for services responsible for managing background import and processing queues.
 /// </summary>
 public interface IImportQueueService
 {
     /// <summary>
-    /// Enqueues a request to import a CSV stream.
+    /// Adds a new CSV import job to the background processing queue.
     /// </summary>
-    /// <param name="csvStream">The data stream to import.</param>
-    /// <param name="projectName">The name of the target project.</param>
-    /// <param name="owner">The owner of the project.</param>
-    /// <param name="stateJson">Optional initial state JSON.</param>
-    /// <returns>The unique identifier of the queued job.</returns>
+    /// <param name="csvStream">The stream containing the CSV data to be imported.</param>
+    /// <param name="projectName">The name to be assigned to the new project.</param>
+    /// <param name="owner">The identifier of the user who owns the project.</param>
+    /// <param name="stateJson">An optional JSON string representing the initial project state.</param>
+    /// <returns>A task containing the unique identifier of the created background job.</returns>
     Task<Guid> EnqueueImportAsync(Stream csvStream, string projectName, string? owner = null, string? stateJson = null);
 
     /// <summary>
-    /// Enqueues a processing job for an existing project.
+    /// Adds a new processing job for an existing project to the background queue.
     /// </summary>
-    /// <param name="projectId">The project identifier.</param>
-    /// <returns>The unique identifier of the queued job.</returns>
+    /// <param name="projectId">The unique identifier of the project to be processed.</param>
+    /// <returns>A task containing the unique identifier of the created background job.</returns>
     Task<Guid> EnqueueProcessJobAsync(Guid projectId);
 
     /// <summary>
-    /// Retrieves the current status of a queued job.
+    /// Retrieves the current execution status of a specific background job.
     /// </summary>
-    /// <param name="jobId">The unique identifier of the job.</param>
-    /// <returns>The status object, or null if not found.</returns>
+    /// <param name="jobId">The unique identifier of the job to check.</param>
+    /// <returns>A task containing the job status, or null if the job is not found.</returns>
     Task<Shared.Models.ImportJobStatusDto?> GetStatusAsync(Guid jobId);
 }

@@ -22,6 +22,13 @@ builder.Services.AddCors(options =>
     });
 });
 
+// Request timeouts (برای Route-level TimeoutPolicy)
+builder.Services.AddRequestTimeouts(options =>
+{
+    options.AddPolicy("Default", TimeSpan.FromSeconds(60));  // برای اکثر API ها
+    options.AddPolicy("Long", TimeSpan.FromMinutes(5));      // برای Undo/Export
+});
+
 var app = builder.Build();
 
 // ============================================
@@ -33,7 +40,9 @@ app.Use(async (context, next) =>
 {
     var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
     logger.LogInformation("→ {Method} {Path}", context.Request.Method, context.Request.Path);
+
     await next();
+
     logger.LogInformation("← {StatusCode}", context.Response.StatusCode);
 });
 
@@ -57,7 +66,10 @@ app.MapGet("/", () => new
     }
 });
 
-// YARP Reverse Proxy
-app.MapReverseProxy();
+// ✅ YARP Reverse Proxy + Apply request timeouts to proxy pipeline
+app.MapReverseProxy(proxyPipeline =>
+{
+    proxyPipeline.UseRequestTimeouts();
+});
 
 app.Run();

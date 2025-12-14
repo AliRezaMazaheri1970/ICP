@@ -4,75 +4,75 @@ using Shared.Wrapper;
 namespace Application.Services;
 
 /// <summary>
-/// Defines services for generating and managing pivot tables from project data.
+/// Defines the contract for services that transform flat project data into pivot table structures for reporting.
 /// </summary>
 public interface IPivotService
 {
     /// <summary>
-    /// Generates a standard pivot table from project raw data.
+    /// Generates a standard pivot table based on the provided filtering and formatting options.
     /// </summary>
-    /// <param name="request">The pivot configuration parameters.</param>
-    /// <returns>The pivot table result.</returns>
+    /// <param name="request">A request object defining the pivot configuration.</param>
+    /// <returns>A result containing the generated pivot table data.</returns>
     Task<Result<PivotResultDto>> GetPivotTableAsync(PivotRequest request);
 
     /// <summary>
-    /// Generates an advanced pivot table with support for GCD calculation and repeat detection.
+    /// Generates a complex pivot table that supports Geochemical Data (GCD) logic and repeat sample handling.
     /// </summary>
-    /// <param name="request">The advanced pivot configuration parameters.</param>
-    /// <returns>The advanced pivot result with metadata.</returns>
+    /// <param name="request">A request object defining the advanced pivot configuration.</param>
+    /// <returns>A result containing the advanced pivot table data and associated metadata.</returns>
     Task<Result<AdvancedPivotResultDto>> GetAdvancedPivotTableAsync(AdvancedPivotRequest request);
 
     /// <summary>
-    /// Retrieves a list of all unique solution labels present in the project.
+    /// Retrieves a complete list of unique solution labels currently existing within the project.
     /// </summary>
-    /// <param name="projectId">The project identifier.</param>
-    /// <returns>A list of solution labels.</returns>
+    /// <param name="projectId">The unique identifier of the project.</param>
+    /// <returns>A result containing the list of solution label strings.</returns>
     Task<Result<List<string>>> GetSolutionLabelsAsync(Guid projectId);
 
     /// <summary>
-    /// Retrieves a list of all unique elements associated with the project.
+    /// Retrieves a complete list of unique chemical element symbols associated with the project data.
     /// </summary>
-    /// <param name="projectId">The project identifier.</param>
-    /// <returns>A list of element symbols.</returns>
+    /// <param name="projectId">The unique identifier of the project.</param>
+    /// <returns>A result containing the list of element symbol strings.</returns>
     Task<Result<List<string>>> GetElementsAsync(Guid projectId);
 
     /// <summary>
-    /// Detects duplicate rows in the project based on naming patterns.
+    /// Scans the project data to identify potential duplicate samples based on configuration patterns.
     /// </summary>
-    /// <param name="request">The duplicate detection criteria.</param>
-    /// <returns>A list of detected duplicate pairs.</returns>
+    /// <param name="request">A request object specifying the detection criteria and thresholds.</param>
+    /// <returns>A result containing a list of identified duplicate pairs and their differences.</returns>
     Task<Result<List<DuplicateResultDto>>> DetectDuplicatesAsync(DuplicateDetectionRequest request);
 
     /// <summary>
-    /// Calculates statistical summaries (min, max, mean, stdDev) for each column in the project.
+    /// Computes statistical summaries (e.g., Min, Max, Mean, Standard Deviation) for all numeric columns in the project.
     /// </summary>
-    /// <param name="projectId">The project identifier.</param>
-    /// <returns>A dictionary of statistics keyed by column name.</returns>
+    /// <param name="projectId">The unique identifier of the project.</param>
+    /// <returns>A result containing a dictionary of statistics for each column.</returns>
     Task<Result<Dictionary<string, ColumnStatsDto>>> GetColumnStatsAsync(Guid projectId);
 
     /// <summary>
-    /// Exports the content of a pivot table to a CSV byte array.
+    /// Exports the generated pivot table data to a CSV file format.
     /// </summary>
-    /// <param name="request">The pivot configuration to export.</param>
-    /// <returns>The CSV file content as a byte array.</returns>
+    /// <param name="request">A request object defining the pivot configuration to export.</param>
+    /// <returns>A result containing the CSV file content as a byte array.</returns>
     Task<Result<byte[]>> ExportToCsvAsync(PivotRequest request);
 
     /// <summary>
-    /// Analyzes the project data to identify repeating patterns (e.g., sets of samples).
+    /// Analyzes the project data structure to identify and report on repeating sample patterns.
     /// </summary>
-    /// <param name="projectId">The project identifier.</param>
-    /// <returns>The analysis result showing repeat structures.</returns>
+    /// <param name="projectId">The unique identifier of the project.</param>
+    /// <returns>A result containing detailed analysis of any repeated structures found.</returns>
     Task<Result<RepeatAnalysisDto>> AnalyzeRepeatsAsync(Guid projectId);
 }
 
 /// <summary>
-/// Represents the result of a repeat pattern analysis.
+/// Encapsulates the results of an analysis of repeated sample patterns within the project.
 /// </summary>
-/// <param name="HasRepeats">Indicates if any repeating patterns were found.</param>
-/// <param name="TotalSamples">Total number of samples analyzed.</param>
-/// <param name="SetSizes">Map of solution labels to their repeat set size.</param>
-/// <param name="RepeatedElements">Map of solution labels to elements that repeat within them.</param>
-/// <param name="ElementCounts">Count of occurrences per element.</param>
+/// <param name="HasRepeats">True if the analysis detected any repeating sample patterns.</param>
+/// <param name="TotalSamples">The total number of samples processed during analysis.</param>
+/// <param name="SetSizes">A dictionary mapping solution labels to the count of samples in their repeat set.</param>
+/// <param name="RepeatedElements">A dictionary mapping solution labels to the specific elements that repeat.</param>
+/// <param name="ElementCounts">A dictionary aggregating the total occurrence count of each element.</param>
 public record RepeatAnalysisDto(
     bool HasRepeats,
     int TotalSamples,

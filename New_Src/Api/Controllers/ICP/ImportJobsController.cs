@@ -7,18 +7,30 @@ using Shared.Wrapper;
 
 namespace Api.Controllers;
 
+/// <summary>
+/// Handles background import job management and status tracking.
+/// </summary>
 [ApiController]
 [Route("api/projects/import")]
 public class ImportJobsController : ControllerBase
 {
     private readonly IsatisDbContext _db;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ImportJobsController"/> class.
+    /// </summary>
+    /// <param name="db">The database context.</param>
     public ImportJobsController(IsatisDbContext db)
     {
         _db = db;
     }
 
-    // GET /api/projects/import/jobs?page=1&pageSize=20
+    /// <summary>
+    /// Retrieves a paginated list of import jobs.
+    /// </summary>
+    /// <param name="page">The page number (default: 1).</param>
+    /// <param name="pageSize">The number of items per page (default: 20).</param>
+    /// <returns>A paginated list of import jobs with their status.</returns>
     [HttpGet("jobs")]
     public async Task<ActionResult<Result<object>>> ListJobs([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
     {
@@ -45,7 +57,11 @@ public class ImportJobsController : ControllerBase
         return Ok(Result<object>.Success(new { total, page, pageSize, items }));
     }
 
-    // GET /api/projects/import/{jobId}
+    /// <summary>
+    /// Retrieves detailed information about a specific import job.
+    /// </summary>
+    /// <param name="jobId">The unique identifier of the import job.</param>
+    /// <returns>The import job details.</returns>
     [HttpGet("{jobId:guid}")]
     public async Task<ActionResult<Result<object>>> GetJob(Guid jobId)
     {
@@ -68,14 +84,20 @@ public class ImportJobsController : ControllerBase
         }));
     }
 
-    // POST /api/projects/import/{jobId}/cancel
+    /// <summary>
+    /// Cancels an import job by marking it as failed.
+    /// </summary>
+    /// <param name="jobId">The unique identifier of the import job to cancel.</param>
+    /// <returns>Confirmation of the cancellation.</returns>
     [HttpPost("{jobId:guid}/cancel")]
     public async Task<ActionResult<Result<object>>> CancelJob(Guid jobId)
     {
         var job = await _db.ProjectImportJobs.FindAsync(jobId);
-        if (job == null) return NotFound(Result<object>.Fail("Job not found"));
+        if (job == null)
+        {
+            return NotFound(Result<object>.Fail("Job not found"));
+        }
 
-        // Basic cancel: mark as Failed/Cancelled and message; running job will not be forcibly aborted immediately.
         job.State = (int)ImportJobState.Failed;
         job.Message = "Cancelled by user";
         job.UpdatedAt = DateTime.UtcNow;

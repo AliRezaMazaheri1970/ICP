@@ -1,17 +1,17 @@
 ﻿namespace Application.DTOs;
 
 /// <summary>
-/// Represents a request to create or retrieve a pivot table.
+/// Represents a request to create or retrieve a pivot table based on specific filtering and formatting criteria.
 /// </summary>
-/// <param name="ProjectId">The project identifier.</param>
-/// <param name="SearchText">Optional text to filter rows.</param>
-/// <param name="SelectedSolutionLabels">Optional list of specific solution labels.</param>
-/// <param name="SelectedElements">Optional list of specific elements.</param>
-/// <param name="NumberFilters">Optional numeric filters per column.</param>
-/// <param name="UseOxide">Whether to convert to oxide values.</param>
-/// <param name="DecimalPlaces">Decimal precision for display.</param>
-/// <param name="Page">Page number.</param>
-/// <param name="PageSize">Page size.</param>
+/// <param name="ProjectId">The unique identifier of the project to query.</param>
+/// <param name="SearchText">Optional text used to filter the rows, matching against solution labels or other text fields.</param>
+/// <param name="SelectedSolutionLabels">An optional list of specific solution labels to restrict the pivot table to. If null, all matching samples are used.</param>
+/// <param name="SelectedElements">An optional list of specific element symbols to include as columns in the pivot table.</param>
+/// <param name="NumberFilters">A set of numeric value filters used to exclude rows based on column values.</param>
+/// <param name="UseOxide">Indicates whether element values should be converted to their oxide equivalents.</param>
+/// <param name="DecimalPlaces">The number of decimal places to use when formatting the output values.</param>
+/// <param name="Page">The current page number for paginated results.</param>
+/// <param name="PageSize">The maximum number of rows to return per page.</param>
 public record PivotRequest(
     Guid ProjectId,
     string? SearchText = null,
@@ -25,24 +25,24 @@ public record PivotRequest(
 );
 
 /// <summary>
-/// Represents a numeric range filter for a column.
+/// Defines a numeric range filter to be applied to a specific column in the pivot table.
 /// </summary>
-/// <param name="Min">Minimum value (inclusive).</param>
-/// <param name="Max">Maximum value (inclusive).</param>
+/// <param name="Min">The minimum acceptable value (inclusive). If null, no lower bound is applied.</param>
+/// <param name="Max">The maximum acceptable value (inclusive). If null, no upper bound is applied.</param>
 public record NumberFilter(
     decimal? Min = null,
     decimal? Max = null
 );
 
 /// <summary>
-/// Represents the result of a pivot table operation.
+/// Represents the result of a pivot table generation operation, containing the data and metadata.
 /// </summary>
-/// <param name="Columns">List of column headers.</param>
-/// <param name="Rows">List of data rows.</param>
-/// <param name="TotalCount">Total number of rows.</param>
-/// <param name="Page">Current page number.</param>
-/// <param name="PageSize">Current page size.</param>
-/// <param name="Metadata">Metadata and statistics.</param>
+/// <param name="Columns">The list of column headers included in the pivot table.</param>
+/// <param name="Rows">The collection of data rows for the current page.</param>
+/// <param name="TotalCount">The total number of rows matching the query criteria.</param>
+/// <param name="Page">The current page number.</param>
+/// <param name="PageSize">The page size used for this result.</param>
+/// <param name="Metadata">Additional statistics and metadata describing the entire result set.</param>
 public record PivotResultDto(
     List<string> Columns,
     List<PivotRowDto> Rows,
@@ -53,11 +53,11 @@ public record PivotResultDto(
 );
 
 /// <summary>
-/// Represents a single row in a pivot table.
+/// Represents a single row of data within the pivot table.
 /// </summary>
-/// <param name="SolutionLabel">The sample label.</param>
-/// <param name="Values">The dictionary of values per column.</param>
-/// <param name="OriginalIndex">The original row index.</param>
+/// <param name="SolutionLabel">The comprehensive label identifying the sample for this row.</param>
+/// <param name="Values">A dictionary where keys are column names and values are the corresponding measurements.</param>
+/// <param name="OriginalIndex">The index of the row in the original source data, useful for sorting stability.</param>
 public record PivotRowDto(
     string SolutionLabel,
     Dictionary<string, decimal?> Values,
@@ -65,11 +65,11 @@ public record PivotRowDto(
 );
 
 /// <summary>
-/// Contains metadata and statistics for the pivot table.
+/// Contains descriptive statistics and metadata about the pivot table contents.
 /// </summary>
-/// <param name="AllSolutionLabels">List of all available solution labels.</param>
-/// <param name="AllElements">List of all available elements.</param>
-/// <param name="ColumnStats">Statistics for each column.</param>
+/// <param name="AllSolutionLabels">A complete list of all unique solution labels present in the filtered result.</param>
+/// <param name="AllElements">A complete list of all distinct elements available in the result data.</param>
+/// <param name="ColumnStats">A dictionary of statistical summaries for each numeric column in the table.</param>
 public record PivotMetadataDto(
     List<string> AllSolutionLabels,
     List<string> AllElements,
@@ -77,13 +77,13 @@ public record PivotMetadataDto(
 );
 
 /// <summary>
-/// Represents statistics for a data column.
+/// Provides statistical information for a single column of data.
 /// </summary>
-/// <param name="Min">Minimum value.</param>
-/// <param name="Max">Maximum value.</param>
-/// <param name="Mean">Mean value.</param>
-/// <param name="StdDev">Standard deviation.</param>
-/// <param name="NonNullCount">Count of non-null values.</param>
+/// <param name="Min">The minimum value found in this column.</param>
+/// <param name="Max">The maximum value found in this column.</param>
+/// <param name="Mean">The arithmetic mean of values in this column.</param>
+/// <param name="StdDev">The standard deviation of values in this column.</param>
+/// <param name="NonNullCount">The count of non-null entries in this column.</param>
 public record ColumnStatsDto(
     decimal? Min,
     decimal? Max,
@@ -93,11 +93,11 @@ public record ColumnStatsDto(
 );
 
 /// <summary>
-/// Represents a request to detect duplicate samples.
+/// Represents a request to identify duplicate data entries within a project.
 /// </summary>
-/// <param name="ProjectId">The project identifier.</param>
-/// <param name="ThresholdPercent">The percentage threshold for difference.</param>
-/// <param name="DuplicatePatterns">Optional patterns to identify duplicates.</param>
+/// <param name="ProjectId">The unique identifier of the project to analyze.</param>
+/// <param name="ThresholdPercent">The percentage threshold above which differences are considered significant. Defaults to 10%.</param>
+/// <param name="DuplicatePatterns">An optional list of regex patterns or substrings used to identify duplicate pairs.</param>
 public record DuplicateDetectionRequest(
     Guid ProjectId,
     decimal ThresholdPercent = 10m,
@@ -105,12 +105,12 @@ public record DuplicateDetectionRequest(
 );
 
 /// <summary>
-/// Represents the result of a duplicate check.
+/// Represents the result of a comparison between two samples identified as duplicates.
 /// </summary>
-/// <param name="MainSolutionLabel">The primary sample label.</param>
-/// <param name="DuplicateSolutionLabel">The duplicate sample label.</param>
-/// <param name="Differences">List of differences per element.</param>
-/// <param name="HasOutOfRangeDiff">Indicates if significant differences exist.</param>
+/// <param name="MainSolutionLabel">The label of the primary sample.</param>
+/// <param name="DuplicateSolutionLabel">The label of the secondary (duplicate) sample.</param>
+/// <param name="Differences">A list of element-wise comparisons detailing the differences found.</param>
+/// <param name="HasOutOfRangeDiff">Indicates whether any element comparison exceeded the defined tolerance threshold.</param>
 public record DuplicateResultDto(
     string MainSolutionLabel,
     string DuplicateSolutionLabel,
@@ -119,12 +119,12 @@ public record DuplicateResultDto(
 );
 
 /// <summary>
-/// Provides standard oxide conversion factors.
+/// Provides a comprehensive dictionary of oxide conversion factors for chemical elements.
 /// </summary>
 public static class OxideFactors
 {
     /// <summary>
-    /// Dictionary of element symbols to their oxide formula and conversion factor.
+    /// A dictionary mapping element symbols to a tuple containing their oxide formula and numeric conversion factor.
     /// </summary>
     public static readonly Dictionary<string, (string Formula, decimal Factor)> Factors = new()
     {

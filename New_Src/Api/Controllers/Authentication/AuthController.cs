@@ -7,6 +7,9 @@ using System.Text;
 
 namespace Api.Controllers;
 
+/// <summary>
+/// Handles user authentication, registration, and session management.
+/// </summary>
 [ApiController]
 [Route("api/[controller]")]
 public class AuthController : ControllerBase
@@ -14,7 +17,6 @@ public class AuthController : ControllerBase
     private readonly IConfiguration _configuration;
     private readonly ILogger<AuthController> _logger;
 
-    // In real version use database
     private static readonly List<UserRecord> _users = new()
     {
         new UserRecord("admin", "admin123", "Administrator", "Admin"),
@@ -22,6 +24,11 @@ public class AuthController : ControllerBase
         new UserRecord("guest", "guest", "Guest User", "Viewer")
     };
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AuthController"/> class.
+    /// </summary>
+    /// <param name="configuration">The configuration settings.</param>
+    /// <param name="logger">The logger instance.</param>
     public AuthController(IConfiguration configuration, ILogger<AuthController> logger)
     {
         _configuration = configuration;
@@ -29,15 +36,16 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// POST /api/auth/login
+    /// Authenticates a user and generates a JWT token.
     /// </summary>
+    /// <param name="request">The login request containing username and password.</param>
+    /// <returns>A login response with the JWT token if successful.</returns>
     [HttpPost("login")]
     [AllowAnonymous]
     public ActionResult<LoginResponse> Login([FromBody] LoginRequest request)
     {
         _logger.LogInformation("Login attempt for user: {Username}", request.Username);
 
-        // Find user
         var user = _users.FirstOrDefault(u =>
             u.Username.Equals(request.Username, StringComparison.OrdinalIgnoreCase) &&
             u.Password == request.Password);
@@ -48,7 +56,6 @@ public class AuthController : ControllerBase
             return Unauthorized(new LoginResponse(false, "Invalid username or password"));
         }
 
-        // Generate JWT Token
         var token = GenerateJwtToken(user);
 
         _logger.LogInformation("Successful login for user: {Username}", request.Username);
@@ -63,19 +70,19 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// POST /api/auth/register
+    /// Registers a new user.
     /// </summary>
+    /// <param name="request">The registration details.</param>
+    /// <returns>A response indicating the result of the registration.</returns>
     [HttpPost("register")]
     [AllowAnonymous]
     public ActionResult<RegisterResponse> Register([FromBody] RegisterRequest request)
     {
-        // Check if user already exists
         if (_users.Any(u => u.Username.Equals(request.Username, StringComparison.OrdinalIgnoreCase)))
         {
             return Conflict(new RegisterResponse(false, "Username already exists"));
         }
 
-        // Add new user
         var newUser = new UserRecord(
             request.Username,
             request.Password,
@@ -90,14 +97,14 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// GET /api/auth/me - Get current user info
+    /// Retrieves the current authenticated user's information.
     /// </summary>
+    /// <returns>The user information details.</returns>
     [HttpGet("me")]
     [Authorize]
     public ActionResult<UserInfo> GetCurrentUser()
     {
         var username = User.FindFirst(ClaimTypes.Name)?.Value;
-        var position = User.FindFirst(ClaimTypes.Role)?.Value;
 
         if (string.IsNullOrEmpty(username))
             return Unauthorized();
@@ -110,27 +117,32 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// GET /api/auth/check-session - Check active session
+    /// Checks if there is an active session.
     /// </summary>
+    /// <returns>The session check result.</returns>
     [HttpGet("check-session")]
     [AllowAnonymous]
     public ActionResult CheckSession()
     {
-        // In real version use Cookie or Session
         return Ok(new LoginResponse(false, "No active session"));
     }
 
     /// <summary>
-    /// POST /api/auth/logout
+    /// Logs out the current user.
     /// </summary>
+    /// <returns>A message indicating logout success.</returns>
     [HttpPost("logout")]
     [AllowAnonymous]
     public ActionResult Logout()
     {
-        // In real version clear Cookie/Session
         return Ok(new { Message = "Logged out successfully" });
     }
 
+    /// <summary>
+    /// Generates a JWT token for the specified user.
+    /// </summary>
+    /// <param name="user">The user to generate the token for.</param>
+    /// <returns>The generated JWT token string.</returns>
     private string GenerateJwtToken(UserRecord user)
     {
         var jwtSettings = _configuration.GetSection("Jwt");
@@ -146,8 +158,8 @@ public class AuthController : ControllerBase
         {
             new Claim(ClaimTypes.Name, user.Username),
             new Claim(ClaimTypes.GivenName, user.FullName),
-            new Claim(ClaimTypes.Role, user. Position),
-            new Claim(JwtRegisteredClaimNames. Jti, Guid.NewGuid().ToString())
+            new Claim(ClaimTypes.Role, user.Position),
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
 
         var token = new JwtSecurityToken(
@@ -162,7 +174,6 @@ public class AuthController : ControllerBase
     }
 }
 
-// DTOs
 public record LoginRequest(string Username, string Password, bool RememberMe = false);
 public record LoginResponse(bool IsAuthenticated, string Message, string Name = "", string Token = "", string Position = "");
 public record RegisterRequest(string Username, string Password, string? FullName, string? Position);

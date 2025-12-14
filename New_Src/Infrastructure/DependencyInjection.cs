@@ -56,6 +56,9 @@ public static class DependencyInjection
         services.AddScoped<IChangeLogService, ChangeLogService>();
         services.AddScoped<IVersionService, VersionService>();
 
+        // Undo Services
+        services.AddScoped<IUndoService, UndoService>();
+
         // Background Maintenance Services
         services.AddSingleton<CleanupHostedService>();
         services.AddHostedService(sp => sp.GetRequiredService<CleanupHostedService>());

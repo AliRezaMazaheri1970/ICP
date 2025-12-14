@@ -7,10 +7,6 @@ using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ============================================
-// Services Configuration
-// ============================================
-
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
@@ -20,16 +16,8 @@ builder.Services.AddControllers()
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 
-// ============================================
-// Application & Infrastructure Services
-// ============================================
-
 builder.Services.AddApplicationServices();
 builder.Services.AddInfrastructureServices(builder.Configuration);
-
-// ============================================
-// JWT Authentication
-// ============================================
 
 var jwtSettings = builder.Configuration.GetSection("Jwt");
 var jwtSecret = jwtSettings["Secret"] ?? "IsatisICP-SuperSecret-Key-2024-Must-Be-At-Least-32-Characters!";
@@ -61,29 +49,16 @@ builder.Services.AddAuthentication(options =>
 
 builder.Services.AddAuthorization();
 
-// ============================================
-// CORS
-// ============================================
-
 builder.Services.AddCors(options =>
 {
-    // Allow access to different clients
     options.AddPolicy("AllowClient",
-        b => b.AllowAnyOrigin() // For testing, allow all origins
+        b => b.AllowAnyOrigin()
               .AllowAnyMethod()
               .AllowAnyHeader()
               .WithExposedHeaders("Content-Disposition"));
 });
 
-// ============================================
-// Build Application
-// ============================================
-
 var app = builder.Build();
-
-// ============================================
-// Middleware Pipeline
-// ============================================
 
 if (app.Environment.IsDevelopment())
 {

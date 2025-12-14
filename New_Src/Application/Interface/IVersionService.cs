@@ -4,16 +4,16 @@ using Shared.Wrapper;
 namespace Application.Services;
 
 /// <summary>
-/// Represents a node in the project version tree.
+/// Represents a hierarchical node in the project version history tree.
 /// </summary>
-/// <param name="StateId">The unique ID of the state.</param>
-/// <param name="ParentStateId">The ID of the parent state.</param>
-/// <param name="VersionNumber">The version number.</param>
-/// <param name="ProcessingType">The type of processing that created this version.</param>
-/// <param name="Description">Description of the version.</param>
-/// <param name="Timestamp">Creation timestamp.</param>
-/// <param name="IsActive">Whether this is the currently active version.</param>
-/// <param name="Children">Child nodes (branches).</param>
+/// <param name="StateId">The unique identifier of the version state.</param>
+/// <param name="ParentStateId">The identifier of the parent version state, if any.</param>
+/// <param name="VersionNumber">The sequential version number.</param>
+/// <param name="ProcessingType">The type of processing action that generated this version.</param>
+/// <param name="Description">A user-friendly description of the version.</param>
+/// <param name="Timestamp">The date and time when the version was created.</param>
+/// <param name="IsActive">True if this is the currently active version of the project.</param>
+/// <param name="Children">A list of child version nodes branching from this version.</param>
 public record VersionNodeDto(
     int StateId,
     int? ParentStateId,
@@ -26,13 +26,13 @@ public record VersionNodeDto(
 );
 
 /// <summary>
-/// Represents a request to create a new version.
+/// Represents a request to create a new version checkpoint for a project.
 /// </summary>
-/// <param name="ProjectId">The project identifier.</param>
-/// <param name="ParentStateId">The parent state identifier.</param>
-/// <param name="ProcessingType">The processing type.</param>
-/// <param name="Data">The serialized state data.</param>
-/// <param name="Description">Optional description.</param>
+/// <param name="ProjectId">The unique identifier of the project.</param>
+/// <param name="ParentStateId">The identifier of the state from which this version is derived.</param>
+/// <param name="ProcessingType">The type of processing action triggering this version creation.</param>
+/// <param name="Data">The serialized state data associated with this version.</param>
+/// <param name="Description">An optional description for the version.</param>
 public record CreateVersionDto(
     Guid ProjectId,
     int? ParentStateId,
@@ -42,84 +42,84 @@ public record CreateVersionDto(
 );
 
 /// <summary>
-/// Defines services for managing project history, versioning, and branching.
+/// Defines the contract for services managing project versioning, history, and branching capabilities.
 /// </summary>
 public interface IVersionService
 {
     /// <summary>
-    /// Creates a new version state for a project.
+    /// Creates a new version state entry in the project's history.
     /// </summary>
-    /// <param name="dto">The version creation details.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>The created project state.</returns>
+    /// <param name="dto">An object containing the details for the new version.</param>
+    /// <param name="ct">A token to observe while waiting for the task to complete.</param>
+    /// <returns>A result containing the created <see cref="ProjectState"/> entity.</returns>
     Task<Result<ProjectState>> CreateVersionAsync(CreateVersionDto dto, CancellationToken ct = default);
 
     /// <summary>
-    /// Retrieves the full version tree for a project.
+    /// Retrieves the complete hierarchical tree of versions for a specific project.
     /// </summary>
-    /// <param name="projectId">The project identifier.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>Average of version nodes representing the tree.</returns>
+    /// <param name="projectId">The unique identifier of the project.</param>
+    /// <param name="ct">A token to observe while waiting for the task to complete.</param>
+    /// <returns>A result containing the root nodes of the version tree.</returns>
     Task<Result<List<VersionNodeDto>>> GetVersionTreeAsync(Guid projectId, CancellationToken ct = default);
 
     /// <summary>
-    /// Retrieves all versions as a flat list.
+    /// Retrieves a flat list of all version states associated with a project.
     /// </summary>
-    /// <param name="projectId">The project identifier.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>A list of project states.</returns>
+    /// <param name="projectId">The unique identifier of the project.</param>
+    /// <param name="ct">A token to observe while waiting for the task to complete.</param>
+    /// <returns>A result containing a list of <see cref="ProjectState"/> entities.</returns>
     Task<Result<List<ProjectState>>> GetAllVersionsAsync(Guid projectId, CancellationToken ct = default);
 
     /// <summary>
-    /// Retrieves the currently active version of a project.
+    /// Retrieves the currently active version state for a project.
     /// </summary>
-    /// <param name="projectId">The project identifier.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>The active project state.</returns>
+    /// <param name="projectId">The unique identifier of the project.</param>
+    /// <param name="ct">A token to observe while waiting for the task to complete.</param>
+    /// <returns>A result containing the active <see cref="ProjectState"/>, or null if none is active.</returns>
     Task<Result<ProjectState?>> GetActiveVersionAsync(Guid projectId, CancellationToken ct = default);
 
     /// <summary>
-    /// Sets a specific version as the active version.
+    /// Sets a specific version as the active current state for the project.
     /// </summary>
-    /// <param name="projectId">The project identifier.</param>
-    /// <param name="stateId">The state ID to activate.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>True if the switch was successful.</returns>
+    /// <param name="projectId">The unique identifier of the project.</param>
+    /// <param name="stateId">The unique identifier of the state to activate.</param>
+    /// <param name="ct">A token to observe while waiting for the task to complete.</param>
+    /// <returns>A result indicating true if the switch was successful.</returns>
     Task<Result<bool>> SwitchToVersionAsync(Guid projectId, int stateId, CancellationToken ct = default);
 
     /// <summary>
-    /// Retrieves a specific version by its ID.
+    /// Retrieves the details of a specific version state by its ID.
     /// </summary>
-    /// <param name="stateId">The state ID.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>The project state.</returns>
+    /// <param name="stateId">The unique identifier of the version state.</param>
+    /// <param name="ct">A token to observe while waiting for the task to complete.</param>
+    /// <returns>A result containing the <see cref="ProjectState"/> if found.</returns>
     Task<Result<ProjectState?>> GetVersionAsync(int stateId, CancellationToken ct = default);
 
     /// <summary>
-    /// Retrieves the lineage path from the root to a specific version.
+    /// Retrieves the sequence of states leading from the root to the specified version (lineage).
     /// </summary>
-    /// <param name="stateId">The target state ID.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>A list of states representing the path.</returns>
+    /// <param name="stateId">The unique identifier of the target version state.</param>
+    /// <param name="ct">A token to observe while waiting for the task to complete.</param>
+    /// <returns>A result containing a list of <see cref="ProjectState"/> entities representing the path.</returns>
     Task<Result<List<ProjectState>>> GetVersionPathAsync(int stateId, CancellationToken ct = default);
 
     /// <summary>
-    /// Deletes a version and optionally its children.
+    /// Permanently deletes a specific version state and optionally its entire descendant lineage.
     /// </summary>
-    /// <param name="stateId">The state ID to delete.</param>
-    /// <param name="deleteChildren">Whether to delete all descendant states.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>True if deletion was successful.</returns>
+    /// <param name="stateId">The unique identifier of the version state to delete.</param>
+    /// <param name="deleteChildren">If true, recursively deletes all child versions derived from this state.</param>
+    /// <param name="ct">A token to observe while waiting for the task to complete.</param>
+    /// <returns>A result indicating true if the deletion was successful.</returns>
     Task<Result<bool>> DeleteVersionAsync(int stateId, bool deleteChildren = false, CancellationToken ct = default);
 
     /// <summary>
-    /// Creates a fork (branch) from an existing version.
+    /// Creates a new divergent branch (fork) from an existing version state with modified data.
     /// </summary>
-    /// <param name="parentStateId">The parent state to fork from.</param>
-    /// <param name="processingType">The processing type for the new fork.</param>
-    /// <param name="data">The state data.</param>
-    /// <param name="description">Optional description.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>The newly created fork state.</returns>
+    /// <param name="parentStateId">The identifier of the parent state to fork from.</param>
+    /// <param name="processingType">The type of processing action for the new fork.</param>
+    /// <param name="data">The new state data to initialize the fork with.</param>
+    /// <param name="description">An optional description for the new fork.</param>
+    /// <param name="ct">A token to observe while waiting for the task to complete.</param>
+    /// <returns>A result containing the newly created branched <see cref="ProjectState"/>.</returns>
     Task<Result<ProjectState>> ForkVersionAsync(int parentStateId, string processingType, string data, string? description = null, CancellationToken ct = default);
 }

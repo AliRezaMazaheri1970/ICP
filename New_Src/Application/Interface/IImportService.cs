@@ -4,19 +4,19 @@ using Shared.Wrapper;
 namespace Application.Services;
 
 /// <summary>
-/// Defines services for importing data from various file formats into the system.
+/// Defines the contract for services handling the import of external data files into the system.
 /// </summary>
 public interface IImportService
 {
     /// <summary>
-    /// Performs a basic import of a CSV stream into a new project.
+    /// Imports data from a standard CSV stream into a new project structure.
     /// </summary>
-    /// <param name="csvStream">The source CSV stream.</param>
-    /// <param name="projectName">The name for the new project.</param>
-    /// <param name="owner">The owner of the project.</param>
-    /// <param name="stateJson">Optional initialization state.</param>
-    /// <param name="progress">Optional progress reporter.</param>
-    /// <returns>The result of the project save operation.</returns>
+    /// <param name="csvStream">The input stream containing CSV data.</param>
+    /// <param name="projectName">The name to assign to the newly created project.</param>
+    /// <param name="owner">The identifier of the user creating the project.</param>
+    /// <param name="stateJson">Optional JSON string defining initial state or configuration.</param>
+    /// <param name="progress">An optional provider for reporting progress updates.</param>
+    /// <returns>A result containing details of the saved project.</returns>
     Task<Result<ProjectSaveResult>> ImportCsvAsync(
         Stream csvStream,
         string projectName,
@@ -25,14 +25,14 @@ public interface IImportService
         IProgress<(int total, int processed)>? progress = null);
 
     /// <summary>
-    /// Performs an advanced import with explicit options and format detection.
+    /// Performs a sophisticated import capable of handling various formats and configuration options.
     /// </summary>
-    /// <param name="fileStream">The source file stream.</param>
-    /// <param name="fileName">The original filename.</param>
-    /// <param name="request">Options specifying import behavior.</param>
-    /// <param name="progress">Optional progress reporter.</param>
-    /// <param name="cancellationToken">Token to cancel the operation.</param>
-    /// <returns>The comprehensive import result.</returns>
+    /// <param name="fileStream">The input stream of the file to import.</param>
+    /// <param name="fileName">The specific name of the file being imported.</param>
+    /// <param name="request">An object defining detailed import settings and mappings.</param>
+    /// <param name="progress">An optional provider for reporting detailed progress.</param>
+    /// <param name="cancellationToken">A token to observe while waiting for the task to complete.</param>
+    /// <returns>A result containing comprehensive statistics and details of the import execution.</returns>
     Task<Result<AdvancedImportResult>> ImportAdvancedAsync(
         Stream fileStream,
         string fileName,
@@ -41,37 +41,37 @@ public interface IImportService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Analyzes a file stream to detect its format and structure without importing.
+    /// Inspects a file stream to determine its format and structure without performing a full import.
     /// </summary>
-    /// <param name="fileStream">The source file stream.</param>
-    /// <param name="fileName">The original filename.</param>
-    /// <returns>The detected format details.</returns>
+    /// <param name="fileStream">The input stream of the file to analyze.</param>
+    /// <param name="fileName">The name of the file being analyzed.</param>
+    /// <returns>A result describing the detected file format and properties.</returns>
     Task<Result<FileFormatDetectionResult>> DetectFormatAsync(
         Stream fileStream,
         string fileName);
 
     /// <summary>
-    /// Reads the first few rows of a file to generate a preview.
+    /// Generates a localized preview of the file content to assist with mapping and verification.
     /// </summary>
-    /// <param name="fileStream">The source file stream.</param>
-    /// <param name="fileName">The original filename.</param>
-    /// <param name="previewRows">Buffer size for preview rows (default 10).</param>
-    /// <returns>A preview result containing headers and sample data.</returns>
+    /// <param name="fileStream">The input stream of the file to preview.</param>
+    /// <param name="fileName">The name of the file being previewed.</param>
+    /// <param name="previewRows">The number of rows to include in the preview. Defaults to 10.</param>
+    /// <returns>A result containing the preview data and headers.</returns>
     Task<Result<FilePreviewResult>> PreviewFileAsync(
         Stream fileStream,
         string fileName,
         int previewRows = 10);
 
     /// <summary>
-    /// Imports an additional file and appends it to an existing project.
+    /// Appends data from an additional file to an existing project.
     /// </summary>
-    /// <param name="projectId">The target project identifier.</param>
-    /// <param name="fileStream">The source file stream.</param>
-    /// <param name="fileName">The original filename.</param>
-    /// <param name="request">Data import options.</param>
-    /// <param name="progress">Optional progress reporter.</param>
-    /// <param name="cancellationToken">Token to cancel the operation.</param>
-    /// <returns>The result of the append operation.</returns>
+    /// <param name="projectId">The unique identifier of the target project.</param>
+    /// <param name="fileStream">The input stream of the file to append.</param>
+    /// <param name="fileName">The name of the file being appended.</param>
+    /// <param name="request">Optional settings to control the import behavior.</param>
+    /// <param name="progress">An optional provider for reporting detailed progress.</param>
+    /// <param name="cancellationToken">A token to observe while waiting for the task to complete.</param>
+    /// <returns>A result containing statistics about the appended data.</returns>
     Task<Result<AdvancedImportResult>> ImportAdditionalAsync(
         Guid projectId,
         Stream fileStream,
@@ -81,14 +81,14 @@ public interface IImportService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Imports an Excel file (.xlsx/.xls) stream.
+    /// Imports data from an Excel workbook stream.
     /// </summary>
-    /// <param name="fileStream">The source Excel stream.</param>
-    /// <param name="fileName">The original filename.</param>
-    /// <param name="request">Import options.</param>
-    /// <param name="progress">Optional progress reporter.</param>
-    /// <param name="cancellationToken">Token to cancel the operation.</param>
-    /// <returns>The import result.</returns>
+    /// <param name="fileStream">The input stream of the Excel file.</param>
+    /// <param name="fileName">The name of the Excel file.</param>
+    /// <param name="request">An object defining import settings.</param>
+    /// <param name="progress">An optional provider for reporting detailed progress.</param>
+    /// <param name="cancellationToken">A token to observe while waiting for the task to complete.</param>
+    /// <returns>A result containing comprehensive statistics and details of the import execution.</returns>
     Task<Result<AdvancedImportResult>> ImportExcelAsync(
         Stream fileStream,
         string fileName,

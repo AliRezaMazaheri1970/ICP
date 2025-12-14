@@ -4,44 +4,44 @@ using Shared.Wrapper;
 namespace Application.Services;
 
 /// <summary>
-/// Defines services for optimizing data correction parameters (Blank &amp; Scale) using evolutionary algorithms.
+/// Defines the contract for services that utilize advanced algorithms to optimize correction parameters.
 /// </summary>
 public interface IOptimizationService
 {
     /// <summary>
-    /// Optimizes blank and scale values to maximize the pass rate of RM checks using Differential Evolution.
+    /// Executes an evolutionary algorithm (e.g., Differential Evolution) to find the optimal Blank and Scale values.
     /// </summary>
-    /// <param name="request">The parameters for the optimization process.</param>
-    /// <returns>The result of the optimization including optimal parameters per element.</returns>
+    /// <param name="request">A request object containing optimization constraints and algorithm parameters.</param>
+    /// <returns>A result containing the calculated optimal parameters for each element.</returns>
     Task<Result<BlankScaleOptimizationResult>> OptimizeBlankScaleAsync(BlankScaleOptimizationRequest request);
 
     /// <summary>
-    /// Applies manually specified blank and scale values to the project data.
+    /// Applies specific Blank and Scale values manually provided by the user to the project data.
     /// </summary>
-    /// <param name="request">The manual adjustment parameters.</param>
-    /// <returns>The result of applying the values.</returns>
+    /// <param name="request">A request object specifying the element and the values to apply.</param>
+    /// <returns>A result showing the outcome of applying the manual parameters.</returns>
     Task<Result<ManualBlankScaleResult>> ApplyManualBlankScaleAsync(ManualBlankScaleRequest request);
 
     /// <summary>
-    /// Previews the effect of blank and scale adjustments without persisting the changes.
+    /// Calculates the hypothetical outcome of applying Blank and Scale values without saving changes.
     /// </summary>
-    /// <param name="request">The parameters to preview.</param>
-    /// <returns>The preview result.</returns>
+    /// <param name="request">A request object specifying the element and the values to preview.</param>
+    /// <returns>A result showing the projected outcome of the parameters.</returns>
     Task<Result<ManualBlankScaleResult>> PreviewBlankScaleAsync(ManualBlankScaleRequest request);
 
     /// <summary>
-    /// Retrieves current pass/fail statistics for CRM comparisons based on current data.
+    /// Retrieves the current statistical performance (pass/fail rates) of the project based on existing settings.
     /// </summary>
-    /// <param name="projectId">The project identifier.</param>
-    /// <param name="minDiff">The minimum acceptable difference percentage.</param>
-    /// <param name="maxDiff">The maximum acceptable difference percentage.</param>
-    /// <returns>The current statistics.</returns>
+    /// <param name="projectId">The unique identifier of the project.</param>
+    /// <param name="minDiff">The lower bound of the acceptable difference percentage. Defaults to -10.</param>
+    /// <param name="maxDiff">The upper bound of the acceptable difference percentage. Defaults to 10.</param>
+    /// <returns>A result containing the current performance metrics.</returns>
     Task<Result<BlankScaleOptimizationResult>> GetCurrentStatisticsAsync(Guid projectId, decimal minDiff = -10m, decimal maxDiff = 10m);
 
     /// <summary>
-    /// Retrieves a subset of sample data for debugging purposes.
+    /// Retrieves a subset of project sample data formatted for debugging and analysis purposes.
     /// </summary>
-    /// <param name="projectId">The project identifier.</param>
-    /// <returns>A generic object containing debug data.</returns>
+    /// <param name="projectId">The unique identifier of the project.</param>
+    /// <returns>An object containing the debug dataset.</returns>
     Task<object> GetDebugSamplesAsync(Guid projectId);
 }

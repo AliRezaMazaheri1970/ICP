@@ -1,12 +1,12 @@
 ﻿namespace Application.DTOs;
 
 /// <summary>
-/// Represents a request for generating a report.
+/// Represents a structured request to generate a project report.
 /// </summary>
-/// <param name="ProjectId">The project identifier.</param>
-/// <param name="ReportType">The type of report to generate.</param>
-/// <param name="Format">The export format (e.g., Excel).</param>
-/// <param name="Options">Configuration options for the report.</param>
+/// <param name="ProjectId">The unique identifier of the project to retrieve data from.</param>
+/// <param name="ReportType">The specific category of report to generate (e.g., Full, Summary).</param>
+/// <param name="Format">The desired output file format (e.g., Excel, CSV).</param>
+/// <param name="Options">An optional configuration object specifying detailed report settings.</param>
 public record ReportRequest(
     Guid ProjectId,
     ReportType ReportType,
@@ -15,18 +15,18 @@ public record ReportRequest(
 );
 
 /// <summary>
-/// Defines options for report generation.
+/// Defines detailed configuration options for report generation customization.
 /// </summary>
-/// <param name="IncludeSummary">Include summary statistics.</param>
-/// <param name="IncludeRawData">Include original raw data.</param>
-/// <param name="IncludeStatistics">Include detailed statistics.</param>
-/// <param name="IncludeRmCheck">Include RM check sections.</param>
-/// <param name="IncludeDuplicates">Include duplicate analysis.</param>
-/// <param name="UseOxide">Convert values to oxides.</param>
-/// <param name="DecimalPlaces">Number of decimal places.</param>
-/// <param name="SelectedElements">Specific elements to include.</param>
-/// <param name="Title">Report title.</param>
-/// <param name="Author">Report author name.</param>
+/// <param name="IncludeSummary">If true, a summary section is included in the report.</param>
+/// <param name="IncludeRawData">If true, the original raw data is included.</param>
+/// <param name="IncludeStatistics">If true, detailed statistical analysis is included.</param>
+/// <param name="IncludeRmCheck">If true, Reference Material check results are included.</param>
+/// <param name="IncludeDuplicates">If true, analysis of duplicate samples is included.</param>
+/// <param name="UseOxide">If true, chemical values are converted to their oxide forms.</param>
+/// <param name="DecimalPlaces">The number of decimal places to use for numeric values.</param>
+/// <param name="SelectedElements">A specific list of elements to include; if null, all are included.</param>
+/// <param name="Title">A custom title for the generated report.</param>
+/// <param name="Author">The name of the report's author.</param>
 public record ReportOptions(
     bool IncludeSummary = true,
     bool IncludeRawData = true,
@@ -41,37 +41,75 @@ public record ReportOptions(
 );
 
 /// <summary>
-/// Defines the available report types.
+/// Enumerates the various types of reports available for generation.
 /// </summary>
 public enum ReportType
 {
+    /// <summary>
+    /// A comprehensive report containing all designated sections.
+    /// </summary>
     Full,
+    
+    /// <summary>
+    /// A concise report focusing on summary statistics.
+    /// </summary>
     Summary,
+    
+    /// <summary>
+    /// A report specifically detailing Reference Material performance.
+    /// </summary>
     RmCheck,
+    
+    /// <summary>
+    /// A report analyzing duplicate sample results.
+    /// </summary>
     Duplicates,
+    
+    /// <summary>
+    /// A report formatted as a pivot table for flexible data analysis.
+    /// </summary>
     PivotTable,
+    
+    /// <summary>
+    /// A report comparing sample results against Certified Reference Materials.
+    /// </summary>
     CrmComparison
 }
 
 /// <summary>
-/// Defines the supported report file formats.
+/// Enumerates the supported output formats for generated reports.
 /// </summary>
 public enum ReportFormat
 {
+    /// <summary>
+    /// Microsoft Excel format (.xlsx).
+    /// </summary>
     Excel,
+    
+    /// <summary>
+    /// Comma-Separated Values format (.csv).
+    /// </summary>
     Csv,
+    
+    /// <summary>
+    /// JavaScript Object Notation format (.json).
+    /// </summary>
     Json,
+    
+    /// <summary>
+    /// Hypertext Markup Language format (.html).
+    /// </summary>
     Html
 }
 
 /// <summary>
-/// Represents the result of a report generation operation.
+/// Represents the completed output of a report generation process.
 /// </summary>
-/// <param name="FileName">The suggested filename.</param>
-/// <param name="ContentType">The MIME content type.</param>
-/// <param name="Data">The binary file data.</param>
-/// <param name="GeneratedAt">The generation timestamp.</param>
-/// <param name="Metadata">Metadata regarding generation performance.</param>
+/// <param name="FileName">The recommended filename for the downloaded report.</param>
+/// <param name="ContentType">The MIME content type appropriate for the file format.</param>
+/// <param name="Data">The raw binary content of the generated report file.</param>
+/// <param name="GeneratedAt">The exact timestamp when the generation was completed.</param>
+/// <param name="Metadata">Metadata describing the generated report's content and performance.</param>
 public record ReportResultDto(
     string FileName,
     string ContentType,
@@ -81,15 +119,15 @@ public record ReportResultDto(
 );
 
 /// <summary>
-/// Contains metadata about the generated report.
+/// Contains metadata describing the properties and metrics of a generated report.
 /// </summary>
-/// <param name="ProjectId">The project identifier.</param>
-/// <param name="ProjectName">The project name.</param>
-/// <param name="ReportType">The report type.</param>
-/// <param name="Format">The report format.</param>
-/// <param name="TotalRows">Total rows in the report.</param>
-/// <param name="TotalColumns">Total columns in the report.</param>
-/// <param name="GenerationTime">Time taken to generate the report.</param>
+/// <param name="ProjectId">The identifier of the project source.</param>
+/// <param name="ProjectName">The display name of the project.</param>
+/// <param name="ReportType">The type of report that was generated.</param>
+/// <param name="Format">The file format of the report.</param>
+/// <param name="TotalRows">The total number of data rows included in the report.</param>
+/// <param name="TotalColumns">The total number of columns included in the report.</param>
+/// <param name="GenerationTime">The time duration occupied by the generation process.</param>
 public record ReportMetadataDto(
     Guid ProjectId,
     string ProjectName,
@@ -101,14 +139,14 @@ public record ReportMetadataDto(
 );
 
 /// <summary>
-/// Represents a request for a simple data export.
+/// Represents a simple request to export project data without complex formatting.
 /// </summary>
-/// <param name="ProjectId">The project identifier.</param>
-/// <param name="Format">The export format.</param>
-/// <param name="UseOxide">Convert values to oxide.</param>
-/// <param name="DecimalPlaces">Decimal precision.</param>
-/// <param name="SelectedElements">Specific elements.</param>
-/// <param name="SelectedSolutionLabels">Specific samples.</param>
+/// <param name="ProjectId">The unique identifier of the project to export.</param>
+/// <param name="Format">The desired export format. Defaults to Excel.</param>
+/// <param name="UseOxide">Indicates whether to convert values to oxides.</param>
+/// <param name="DecimalPlaces">The numeric precision to use.</param>
+/// <param name="SelectedElements">Optional list of elements to include.</param>
+/// <param name="SelectedSolutionLabels">Optional list of specific samples to include.</param>
 public record ExportRequest(
     Guid ProjectId,
     ReportFormat Format = ReportFormat.Excel,
@@ -119,12 +157,12 @@ public record ExportRequest(
 );
 
 /// <summary>
-/// Represents the calibration range for an element.
+/// Represents the valid calibration range for a specific element.
 /// </summary>
 /// <param name="Element">The element identifier.</param>
-/// <param name="Min">Minimum range value.</param>
-/// <param name="Max">Maximum range value.</param>
-/// <param name="DisplayRange">Formatted range string.</param>
+/// <param name="Min">The minimum valid calibration value.</param>
+/// <param name="Max">The maximum valid calibration value.</param>
+/// <param name="DisplayRange">A string representation of the range for display purposes.</param>
 public record CalibrationRange(
     string Element,
     decimal Min,
@@ -133,11 +171,11 @@ public record CalibrationRange(
 );
 
 /// <summary>
-/// Represents a request to select the best wavelength.
+/// Represents a request to determine the optimal wavelength for analysis.
 /// </summary>
 /// <param name="ProjectId">The project identifier.</param>
-/// <param name="SelectedSolutionLabels">Optional list of samples.</param>
-/// <param name="UseConcentration">Use Soln Conc (true) or Corr Con (false).</param>
+/// <param name="SelectedSolutionLabels">An optional list of samples to consider.</param>
+/// <param name="UseConcentration">If true, uses Solution Concentration; if false, uses Corrected Concentration.</param>
 public record BestWavelengthRequest(
     Guid ProjectId,
     List<string>? SelectedSolutionLabels = null,
@@ -145,12 +183,12 @@ public record BestWavelengthRequest(
 );
 
 /// <summary>
-/// Represents the result of best wavelength selection processes.
+/// Contains the comprehensive results of the best wavelength selection algorithm.
 /// </summary>
-/// <param name="CalibrationRanges">Calibration ranges per element.</param>
-/// <param name="BestWavelengthsPerRow">Best wavelength selection per row and element.</param>
-/// <param name="BaseElements">Mapping of base elements to available wavelengths.</param>
-/// <param name="SelectedColumns">List of columns selected for the final view.</param>
+/// <param name="CalibrationRanges">A dictionary mapping elements to their calibration ranges.</param>
+/// <param name="BestWavelengthsPerRow">A nested dictionary mapping row index and element to the selected wavelength.</param>
+/// <param name="BaseElements">A dictionary mapping base elements to available wavelength options.</param>
+/// <param name="SelectedColumns">The final list of column headers selected for the view.</param>
 public record BestWavelengthResult(
     Dictionary<string, CalibrationRange> CalibrationRanges,
     Dictionary<int, Dictionary<string, string>> BestWavelengthsPerRow,
@@ -159,14 +197,14 @@ public record BestWavelengthResult(
 );
 
 /// <summary>
-/// Details wavelength selection for a single row.
+/// Details the wavelength selection decision for a single sample row and element.
 /// </summary>
 /// <param name="SolutionLabel">The sample label.</param>
-/// <param name="BaseElement">The base element.</param>
-/// <param name="SelectedWavelength">The selected wavelength.</param>
-/// <param name="Concentration">The concentration value.</param>
-/// <param name="IsInCalibrationRange">Whether the value is within range.</param>
-/// <param name="DistanceFromRange">Distance from the range boundary if out of range.</param>
+/// <param name="BaseElement">The base chemical element (e.g., "Fe").</param>
+/// <param name="SelectedWavelength">The specific wavelength variant selected (e.g., "Fe 238.204").</param>
+/// <param name="Concentration">The concentration value associated with the selected wavelength.</param>
+/// <param name="IsInCalibrationRange">True if the value falls within the calibration range.</param>
+/// <param name="DistanceFromRange">The absolute difference from the nearest range boundary, if out of range.</param>
 public record WavelengthSelectionInfo(
     string SolutionLabel,
     string BaseElement,

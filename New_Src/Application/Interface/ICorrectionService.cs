@@ -4,80 +4,78 @@ using Shared.Wrapper;
 namespace Application.Services;
 
 /// <summary>
-/// Defines services for data correction operations like weight, volume, and dilution factor adjustments.
+/// Defines the contract for services that perform data correctness checks and apply modifications
+/// such as weight, volume, dilution factor corrections, and optimizations.
 /// </summary>
 public interface ICorrectionService
 {
     /// <summary>
-    /// Identifies samples with weights outside a specified acceptable range.
+    /// Scans the project data to identify samples where the recorded weight falls outside the specified acceptable range.
     /// </summary>
-    /// <param name="request">The parameters specifying the weight range and project.</param>
-    /// <returns>A list of samples with invalid weights.</returns>
+    /// <param name="request">A request object containing the project ID and weight thresholds.</param>
+    /// <returns>A result containing a list of <see cref="BadSampleDto"/> items representing invalid samples.</returns>
     Task<Result<List<BadSampleDto>>> FindBadWeightsAsync(FindBadWeightsRequest request);
 
     /// <summary>
-    /// Identifies samples with volumes different from the expected value.
+    /// Scans the project data to identify samples where the recorded volume deviates from the expected standard value.
     /// </summary>
-    /// <param name="request">The parameters specifying the expected volume and project.</param>
-    /// <returns>A list of samples with invalid volumes.</returns>
+    /// <param name="request">A request object containing the project ID and expected volume.</param>
+    /// <returns>A result containing a list of <see cref="BadSampleDto"/> items representing invalid samples.</returns>
     Task<Result<List<BadSampleDto>>> FindBadVolumesAsync(FindBadVolumesRequest request);
 
     /// <summary>
-    /// Applies a weight correction to specific samples.
-    /// Updates corrected concentration based on the ratio of new to old weight.
+    /// Applies corrections to the recorded weight for a specified list of samples and recalculates their concentrations.
     /// </summary>
-    /// <param name="request">The request details including samples and new weight.</param>
-    /// <returns>The result summary of the operation.</returns>
+    /// <param name="request">A request object specifying the samples to update and the new weight value.</param>
+    /// <returns>A result summary detailing the number of rows affected and correction specifics.</returns>
     Task<Result<CorrectionResultDto>> ApplyWeightCorrectionAsync(WeightCorrectionRequest request);
 
     /// <summary>
-    /// Applies a volume correction to specific samples.
-    /// Updates corrected concentration based on the ratio of new to old volume.
+    /// Applies corrections to the recorded volume for a specified list of samples and recalculates their concentrations.
     /// </summary>
-    /// <param name="request">The request details including samples and new volume.</param>
-    /// <returns>The result summary of the operation.</returns>
+    /// <param name="request">A request object specifying the samples to update and the new volume value.</param>
+    /// <returns>A result summary detailing the number of rows affected and correction specifics.</returns>
     Task<Result<CorrectionResultDto>> ApplyVolumeCorrectionAsync(VolumeCorrectionRequest request);
 
     /// <summary>
-    /// Applies a dilution factor (DF) correction to specific samples.
-    /// Updates corrected concentration based on the ratio of new to old DF.
+    /// Updates the dilution factor (DF) for a specified list of samples and adjusts the corrected concentrations accordingly.
     /// </summary>
-    /// <param name="request">The request details including samples and new DF.</param>
-    /// <returns>The result summary of the operation.</returns>
+    /// <param name="request">A request object specifying the samples to update and the new dilution factor.</param>
+    /// <returns>A result summary detailing the number of rows affected and correction specifics.</returns>
     Task<Result<CorrectionResultDto>> ApplyDfCorrectionAsync(DfCorrectionRequest request);
 
     /// <summary>
-    /// Retrieves a list of all samples with their current dilution factors.
+    /// Retrieves a list of all samples in a project along with their currently assigned dilution factors.
     /// </summary>
-    /// <param name="projectId">The project identifier.</param>
-    /// <returns>A list of samples and their DF values.</returns>
+    /// <param name="projectId">The unique identifier of the project.</param>
+    /// <returns>A result containing a list of <see cref="DfSampleDto"/> items.</returns>
     Task<Result<List<DfSampleDto>>> GetDfSamplesAsync(Guid projectId);
 
     /// <summary>
-    /// Applies global or element-specific optimization (Blank subtraction and Scale factor) to the project data.
+    /// Applies specified optimization settings (blank subtraction and scaling) to the project data.
     /// </summary>
-    /// <param name="request">The optimization parameters.</param>
-    /// <returns>The result summary of the operation.</returns>
+    /// <param name="request">A request object containing the per-element optimization parameters.</param>
+    /// <returns>A result summary detailing the operations performed.</returns>
     Task<Result<CorrectionResultDto>> ApplyOptimizationAsync(ApplyOptimizationRequest request);
 
     /// <summary>
-    /// Identifies rows that are potentially empty or statistical outliers based on element averages.
+    /// Analyzes the project data to identify rows that appear to be empty or contain statistical outliers.
     /// </summary>
-    /// <param name="request">The criteria for detecting empty rows.</param>
-    /// <returns>A list of flagged rows.</returns>
+    /// <param name="request">A request object defining the threshold criteria for detection.</param>
+    /// <returns>A result containing a list of <see cref="EmptyRowDto"/> identifying the flagged rows.</returns>
     Task<Result<List<EmptyRowDto>>> FindEmptyRowsAsync(FindEmptyRowsRequest request);
 
     /// <summary>
-    /// Deletes specified rows from the project.
+    /// Permanently removes the specified sample rows from the project.
     /// </summary>
-    /// <param name="request">The request identifying samples to delete.</param>
-    /// <returns>The count of deleted rows.</returns>
+    /// <param name="request">A request object containing the list of solution labels to delete.</param>
+    /// <returns>A result containing the count of successfully deleted rows.</returns>
     Task<Result<int>> DeleteRowsAsync(DeleteRowsRequest request);
 
     /// <summary>
-    /// Reverts the most recent correction applied to the project.
+    /// Reverts the most recently applied correction or bulk modification action for the specified project.
     /// </summary>
-    /// <param name="projectId">The project identifier.</param>
-    /// <returns>True if restoration was successful; otherwise, false.</returns>
+    /// <param name="projectId">The unique identifier of the project.</param>
+    /// <returns>A result indicating true if the undo operation was successful.</returns>
     Task<Result<bool>> UndoLastCorrectionAsync(Guid projectId);
 }

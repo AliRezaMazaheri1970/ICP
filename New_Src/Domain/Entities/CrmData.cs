@@ -3,7 +3,7 @@
 namespace Domain.Entities;
 
 /// <summary>
-/// Represents CRM (Certified Reference Material) data.
+/// Represents Certified Reference Material (CRM) data used for calibration and quality control.
 /// </summary>
 public class CrmData
 {
@@ -14,41 +14,41 @@ public class CrmData
     public int Id { get; set; }
 
     /// <summary>
-    /// Gets or sets the CRM identifier (e.g., "OREAS 258").
+    /// Gets or sets the unique name or identifier of the CRM (e.g., "OREAS 258").
     /// </summary>
     [Required]
     [MaxLength(100)]
     public string CrmId { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the analysis method used (e.g., "4-Acid Digestion").
+    /// Gets or sets the laboratory analysis method applied to the CRM.
     /// </summary>
     [MaxLength(200)]
     public string? AnalysisMethod { get; set; }
 
     /// <summary>
-    /// Gets or sets the type or category of the CRM.
+    /// Gets or sets the categorization or type of the reference material.
     /// </summary>
     [MaxLength(100)]
     public string? Type { get; set; }
 
     /// <summary>
-    /// Gets or sets the JSON string containing element concentration values.
+    /// Gets or sets the serialized JSON structure containing element concentration values.
     /// </summary>
     public string ElementValues { get; set; } = "{}";
 
     /// <summary>
-    /// Gets or sets a value indicating whether this CRM is flagged as a frequently used one.
+    /// Gets or sets a value indicating whether this CRM is part of the internal standard set (e.g., Our Oreas).
     /// </summary>
     public bool IsOurOreas { get; set; } = false;
 
     /// <summary>
-    /// Gets or sets the timestamp when the record was created.
+    /// Gets or sets the date and time when the record was initially created.
     /// </summary>
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>
-    /// Gets or sets the timestamp when the record was last updated.
+    /// Gets or sets the date and time when the record was last modified.
     /// </summary>
     public DateTime? UpdatedAt { get; set; }
 }

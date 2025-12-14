@@ -7,6 +7,9 @@ using System.Text.Json;
 
 namespace Api.Controllers;
 
+/// <summary>
+/// Handles bulk import and management of CRM data.
+/// </summary>
 [ApiController]
 [Route("api/crm")]
 public class CrmImportController : ControllerBase
@@ -14,6 +17,11 @@ public class CrmImportController : ControllerBase
     private readonly IsatisDbContext _db;
     private readonly ILogger<CrmImportController> _logger;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CrmImportController"/> class.
+    /// </summary>
+    /// <param name="db">The database context.</param>
+    /// <param name="logger">The logger instance.</param>
     public CrmImportController(IsatisDbContext db, ILogger<CrmImportController> logger)
     {
         _db = db;
@@ -21,52 +29,58 @@ public class CrmImportController : ControllerBase
     }
 
     /// <summary>
-    /// Import CRM data from CSV file
+    /// Imports CRM data from an uploaded CSV file.
     /// </summary>
+    /// <param name="file">The uploaded CSV file.</param>
+    /// <returns>The result of the import operation.</returns>
     [HttpPost("import")]
     public async Task<IActionResult> ImportCrmFromCsv(IFormFile file)
     {
         if (file == null || file.Length == 0)
+        {
             return BadRequest("No file uploaded");
+        }
 
         try
         {
             using var reader = new StreamReader(file.OpenReadStream());
             var headerLine = await reader.ReadLineAsync();
-            
-            if (string.IsNullOrEmpty(headerLine))
-                return BadRequest("Empty file");
 
-            // Parse headers - first column is index, second is CRM ID, third is Analysis Method
+            if (string.IsNullOrEmpty(headerLine))
+            {
+                return BadRequest("Empty file");
+            }
+
             var headers = ParseCsvLine(headerLine);
-            var elementColumns = headers.Skip(3).ToList(); // Skip index, CRM ID, Analysis Method
+            var elementColumns = headers.Skip(3).ToList(); 
 
             var crmRecords = new List<CrmData>();
-            var lineNumber = 1;
             string? line;
 
             while ((line = await reader.ReadLineAsync()) != null)
             {
-                lineNumber++;
-
                 if (string.IsNullOrWhiteSpace(line))
+                {
                     continue;
+                }
 
                 var values = ParseCsvLine(line);
-                
+
                 if (values.Count < 3)
+                {
                     continue;
+                }
 
                 var crmId = values[1]?.Trim() ?? "";
                 var analysisMethod = values[2]?.Trim() ?? "";
 
                 if (string.IsNullOrEmpty(crmId))
+                {
                     continue;
+                }
 
-                // Determine type: OREAS if starts with "OREAS", otherwise CRM
                 var type = crmId.StartsWith("OREAS", StringComparison.OrdinalIgnoreCase) ? "OREAS" : "CRM";
 
-                // Build element values dictionary
                 var elementValues = new Dictionary<string, double>();
                 for (int i = 3; i < values.Count && i - 3 < elementColumns.Count; i++)
                 {
@@ -90,10 +104,8 @@ public class CrmImportController : ControllerBase
                 crmRecords.Add(crmData);
             }
 
-            // Clear existing data
             await _db.CrmData.ExecuteDeleteAsync();
 
-            // Insert new data
             await _db.CrmData.AddRangeAsync(crmRecords);
             await _db.SaveChangesAsync();
 
@@ -116,24 +128,32 @@ public class CrmImportController : ControllerBase
     }
 
     /// <summary>
-    /// Import CRM data from file path on server
+    /// Imports CRM data from a CSV file located at a specific path on the server.
     /// </summary>
+    /// <param name="request">The request containing the file path.</param>
+    /// <returns>The result of the import operation.</returns>
     [HttpPost("import-from-path")]
     public async Task<IActionResult> ImportCrmFromPath([FromBody] ImportFromPathRequest request)
     {
         if (string.IsNullOrEmpty(request?.FilePath))
+        {
             return BadRequest("File path is required");
+        }
 
         if (!System.IO.File.Exists(request.FilePath))
+        {
             return NotFound($"File not found: {request.FilePath}");
+        }
 
         try
         {
             using var reader = new StreamReader(request.FilePath);
             var headerLine = await reader.ReadLineAsync();
-            
+
             if (string.IsNullOrEmpty(headerLine))
+            {
                 return BadRequest("Empty file");
+            }
 
             var headers = ParseCsvLine(headerLine);
             var elementColumns = headers.Skip(3).ToList();
@@ -143,20 +163,25 @@ public class CrmImportController : ControllerBase
 
             while ((line = await reader.ReadLineAsync()) != null)
             {
-
                 if (string.IsNullOrWhiteSpace(line))
+                {
                     continue;
+                }
 
                 var values = ParseCsvLine(line);
-                
+
                 if (values.Count < 3)
+                {
                     continue;
+                }
 
                 var crmId = values[1]?.Trim() ?? "";
                 var analysisMethod = values[2]?.Trim() ?? "";
 
                 if (string.IsNullOrEmpty(crmId))
+                {
                     continue;
+                }
 
                 var type = crmId.StartsWith("OREAS", StringComparison.OrdinalIgnoreCase) ? "OREAS" : "CRM";
 
@@ -183,7 +208,6 @@ public class CrmImportController : ControllerBase
                 crmRecords.Add(crmData);
             }
 
-            // Clear existing and insert new
             await _db.CrmData.ExecuteDeleteAsync();
             await _db.CrmData.AddRangeAsync(crmRecords);
             await _db.SaveChangesAsync();
@@ -207,18 +231,22 @@ public class CrmImportController : ControllerBase
     }
 
     /// <summary>
-    /// Get all CRM data (for import verification)
+    /// Retrieves all CRM data, optionally filtered by type.
     /// </summary>
+    /// <param name="type">The type of CRM to filter by (optional).</param>
+    /// <returns>A list of all matching CRM records.</returns>
     [HttpGet("all")]
     public async Task<IActionResult> GetAll([FromQuery] string? type = null)
     {
         var query = _db.CrmData.AsQueryable();
-        
+
         if (!string.IsNullOrEmpty(type))
+        {
             query = query.Where(c => c.Type == type);
+        }
 
         var data = await query.OrderBy(c => c.CrmId).ToListAsync();
-        
+
         return Ok(new
         {
             success = true,
@@ -236,8 +264,9 @@ public class CrmImportController : ControllerBase
     }
 
     /// <summary>
-    /// Get CRM statistics
+    /// Retrieves statistical information about the stored CRM data.
     /// </summary>
+    /// <returns>Statistics including total count, count by type, and number of unique analysis methods.</returns>
     [HttpGet("stats")]
     public async Task<IActionResult> GetStats()
     {
@@ -282,8 +311,14 @@ public class CrmImportController : ControllerBase
         return result;
     }
 
+    /// <summary>
+    /// Request model for importing CRM data from a file path.
+    /// </summary>
     public class ImportFromPathRequest
     {
+        /// <summary>
+        /// Gets or sets the absolute file path of the CSV file.
+        /// </summary>
         public string? FilePath { get; set; }
     }
 }

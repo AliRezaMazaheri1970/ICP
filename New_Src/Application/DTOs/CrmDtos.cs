@@ -1,14 +1,14 @@
 namespace Application.DTOs;
 
 /// <summary>
-/// Represents a CRM list item data transfer object.
+/// Represents a CRM (Certified Reference Material) list item for display and selection purposes.
 /// </summary>
-/// <param name="Id">The unique, internal identifier of the CRM.</param>
-/// <param name="CrmId">The official CRM identifier (e.g. OREAS #).</param>
-/// <param name="AnalysisMethod">The analysis method used.</param>
-/// <param name="Type">The type category of the CRM.</param>
-/// <param name="IsOurOreas">Indicates if this is a frequently used CRM.</param>
-/// <param name="Elements">The dictionary of element concentrations.</param>
+/// <param name="Id">The internal database identifier for this CRM record.</param>
+/// <param name="CrmId">The official identifier or code of the CRM (e.g., "OREAS 24c").</param>
+/// <param name="AnalysisMethod">The specific analytical method used for certification (e.g., "4-Acid").</param>
+/// <param name="Type">The general category or type of the CRM.</param>
+/// <param name="IsOurOreas">Indicates whether this CRM is part of the frequently used or internal standard set (previously "IsOurOreas").</param>
+/// <param name="Elements">A dictionary of element concentrations defined for this CRM.</param>
 public record CrmListItemDto(
     int Id,
     string CrmId,
@@ -19,12 +19,12 @@ public record CrmListItemDto(
 );
 
 /// <summary>
-/// Represents the result of a comparison between project data and a CRM.
+/// Contains the results of comparing project data against a specific CRM standard.
 /// </summary>
-/// <param name="SolutionLabel">The sample solution label.</param>
-/// <param name="CrmId">The ID of the CRM being compared against.</param>
-/// <param name="AnalysisMethod">The analysis method of the CRM.</param>
-/// <param name="Differences">List of differences per element.</param>
+/// <param name="SolutionLabel">The solution label from the project data.</param>
+/// <param name="CrmId">The identifier of the CRM standard used for comparison.</param>
+/// <param name="AnalysisMethod">The analysis method associated with the CRM.</param>
+/// <param name="Differences">A list of differences for each element comparing the measured value to the CRM certified value.</param>
 public record CrmDiffResultDto(
     string SolutionLabel,
     string CrmId,
@@ -33,13 +33,13 @@ public record CrmDiffResultDto(
 );
 
 /// <summary>
-/// Represents the difference calculation for a single element.
+/// Represents the calculated difference for a single chemical element between a measured value and a CRM standard.
 /// </summary>
-/// <param name="Element">The element symbol.</param>
-/// <param name="ProjectValue">The value measured in the project.</param>
-/// <param name="CrmValue">The certified value from the CRM.</param>
-/// <param name="DiffPercent">The difference percentage.</param>
-/// <param name="IsInRange">Indicates if the difference is within acceptable limits.</param>
+/// <param name="Element">The chemical symbol of the element.</param>
+/// <param name="ProjectValue">The value measured in the project sample.</param>
+/// <param name="CrmValue">The certified reference value from the CRM.</param>
+/// <param name="DiffPercent">The calculated percentage difference between the project value and the CRM value.</param>
+/// <param name="IsInRange">Indicates whether the calculated difference falls within the specified acceptance tolerance.</param>
 public record ElementDiffDto(
     string Element,
     decimal? ProjectValue,
@@ -49,12 +49,12 @@ public record ElementDiffDto(
 );
 
 /// <summary>
-/// Represents a request to calculate CRM differences.
+/// Represents a request to calculate the differences between project samples and known CRM standards.
 /// </summary>
-/// <param name="ProjectId">The project identifier.</param>
-/// <param name="MinDiffPercent">The lower bound for acceptable difference percentage.</param>
-/// <param name="MaxDiffPercent">The upper bound for acceptable difference percentage.</param>
-/// <param name="CrmPatterns">Optional list of patterns to match CRM IDs.</param>
+/// <param name="ProjectId">The unique identifier of the project to analyze.</param>
+/// <param name="MinDiffPercent">The minimum percentage difference to consider acceptable (negative value for lower bound). Defaults to -12%.</param>
+/// <param name="MaxDiffPercent">The maximum percentage difference to consider acceptable. Defaults to 12%.</param>
+/// <param name="CrmPatterns">An optional list of string patterns used to identify which samples are CRMs (e.g., "OREAS").</param>
 public record CrmDiffRequest(
     Guid ProjectId,
     decimal MinDiffPercent = -12m,
@@ -63,13 +63,13 @@ public record CrmDiffRequest(
 );
 
 /// <summary>
-/// Represents a request to create or update a CRM record.
+/// Represents a request to create a new CRM record or update an existing one.
 /// </summary>
-/// <param name="CrmId">The official CRM identifier.</param>
-/// <param name="AnalysisMethod">The analysis method.</param>
-/// <param name="Type">The CRM category.</param>
-/// <param name="Elements">The element concentrations.</param>
-/// <param name="IsOurOreas">Flag for frequently used CRMs.</param>
+/// <param name="CrmId">The official identifier code for the CRM.</param>
+/// <param name="AnalysisMethod">The analytical method applicable to this CRM.</param>
+/// <param name="Type">The category or classification of the CRM.</param>
+/// <param name="Elements">A dictionary mapping element symbols to their certified concentration values.</param>
+/// <param name="IsOurOreas">Indicates if this is a commonly used internal standard.</param>
 public record CrmUpsertRequest(
     string CrmId,
     string? AnalysisMethod,
@@ -79,13 +79,13 @@ public record CrmUpsertRequest(
 );
 
 /// <summary>
-/// Represents a generic paginated result.
+/// Represents a generic container for paginated query results.
 /// </summary>
-/// <typeparam name="T">The type of items in the result.</typeparam>
-/// <param name="Items">The list of items on the current page.</param>
-/// <param name="TotalCount">The total number of items available.</param>
+/// <typeparam name="T">The type of item contained in the result list.</typeparam>
+/// <param name="Items">The collection of items for the current page.</param>
+/// <param name="TotalCount">The total number of items available across all pages.</param>
 /// <param name="Page">The current page number.</param>
-/// <param name="PageSize">The size of the page.</param>
+/// <param name="PageSize">The number of items per page.</param>
 public record PaginatedResult<T>(
     List<T> Items,
     int TotalCount,

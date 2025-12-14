@@ -3,14 +3,12 @@ using System.Text.RegularExpressions;
 
 namespace Application.DTOs;
 
-#region Request DTOs
-
 /// <summary>
-/// Represents a request to identify samples with weights outside an expected range.
+/// Represents a request to identify samples where the measured weight falls outside the specified acceptable range.
 /// </summary>
-/// <param name="ProjectId">The project identifier.</param>
-/// <param name="WeightMin">The minimum acceptable weight.</param>
-/// <param name="WeightMax">The maximum acceptable weight.</param>
+/// <param name="ProjectId">The unique identifier of the project to inspect.</param>
+/// <param name="WeightMin">The minimum acceptable weight value (inclusive). Defaults to 0.09.</param>
+/// <param name="WeightMax">The maximum acceptable weight value (inclusive). Defaults to 0.11.</param>
 public record FindBadWeightsRequest(
     Guid ProjectId,
     decimal WeightMin = 0.09m,
@@ -18,22 +16,22 @@ public record FindBadWeightsRequest(
 );
 
 /// <summary>
-/// Represents a request to identify samples with volumes differing from the expected value.
+/// Represents a request to identify samples where the volume deviates from the expected standard.
 /// </summary>
-/// <param name="ProjectId">The project identifier.</param>
-/// <param name="ExpectedVolume">The expected volume value.</param>
+/// <param name="ProjectId">The unique identifier of the project to inspect.</param>
+/// <param name="ExpectedVolume">The expected volume value for valid samples. Defaults to 10.</param>
 public record FindBadVolumesRequest(
     Guid ProjectId,
     decimal ExpectedVolume = 10m
 );
 
 /// <summary>
-/// Represents a request to find empty or outlier rows based on element averages.
+/// Represents a request to find rows that appear to be empty or contain outlier data based on element analysis.
 /// </summary>
-/// <param name="ProjectId">The project identifier.</param>
-/// <param name="ThresholdPercent">The percentage threshold for outlier detection.</param>
-/// <param name="ElementsToCheck">Optional list of specific elements to check.</param>
-/// <param name="RequireAllElements">Whether all checked elements must be below threshold to flag the row.</param>
+/// <param name="ProjectId">The unique identifier of the project to inspect.</param>
+/// <param name="ThresholdPercent">The percentage of the average value below which a reading is considered low. Defaults to 70%.</param>
+/// <param name="ElementsToCheck">An optional list of specific elements to analyze. If null, all available elements are checked.</param>
+/// <param name="RequireAllElements">If true, a row is flagged only if ALL checked elements are below the threshold. If false, ANY element below threshold triggers a flag.</param>
 public record FindEmptyRowsRequest(
     Guid ProjectId,
     decimal ThresholdPercent = 70m,
@@ -42,12 +40,12 @@ public record FindEmptyRowsRequest(
 );
 
 /// <summary>
-/// Represents a request to apply a weight correction to specific samples.
+/// Represents a request to apply a new weight value to a specific set of samples.
 /// </summary>
-/// <param name="ProjectId">The project identifier.</param>
-/// <param name="SolutionLabels">The list of sample labels to correct.</param>
-/// <param name="NewWeight">The new weight value to apply.</param>
-/// <param name="ChangedBy">The user applying the change.</param>
+/// <param name="ProjectId">The unique identifier of the project containing the samples.</param>
+/// <param name="SolutionLabels">The list of solution labels identifying the samples to update.</param>
+/// <param name="NewWeight">The new weight value to apply to the specified samples.</param>
+/// <param name="ChangedBy">The username or identifier of the user performing this correction.</param>
 public record WeightCorrectionRequest(
     Guid ProjectId,
     List<string> SolutionLabels,
@@ -56,12 +54,12 @@ public record WeightCorrectionRequest(
 );
 
 /// <summary>
-/// Represents a request to apply a volume correction to specific samples.
+/// Represents a request to apply a new volume value to a specific set of samples.
 /// </summary>
-/// <param name="ProjectId">The project identifier.</param>
-/// <param name="SolutionLabels">The list of sample labels to correct.</param>
-/// <param name="NewVolume">The new volume value to apply.</param>
-/// <param name="ChangedBy">The user applying the change.</param>
+/// <param name="ProjectId">The unique identifier of the project containing the samples.</param>
+/// <param name="SolutionLabels">The list of solution labels identifying the samples to update.</param>
+/// <param name="NewVolume">The new volume value to apply to the specified samples.</param>
+/// <param name="ChangedBy">The username or identifier of the user performing this correction.</param>
 public record VolumeCorrectionRequest(
     Guid ProjectId,
     List<string> SolutionLabels,
@@ -70,12 +68,12 @@ public record VolumeCorrectionRequest(
 );
 
 /// <summary>
-/// Represents a request to apply a dilution factor (DF) correction.
+/// Represents a request to update the dilution factor (DF) for a specific set of samples.
 /// </summary>
-/// <param name="ProjectId">The project identifier.</param>
-/// <param name="SolutionLabels">The list of sample labels to correct.</param>
-/// <param name="NewDf">The new dilution factor.</param>
-/// <param name="ChangedBy">The user applying the change.</param>
+/// <param name="ProjectId">The unique identifier of the project containing the samples.</param>
+/// <param name="SolutionLabels">The list of solution labels identifying the samples to update.</param>
+/// <param name="NewDf">The new dilution factor to apply.</param>
+/// <param name="ChangedBy">The username or identifier of the user performing this correction.</param>
 public record DfCorrectionRequest(
     Guid ProjectId,
     List<string> SolutionLabels,
@@ -84,11 +82,11 @@ public record DfCorrectionRequest(
 );
 
 /// <summary>
-/// Represents a request to delete specific rows.
+/// Represents a request to permanently remove specific sample rows from the project.
 /// </summary>
-/// <param name="ProjectId">The project identifier.</param>
-/// <param name="SolutionLabels">The list of sample labels to delete.</param>
-/// <param name="ChangedBy">The user performing the deletion.</param>
+/// <param name="ProjectId">The unique identifier of the project containing the rows.</param>
+/// <param name="SolutionLabels">The list of solution labels identifying the rows to delete.</param>
+/// <param name="ChangedBy">The username or identifier of the user performing the deletion.</param>
 public record DeleteRowsRequest(
     Guid ProjectId,
     List<string> SolutionLabels,
@@ -96,11 +94,11 @@ public record DeleteRowsRequest(
 );
 
 /// <summary>
-/// Represents a request to apply optimization settings (Blank and Scale).
+/// Represents a request to apply optimization settings, such as blank subtraction and scaling, to project data.
 /// </summary>
-/// <param name="ProjectId">The project identifier.</param>
-/// <param name="ElementSettings">The optimization settings per element.</param>
-/// <param name="ChangedBy">The user applying the optimization.</param>
+/// <param name="ProjectId">The unique identifier of the project to optimize.</param>
+/// <param name="ElementSettings">A dictionary mapping element names to their specific blank and scale settings.</param>
+/// <param name="ChangedBy">The username or identifier of the user applying the settings.</param>
 public record ApplyOptimizationRequest(
     Guid ProjectId,
     Dictionary<string, ElementSettings> ElementSettings,
@@ -108,26 +106,22 @@ public record ApplyOptimizationRequest(
 );
 
 /// <summary>
-/// Defines the input parameter for blank and scale settings.
+/// Defines the blank correction and scaling factor for a specific element.
 /// </summary>
-/// <param name="Blank">The blank value adjustment.</param>
-/// <param name="Scale">The scale factor adjustment.</param>
+/// <param name="Blank">The value to be subtracted from the raw reading as a blank correction.</param>
+/// <param name="Scale">The factor by which the result should be scaled.</param>
 public record ElementSettings(
     decimal Blank,
     decimal Scale
 );
 
-#endregion
-
-#region Response DTOs
-
 /// <summary>
-/// Represents information about a sample's dilution factor.
+/// Contains information about the current dilution factor of a specific sample row.
 /// </summary>
-/// <param name="RowNumber">The row index.</param>
-/// <param name="SolutionLabel">The solution label.</param>
-/// <param name="CurrentDf">The current dilution factor.</param>
-/// <param name="SampleType">The type of the sample.</param>
+/// <param name="RowNumber">The sequential row number of the sample.</param>
+/// <param name="SolutionLabel">The label identifying the sample.</param>
+/// <param name="CurrentDf">The currently applied dilution factor.</param>
+/// <param name="SampleType">The classification of the sample (e.g., standard, unknown).</param>
 public record DfSampleDto(
     int RowNumber,
     string SolutionLabel,
@@ -136,13 +130,13 @@ public record DfSampleDto(
 );
 
 /// <summary>
-/// Represents information about a sample flagged for bad weight or volume.
+/// Provides details about a sample that has been flagged for having an incorrect weight or volume.
 /// </summary>
-/// <param name="SolutionLabel">The solution label.</param>
-/// <param name="ActualValue">The actual recorded value.</param>
-/// <param name="CorrCon">The corrected concentration.</param>
-/// <param name="ExpectedValue">The expected value.</param>
-/// <param name="Deviation">The deviation from the expected value.</param>
+/// <param name="SolutionLabel">The label identifying the flagged sample.</param>
+/// <param name="ActualValue">The value (weight or volume) that was actually recorded.</param>
+/// <param name="CorrCon">The corrected concentration calculated using the actual value.</param>
+/// <param name="ExpectedValue">The value that was expected for this sample.</param>
+/// <param name="Deviation">The numerical difference between the actual and expected values.</param>
 public record BadSampleDto(
     string SolutionLabel,
     decimal ActualValue,
@@ -152,15 +146,15 @@ public record BadSampleDto(
 );
 
 /// <summary>
-/// Represents a row identified as potentially empty or an outlier.
+/// Represents a row that has been flagged as potentially empty or an outlier based on statistical analysis.
 /// </summary>
-/// <param name="SolutionLabel">The solution label.</param>
-/// <param name="ElementValues">The raw element values.</param>
-/// <param name="ElementAverages">The computed average values per element.</param>
-/// <param name="PercentOfAverage">The value as a percentage of the average.</param>
-/// <param name="ElementsBelowThreshold">Count of elements below the threshold.</param>
-/// <param name="TotalElementsChecked">Total count of elements checked.</param>
-/// <param name="OverallScore">The calculated outlier score.</param>
+/// <param name="SolutionLabel">The label identifying the sample row.</param>
+/// <param name="ElementValues">A dictionary of raw element values measured for this row.</param>
+/// <param name="ElementAverages">A dictionary of average values for the corresponding elements across the dataset.</param>
+/// <param name="PercentOfAverage">A dictionary showing each element's value as a percentage of the average.</param>
+/// <param name="ElementsBelowThreshold">The count of assessed elements that fell below the specified threshold.</param>
+/// <param name="TotalElementsChecked">The total number of elements that were included in the check.</param>
+/// <param name="OverallScore">A calculated score indicating the severity of the outlier status.</param>
 public record EmptyRowDto(
     string SolutionLabel,
     Dictionary<string, decimal?> ElementValues,
@@ -172,18 +166,18 @@ public record EmptyRowDto(
 )
 {
     /// <summary>
-    /// Gets a safe identifier string suitable for use in HTML IDs.
+    /// Gets a sanitized version of the solution label safe for use as an HTML element identifier.
     /// </summary>
     [JsonIgnore]
     public string SafeId => Regex.Replace(SolutionLabel ?? Guid.NewGuid().ToString(), @"[^a-zA-Z0-9-_]", "_");
 }
 
 /// <summary>
-/// Represents the result of a correction operation.
+/// Summarizes the result of a bulk correction operation.
 /// </summary>
-/// <param name="TotalRows">The total number of rows processed.</param>
-/// <param name="CorrectedRows">The number of rows actually corrected.</param>
-/// <param name="CorrectedSamples">The list of detailed correction info per sample.</param>
+/// <param name="TotalRows">The total number of rows considered for the operation.</param>
+/// <param name="CorrectedRows">The number of rows that were successfully modified.</param>
+/// <param name="CorrectedSamples">A detailed list of the specific samples that were corrected.</param>
 public record CorrectionResultDto(
     int TotalRows,
     int CorrectedRows,
@@ -191,13 +185,13 @@ public record CorrectionResultDto(
 );
 
 /// <summary>
-/// Provides details about a single corrected sample.
+/// Details the changes applied to a single sample during a correction operation.
 /// </summary>
-/// <param name="SolutionLabel">The sample label.</param>
-/// <param name="OldValue">The value before correction.</param>
-/// <param name="NewValue">The value after correction.</param>
-/// <param name="OldCorrCon">The corrected concentration before change.</param>
-/// <param name="NewCorrCon">The corrected concentration after change.</param>
+/// <param name="SolutionLabel">The label of the corrected sample.</param>
+/// <param name="OldValue">The primary value (e.g., weight, DF) before the correction.</param>
+/// <param name="NewValue">The primary value after the correction.</param>
+/// <param name="OldCorrCon">The corrected concentration value before the change.</param>
+/// <param name="NewCorrCon">The corrected concentration value resulting from the change.</param>
 public record CorrectedSampleInfo(
     string SolutionLabel,
     decimal OldValue,
@@ -205,5 +199,3 @@ public record CorrectedSampleInfo(
     decimal OldCorrCon,
     decimal NewCorrCon
 );
-
-#endregion
