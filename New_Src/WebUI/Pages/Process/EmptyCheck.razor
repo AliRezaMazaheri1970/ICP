@@ -23,10 +23,10 @@
 
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
     <MudPaper Elevation="0" Class="pa-4 mb-4 custom-card-all">
-        <div class="d-flex justify-space-between align-center">
-            <div>
-                <MudText Typo="Typo.h4" Class="fw-bold">Empty Check</MudText>
-                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+        <div class="justify-space-between align-center">
+            <div class="mb-4">
+                <MudText Typo="Typo.h4" Class="fw-bold h4-title">Empty Check</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary p-description">
                     @if (!string.IsNullOrEmpty(_projectName))
                     {
                         <span>Project: <strong>@_projectName</strong> | </span>

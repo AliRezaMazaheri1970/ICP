@@ -16,6 +16,9 @@
     .btn-change-export {
         flex-wrap: wrap;
     }
+    .table-weight {
+        min-width: 100%;
+    }
    
 }
 

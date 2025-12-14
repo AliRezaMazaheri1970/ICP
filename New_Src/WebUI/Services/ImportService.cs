@@ -12,7 +12,7 @@ namespace WebUI.Services;
 public class PreviewResult
 {
     [JsonPropertyName("detectedFormat")]
-    public int DetectedFormat { get; set; }
+    public string DetectedFormat { get; set; }
 
     [JsonPropertyName("totalRows")]
     public int TotalRows { get; set; }
