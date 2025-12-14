@@ -154,7 +154,9 @@
                               Striped="true"
                               Dense="true"
                               FixedHeader="true"
-                              Height="570px"
+                              Breakpoint="Breakpoint.None" HorizontalScrollbar="true" Class="table-weight"
+                              Height="380px"
+                              RowsPerPage="@_pageSize"
                               Loading="_isLoading">
                         <HeaderContent>
                             <MudTh Style="position: sticky; left: 0; background: var(--mud-palette-surface); z-index: 1;">
@@ -196,7 +198,7 @@
                             }
                             @foreach (var col in _displayColumns)
                             {
-                                <MudTd Style="text-align: right;">
+                                <MudTd Style="text-align: left;">
                                     @if (context.Values.TryGetValue(col, out var val) && val.HasValue)
                                     {
                                         @val.Value.ToString($"F{_decimalPlaces}")
@@ -262,19 +264,30 @@
         z-index: 9999;
     }
 
+    .mud-table-dense * .mud-table-row .mud-table-cell,
+    .mud-table-dense * .mud-table-row .mud-table-cell div {
+        /* جلوگیری از شکستن متن و تضمین اینکه عرض بر اساس محتوا باشد */
+        white-space: nowrap;
+        padding: 10px;
+    }
+
     .mud-simple-table table {
         width: 100%;
         display: table;
         border-spacing: 0;
         border-collapse: collapse;
-        height: 400px;
+        /* حذف ارتفاع ثابت (مانند 400px) */
+        /* height: 400px; */
+        /* تنظیم خودکار عرض جدول بر اساس محتوای ستون‌ها */
+        table-layout: auto !important;
         overflow: scroll;
     }
 
     .mud-table-dense * .mud-table-row .mud-table-cell {
-        padding: 0px 15px 0px 16px;
-        padding-inline-start: 16px;
-        padding-inline-end: 24px;
+        padding: 4px 7px 4px 8px;
+        padding-inline-start: 8px;
+        padding-inline-end: 12px;
+        white-space: nowrap;
     }
 
     .mud-table {
@@ -282,7 +295,7 @@
         background-color: var(--mud-palette-surface);
         border-radius: var(--mud-default-borderradius);
         transition: box-shadow 300ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;
-        height: 550px;
+        height: 500px;
         overflow: scroll;
     }
 </style>
