@@ -23,8 +23,8 @@
     <MudPaper Elevation="0" Class="pa-4 mb-4 custom-card-all">
         <div class="d-flex justify-space-between align-center flex-wrap gap-4">
             <div>
-                <MudText Typo="Typo.h4" Class="fw-bold">Pivot Table</MudText>
-                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                <MudText Typo="Typo.h4" Class="fw-bold h4-title">Pivot Table</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary p-description">
                     @if (_projectName != null)
                     {
                         <span>Project: <strong>@_projectName</strong></span>
@@ -217,6 +217,7 @@
                                            Label="Per Page"
                                            Variant="Variant.Outlined"
                                            Dense="true"
+                                           Class="perpage-pivot"
                                            Style="width: 100px;">
                                     <MudSelectItem Value="10">10</MudSelectItem>
                                     <MudSelectItem Value="20">20</MudSelectItem>

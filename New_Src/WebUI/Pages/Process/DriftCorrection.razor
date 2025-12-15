@@ -191,7 +191,9 @@
                         <MudTable Items="@GetPagedElementDrifts()"
                                   Hover="true"
                                   Dense="true"
-                                  FixedHeader="true">
+                                  FixedHeader="true"
+                                  Breakpoint="Breakpoint.None"
+                                  HorizontalScrollbar="true">
 
                             <HeaderContent>
                                 <MudTh>Element</MudTh>
@@ -236,7 +238,7 @@
                         @* Pagination for element drift table *@
                         @if (_totalCount > 0)
                         {
-                            <div class="d-flex justify-center align-center mt-4 gap-4">
+                            <div class="d-flex justify-center align-center mt-4 gap-4 change-flex-item">
                                 <MudSelect T="int"
                                            Value="_pageSize"
                                            ValueChanged="OnPageSizeChanged"
@@ -272,7 +274,9 @@
                                 <MudExpansionPanel Text="Corrected Data Preview">
                                     <MudTable Items="@_analysisResult.CorrectedData.Take(20)"
                                               Hover="true"
-                                              Dense="true">
+                                              Dense="true"
+                                              Breakpoint="Breakpoint.None"
+                                              HorizontalScrollbar="true">
                                         <HeaderContent>
                                             <MudTh>Sample</MudTh>
                                             <MudTh>Segment</MudTh>
@@ -332,6 +336,10 @@
         padding: 0px 15px 1px 16px;
         padding-inline-start: 16px;
         padding-inline-end: 24px;
+    }
+
+    .mud-table-cell {
+        white-space: nowrap; /* جلوگیری از شکستن متن در سلول‌ها */
     }
 
     .mud-table {

@@ -1,4 +1,4 @@
-@page "/process/crm"
+﻿@page "/process/crm"
 @using WebUI.Services
 @inject ProjectService ProjectService
 @inject OptimizationService OptimizationService
@@ -161,28 +161,28 @@
                     else
                     {
                         @* Summary Cards *@
-                        <MudGrid Class="mb-4">
-                            <MudItem xs="6" sm="3">
+                        <MudGrid Class="mb-4 ">
+                            <MudItem xs="12" sm="6" md="3">
                                 <MudPaper Elevation="0" Class="pa-3 text-center custom-card-all" Style="background: var(--mud-palette-info-lighten);">
-                                    <MudText Typo="Typo.h4" Color="Color.Info">@_result.TotalRmSamples</MudText>
-                                    <MudText Typo="Typo.caption">RM Samples</MudText>
+                                    <MudText Typo="Typo.h4" Color="Color.Dark" Class="count-result-crm">@_result.TotalRmSamples</MudText>
+                                    <MudText Typo="Typo.caption"> RM Samples</MudText>
                                 </MudPaper>
                             </MudItem>
-                            <MudItem xs="6" sm="3">
+                            <MudItem xs="12" sm="6" md="3">
                                 <MudPaper Elevation="0" Class="pa-3 text-center custom-card-all" Style="background: var(--mud-palette-warning-lighten);">
-                                    <MudText Typo="Typo.h4" Color="Color.Warning">@_result.PassedBefore</MudText>
+                                    <MudText Typo="Typo.h4" Color="Color.Dark">@_result.PassedBefore</MudText>
                                     <MudText Typo="Typo.caption">Passed Before</MudText>
                                 </MudPaper>
                             </MudItem>
-                            <MudItem xs="6" sm="3">
+                            <MudItem xs="12" sm="6" md="3">
                                 <MudPaper Elevation="0" Class="pa-3 text-center custom-card-all" Style="background: var(--mud-palette-success-lighten);">
-                                    <MudText Typo="Typo.h4" Color="Color.Success">@_result.PassedAfter</MudText>
+                                    <MudText Typo="Typo.h4" Color="Color.Dark">@_result.PassedAfter</MudText>
                                     <MudText Typo="Typo.caption">Passed After</MudText>
                                 </MudPaper>
                             </MudItem>
-                            <MudItem xs="6" sm="3">
+                            <MudItem xs="12" sm="6" md="3">
                                 <MudPaper Elevation="0" Class="pa-3 text-center custom-card-all" Style="background: var(--mud-palette-secondary-lighten);">
-                                    <MudText Typo="Typo.h4" Color="Color.Secondary">
+                                    <MudText Typo="Typo.h4" Color="Color.Dark">
                                         @(_result.ImprovementPercent > 0 ? "+" : "")@_result.ImprovementPercent.ToString("F1")%
                                     </MudText>
                                     <MudText Typo="Typo.caption">Improvement</MudText>
@@ -196,6 +196,8 @@
                                   Hover="true"
                                   Dense="true"
                                   FixedHeader="true"
+                                  Breakpoint="Breakpoint.None"
+                                  HorizontalScrollbar="true"
                                   Height="350px">
                             <HeaderContent>
                                 <MudTh>Element</MudTh>
@@ -240,7 +242,9 @@
                                 <MudExpansionPanel Text="Optimized Sample Details" @bind-Expanded="_detailsExpanded">
                                     <MudTable Items="@_result.OptimizedData.Take(50)"
                                               Hover="true"
-                                              Dense="true">
+                                              Dense="true"
+                                              Breakpoint="Breakpoint.None"
+                                              HorizontalScrollbar="true">
                                         <HeaderContent>
                                             <MudTh>Sample</MudTh>
                                             <MudTh>CRM</MudTh>
@@ -311,6 +315,10 @@
         padding: 0px 15px 0px 16px;
         padding-inline-start: 16px;
         padding-inline-end: 24px;
+    }
+
+    .mud-table-cell {
+        white-space: nowrap; /* جلوگیری از شکستن متن در سلول‌ها */
     }
 
     .mud-table {

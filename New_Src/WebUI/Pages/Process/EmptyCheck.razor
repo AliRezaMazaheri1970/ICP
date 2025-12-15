@@ -127,7 +127,7 @@
                                 {
                                     <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
                                 }
-                                🗑️ DELETE ALL (@_totalCount)
+                                DELETE ALL (@_totalCount)
                             </MudButton>
 
                             <MudDivider Class="my-2" />
@@ -210,6 +210,8 @@
                                   Dense="true"
                                   FixedHeader="true"
                                   T="EmptyRowDto"
+                                  Breakpoint="Breakpoint.None"
+                                  HorizontalScrollbar="true"
                                   OnRowClick="@((args) => { if (args.Item != null) SelectRow(args.Item); })">
                             <HeaderContent>
                                 <MudTh><MudCheckBox T="bool" Value="@IsAllSelectedOnPage()" ValueChanged="@((bool val) => ToggleSelectAllOnPage(val))" /></MudTh>
@@ -269,7 +271,7 @@
                         </MudTable>
 
                         @* Pagination *@
-                        <div class="d-flex justify-center align-center mt-4 gap-4">
+                        <div class="d-flex justify-center align-center mt-4 gap-4 change-flex-item">
                             <MudSelect T="int" Value="_pageSize" ValueChanged="OnPageSizeChanged"
                                        Label="Per Page" Variant="Variant.Outlined" Dense="true" Style="width: 100px;">
                                 <MudSelectItem Value="10">10</MudSelectItem>
@@ -300,7 +302,9 @@
                                     <MudText Typo="Typo.subtitle2" Class="mb-2">
                                         Selected: <strong>@_selectedEmpty.SolutionLabel</strong>
                                     </MudText>
-                                    <MudSimpleTable Dense="true" Style="height:180px; overflow:scroll;">
+                                    <MudSimpleTable Breakpoint="Breakpoint.None"
+                                                    HorizontalScrollbar="true"
+                                        Dense="true" Style="height:180px; overflow:scroll;">
                                         <thead>
                                             <tr>
                                                 <th>Element</th>
@@ -366,6 +370,10 @@
         padding: 0px 15px 0px 16px;
         padding-inline-start: 16px;
         padding-inline-end: 24px;
+    }
+
+    .mud-table-cell {
+        white-space: nowrap; /* جلوگیری از شکستن متن در سلول‌ها */
     }
 
     .mud-table {

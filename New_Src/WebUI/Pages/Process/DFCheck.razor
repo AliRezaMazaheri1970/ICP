@@ -166,8 +166,10 @@
                         <MudTable Items="@_pagedBadSamples"
                                   Hover="true"
                                   Dense="true"
-                                  Class="box-shadow-0"
-                                  FixedHeader="true">
+                                  Class="box-shadow-0 table-weight"
+                                  FixedHeader="true"
+                                  Breakpoint="Breakpoint.None"
+                                  HorizontalScrollbar="true">
                             <HeaderContent>
                                 <MudTh>Row</MudTh>
                                 <MudTh>Solution Label</MudTh>
@@ -205,7 +207,7 @@
 
                         @* ✅ اضافه کردن کنترل‌های صفحه‌بندی *@
                         <MudDivider Class="my-4" />
-                        <div class="d-flex justify-center align-center gap-4">
+                        <div class="d-flex justify-center align-center gap-4 change-flex-item">
                             <MudSelect T="int" Value="_pageSize" ValueChanged="OnPageSizeChanged"
                                        Label="Per Page" Variant="Variant.Outlined" Dense="true" Style="width: 100px;">
                                 <MudSelectItem Value="10">10</MudSelectItem>
@@ -241,10 +243,12 @@
                                 @bind-Expanded="_detailsExpanded">
                                 <MudTable Items="@_allSamples.Take(100)"
                                           Hover="true"
-                                          Class="box-shadow-0"
+                                          Class="box-shadow-0 table-weight"
                                           Dense="true"
                                           FixedHeader="true"
-                                          Style="height:180px">
+                                          Style="height:170px"
+                                          Breakpoint="Breakpoint.None"
+                                          HorizontalScrollbar="true">
                                     <HeaderContent>
                                         <MudTh>Row</MudTh>
                                         <MudTh>Solution Label</MudTh>
@@ -307,6 +311,9 @@
         padding: 0px 15px 0px 16px;
         padding-inline-start: 16px;
         padding-inline-end: 24px;
+    }
+    .mud-table-cell {
+        white-space: nowrap; /* جلوگیری از شکستن متن در سلول‌ها */
     }
 
     .mud-table {

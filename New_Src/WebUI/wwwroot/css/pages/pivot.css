@@ -3,10 +3,7 @@
    =================================== */
 
 @media (max-width: 768px) {
-/*    .back-to-dashboard{
-        flex-direction:row;
-        font-size:.7rem;
-    }*/
+
 }
 
 @media (max-width: 600px) {
@@ -24,4 +21,12 @@
 
 @media (max-width: 380px) {
   
+}
+@media (max-width: 375px) {
+    .mud-table .mud-table-pagination .mud-select {
+        margin-left: 0;
+        margin-right: 0;
+        margin-inline-start: 0;
+        margin-inline-end: 0;
+    }
 }

@@ -124,7 +124,7 @@
             </MudItem>
 
             <MudItem xs="12" md="8" Class="">
-                <MudPaper Elevation="0" Class="pa-4 custom-card-all" Height="630px">
+                <MudPaper Elevation="0" Class="pa-4 custom-card-all " >
 
                     <div class="d-flex justify-space-between align-center mb-4">
 
@@ -165,7 +165,8 @@
                         <MudTable Items="@_pagedRows"
                                   Hover="true"
                                   Dense="true"
-                                  Breakpoint="Breakpoint.None" HorizontalScrollbar="true" Class="table-weight"
+                                  Breakpoint="Breakpoint.None" HorizontalScrollbar="true"
+                                  
                                   MultiSelection="true"
                                   @bind-SelectedItems="_selectedSamples"
                                   SelectOnRowClick="true">
@@ -296,7 +297,7 @@
     }
 
     .mud-table-dense * .mud-table-row .mud-table-cell {
-        padding: 2px 15px 2px 16px;
+        padding: 0px 15px 0px 16px;
         padding-inline-start: 16px;
         padding-inline-end: 24px;
     }
