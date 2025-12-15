@@ -83,7 +83,22 @@ justify-space-between align-center">
 
                     @if (_badSamples != null && _badSamples.Any())
                     {
-
+                        <div class="d-flex justify-center mt-4 gap-2">
+                            <MudButton Variant="Variant.Outlined"
+                                       Size="Size.Small"
+                                       Color="Color.Warning"
+                                       OnClick="SelectAll"
+                                       Class="flex-grow-1">
+                                Select All
+                            </MudButton>
+                            <MudButton Variant="Variant.Outlined"
+                                       Size="Size.Small"
+                                       Color="Color.Warning"
+                                       OnClick="ClearSelection"
+                                       Class="flex-grow-1">
+                                Clear Selection
+                            </MudButton>
+                        </div>
                         <MudDivider Class="my-4" />
 
                         <MudNumericField @bind-Value="_newVolume"
