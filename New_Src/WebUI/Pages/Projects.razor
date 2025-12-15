@@ -54,7 +54,7 @@
                 <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
             </div>
         }
-        else if (_projects == null || !_projects.Any())
+        else if (_allProjects == null || !_allProjects.Any())
         {
             <MudAlert Severity="Severity.Info" Class="my-4">
                 <div class="d-flex align-center gap-2">
@@ -65,7 +65,7 @@
         }
         else
         {
-            <MudTable Items="@_projects"
+            <MudTable Items="@_pagedProjects"
                       Hover="true"
                       Striped="true"
                       Dense="true"
@@ -203,7 +203,12 @@
 </style>
 
 @code {
-    private List<ProjectDto>? _projects;
+    // private List<ProjectDto>? _projects;
+    private List<ProjectDto> _allProjects = new();
+
+    // لیستی که فقط پروژه‌های صفحه جاری را نگه می‌دارد (مثل _pagedRows در WeightCheck)
+    private List<ProjectDto> _pagedProjects = new();
+
     private bool _isLoading = true;
     private string _searchText = "";
 
@@ -224,22 +229,48 @@
         _isLoading = true;
         StateHasChanged();
 
-        var result = await ProjectService.GetProjectsAsync(_currentPage, _pageSize, _searchText);
+        // نکته مهم: اینجا درخواست تعداد بسیار زیاد (مثل 10000) می‌دهیم تا "همه" پروژه‌ها را بگیریم
+        // چون می‌خواهیم صفحه‌بندی را سمت کلاینت انجام دهیم
+        var result = await ProjectService.GetProjectsAsync(1, 10000, _searchText);
 
         if (result.Succeeded && result.Data != null)
         {
-            _projects = result.Data.Items;
-            // ✅ دریافت تعداد کل آیتم‌ها از سرور برای محاسبه صفحات
-            _totalItems = result.Data.TotalCount;
+            // ذخیره همه پروژه‌ها در لیست اصلی
+            _allProjects = result.Data.Items ?? new List<ProjectDto>();
+
+            // محاسبه تعداد کل بر اساس لیستی که گرفتیم (نه چیزی که سرور می‌گوید)
+            _totalItems = _allProjects.Count;
+
+            // اگر سرچ شده بود، فیلتر سمت کلاینت هم اعمال شود (اختیاری)
+            if (!string.IsNullOrWhiteSpace(_searchText))
+            {
+                _allProjects = _allProjects
+                   .Where(p => p.ProjectName.Contains(_searchText, StringComparison.OrdinalIgnoreCase))
+                   .ToList();
+                _totalItems = _allProjects.Count;
+            }
         }
         else
         {
             Snackbar.Add(result.Message ?? "Failed to load projects", Severity.Error);
-            _projects = new List<ProjectDto>();
+            _allProjects = new List<ProjectDto>();
             _totalItems = 0;
         }
 
+        // به‌روزرسانی لیست نمایشی (صفحه اول)
+        _currentPage = 1;
+        UpdatePagedProjects();
+
         _isLoading = false;
+    }
+
+
+    private void UpdatePagedProjects()
+    {
+        _pagedProjects = _allProjects
+            .Skip((_currentPage - 1) * _pageSize)
+            .Take(_pageSize)
+            .ToList();
     }
 
     private async Task ReloadProjects()
@@ -250,7 +281,7 @@
 
     private async Task SearchProjects()
     {
-        _currentPage = 1;
+        // _currentPage = 1;
         await LoadProjects();
     }
 
@@ -258,15 +289,17 @@
     private async Task OnPageChanged(int page)
     {
         _currentPage = page;
-        await LoadProjects();
+        UpdatePagedProjects();
+        StateHasChanged();
     }
 
     // ✅ متد تغییر تعداد آیتم در صفحه
     private async Task OnPageSizeChanged(int size)
     {
         _pageSize = size;
-        _currentPage = 1; // بازگشت به صفحه اول هنگام تغییر سایز
-        await LoadProjects();
+        _currentPage = 1;
+        UpdatePagedProjects();
+        StateHasChanged();
     }
 
     private void OpenProject(ProjectDto project)
@@ -299,12 +332,7 @@
             if (deleteResult.Succeeded)
             {
                 Snackbar.Add($"Project '{project.ProjectName}' deleted", Severity.Success);
-                // اگر در صفحه آخر بودیم و همه آیتم‌های آن صفحه حذف شدند، به صفحه قبل برگردیم
-                if (_projects?.Count == 1 && _currentPage > 1)
-                {
-                    _currentPage--;
-                }
-                await LoadProjects();
+                await LoadProjects(); // لود مجدد لیست
             }
             else
             {
