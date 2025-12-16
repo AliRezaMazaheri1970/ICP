@@ -142,7 +142,7 @@
             </MudItem>
 
             @* Results Panel *@
-            <MudItem xs="12" md="9" Class="fixed-header-table">
+            <MudItem xs="12" md="9" >
                 <MudPaper Elevation="0" Class="pa-4 custom-card-all">
                     @if (!_badDfSamples.Any() && !_isLoading)
                     {
@@ -168,6 +168,7 @@
                                   Dense="true"
                                   Class="box-shadow-0 table-weight"
                                   FixedHeader="true"
+                                  Height="360px"
                                   Breakpoint="Breakpoint.None"
                                   HorizontalScrollbar="true">
                             <HeaderContent>
@@ -246,6 +247,7 @@
                                           Class="box-shadow-0 table-weight"
                                           Dense="true"
                                           FixedHeader="true"
+                                          Height="175px"
                                           Breakpoint="Breakpoint.None"
                                           HorizontalScrollbar="true">
                                     <HeaderContent>
@@ -315,35 +317,16 @@
         white-space: nowrap; /* جلوگیری از شکستن متن در سلول‌ها */
     }
 
-    /* .mud-table {
+     .mud-table {
         color: var(--mud-palette-text-primary);
         background-color: var(--mud-palette-surface);
         border-radius: var(--mud-default-borderradius);
         transition: box-shadow 300ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;
-        height: 360px;
-        overflow: scroll;
+        /* height: 360px;
+        overflow: scroll; */
     }
-     */
-    .fixed-header-table .mud-table {
-        /* حذف ارتفاع و اسکرول از کل کامپوننت MudTable */
-        height: auto;
-        overflow: scroll;
-        border-radius: var(--mud-default-borderradius);
-        transition: box-shadow 300ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;
-    }
-
-    .fixed-header-table .mud-table-container {
-        /* container داخلی که MudBlazor برای مدیریت اسکرول استفاده می کند */
-        max-height: 362px; /* تنظیم حداکثر ارتفاع مورد نظر شما */
-        overflow-y: auto; /* فعال کردن اسکرول عمودی روی بدنه */
-    }
-
-    .fixed-header-table thead th {
-        position: sticky; /* چسباندن هدر */
-        top: 0; /* چسبیدن به بالای container */
-        z-index: 10;
-        background-color: var(--mud-palette-surface); /* تنظیم رنگ پس زمینه برای جلوگیری از دیده شدن محتوای زیرین */
-    }
+     
+  
 </style>
 @code {
     [SupplyParameterFromQuery]

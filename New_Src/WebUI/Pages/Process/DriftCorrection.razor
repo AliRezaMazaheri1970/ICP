@@ -131,7 +131,7 @@
             </MudItem>
 
             @* Results Panel *@
-            <MudItem xs="12" md="9" Class="fixed-header-table">
+            <MudItem xs="12" md="9">
                 <MudPaper Elevation="0" Class="pa-4 custom-card-all">
                     @if (_isLoading)
                     {
@@ -192,6 +192,7 @@
                                   Hover="true"
                                   Dense="true"
                                   FixedHeader="true"
+                                  Height="380px"
                                   Breakpoint="Breakpoint.None"
                                   HorizontalScrollbar="true">
 
@@ -280,6 +281,8 @@
                                     <MudTable Items="@_analysisResult.CorrectedData.Take(20)"
                                               Hover="true"
                                               Dense="true"
+                                              FixedHeader="true"
+                                              Height="170px"
                                               Breakpoint="Breakpoint.None"
                                               HorizontalScrollbar="true">
                                         <HeaderContent>
@@ -352,30 +355,11 @@
         background-color: var(--mud-palette-surface);
         border-radius: var(--mud-default-borderradius);
         transition: box-shadow 300ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;
-        height: 400px;
-        overflow: scroll;
+        /* height: 400px;
+        overflow: scroll; */
     }
 
-    .fixed-header-table .mud-table {
-        /* حذف ارتفاع و اسکرول از کل کامپوننت MudTable */
-        height: auto;
-        overflow: visible;
-        border-radius: var(--mud-default-borderradius);
-        transition: box-shadow 300ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;
-    }
-
-    .fixed-header-table .mud-table-container {
-        /* container داخلی که MudBlazor برای مدیریت اسکرول استفاده می کند */
-        max-height: 450px; /* تنظیم حداکثر ارتفاع مورد نظر شما */
-        overflow-y: auto; /* فعال کردن اسکرول عمودی روی بدنه */
-    }
-
-    .fixed-header-table thead th {
-        position: sticky; /* چسباندن هدر */
-        top: 0; /* چسبیدن به بالای container */
-        z-index: 10;
-        background-color: var(--mud-palette-surface); /* تنظیم رنگ پس زمینه برای جلوگیری از دیده شدن محتوای زیرین */
-    }
+   
 </style>
 
 @code {
