@@ -203,7 +203,6 @@ public class CorrectionService : ICorrectionService
 
 
     #region Find Empty Rows (FINAL - CORRECT VERSION)
-
     public async Task<Result<List<EmptyRowDto>>> FindEmptyRowsAsync(FindEmptyRowsRequest request)
     {
         try
@@ -230,6 +229,11 @@ public class CorrectionService : ICorrectionService
                 {
                     using var doc = JsonDocument.Parse(row.ColumnData);
                     var root = doc.RootElement;
+
+                    // ✅ فیلتر Type == 'Samp' (مطابق پایتون)
+                    if (root.TryGetProperty("Type", out var typeElement) &&
+                        typeElement.GetString() != "Samp")
+                        continue;
 
                     string sampleId = row.SampleId ?? "Unknown";
                     if (root.TryGetProperty("Solution Label", out var labelElement))
