@@ -33,8 +33,6 @@ var apiBaseUrl = builder.Configuration.GetValue<string>("ApiSettings:BaseUrl") ?
 builder.Services.AddHttpClient("Api", client =>
 {
     client.BaseAddress = new Uri(apiBaseUrl);
-    //client.Timeout = TimeSpan.FromSeconds(300);
-    client.Timeout = TimeSpan.FromMinutes(10);
     client.DefaultRequestHeaders.Add("Accept", "application/json");
 });
 
