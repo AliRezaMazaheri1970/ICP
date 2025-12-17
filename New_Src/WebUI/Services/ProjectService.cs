@@ -58,7 +58,7 @@ public class ProjectDto
     public Guid? ResultProjectId { get; set; }
 
     [JsonPropertyName("projectName")]
-    public string? ProjectName { get; set; }
+    public string ProjectName { get; set; } = "";
     
     [JsonPropertyName("state")]
     public int State { get; set; }

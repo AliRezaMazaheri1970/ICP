@@ -1,26 +1,24 @@
-﻿using System.Text.Json;
-using Application.DTOs;
+﻿using Application.DTOs;
 using Application.Services;
+using Domain.Entities;
 using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Shared.Wrapper;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Infrastructure.Services;
 
 /// <summary>
-/// Implementation of Blank and Scale optimization using Differential Evolution
-/// Based on Python scipy.optimize.differential_evolution
-/// Supports Model A (Pass Count), Model B (Huber), Model C (SSE)
-/// 
-/// Improvements over previous version:
-/// - best1bin strategy (like scipy default)
-/// - Convergence detection with tolerance
-/// - Dithering (variable F between 0.5-1.0)
-/// - Reproducible results with seed parameter
-/// 
-/// CORRECTED: Formula changed from (value + blank) to (value - blank) to match Python
+/// Blank & Scale optimization service (Python-aligned).
 /// Python formula: corrected = (original - blank) * scale
+///
+/// Key fixes:
+/// - CRM duplicate-safe (CrmId duplicates won't crash)
+/// - MatchWithCrm expects Dictionary CRM map
+/// - ApplyManualBlankScaleAsync persists to DB + creates Undo snapshot (Drift-like)
 /// </summary>
 public class OptimizationService : IOptimizationService
 {
@@ -28,11 +26,9 @@ public class OptimizationService : IOptimizationService
     private readonly ILogger<OptimizationService> _logger;
     private Random _random;
 
-    // DE Parameters matching scipy defaults
-    private const double DefaultF = 0.8;      // Mutation factor
-    private const double DefaultCR = 0.7;     // Crossover probability (scipy default)
-    private const double Tolerance = 0.01;    // Convergence tolerance
-    private const int ConvergenceWindow = 10; // Generations without improvement to stop
+    private const double DefaultCR = 0.7;     // scipy-like default crossover
+    private const double Tolerance = 0.01;    // convergence tolerance
+    private const int ConvergenceWindow = 10; // generations without improvement
 
     public OptimizationService(IsatisDbContext db, ILogger<OptimizationService> logger)
     {
@@ -41,35 +37,46 @@ public class OptimizationService : IOptimizationService
         _random = new Random();
     }
 
+    // ---------------------------
+    // Public API
+    // ---------------------------
+
     public async Task<Result<BlankScaleOptimizationResult>> OptimizeBlankScaleAsync(BlankScaleOptimizationRequest request)
     {
         try
         {
-            // Set seed for reproducibility if provided
+            // 1. تنظیم Seed برای تکرارپذیری (در صورت نیاز)
             if (request.Seed.HasValue)
-            {
                 _random = new Random(request.Seed.Value);
-            }
 
+            // 2. دریافت داده‌های پروژه (Read-Only برای محاسبات)
             var projectData = await GetProjectRmDataAsync(request.ProjectId);
-            if (!projectData.Any())
+            if (projectData.Count == 0)
                 return Result<BlankScaleOptimizationResult>.Fail("No RM samples found in project");
 
+            // 3. دریافت داده‌های CRM
             var crmData = await GetCrmDataAsync();
-            if (!crmData.Any())
+            if (crmData.Count == 0)
                 return Result<BlankScaleOptimizationResult>.Fail("No CRM data found");
 
+            // 4. تطبیق داده‌های پروژه با CRM
             var matchedData = MatchWithCrm(projectData, crmData);
-            if (!matchedData.Any())
+            if (matchedData.Count == 0)
                 return Result<BlankScaleOptimizationResult>.Fail("No matching CRM data found for RM samples");
 
-            var elements = request.Elements ?? GetCommonElements(matchedData);
-            var initialStats = CalculateStatistics(matchedData, elements, 0, 1, request.MinDiffPercent, request.MaxDiffPercent);
+            // 5. مشخص کردن عناصر مورد نظر
+            var elements = (request.Elements != null && request.Elements.Count > 0)
+                ? request.Elements
+                : GetCommonElements(matchedData);
 
-            var elementOptimizations = new Dictionary<string, ElementOptimization>();
-            var bestBlanks = new Dictionary<string, decimal>();
-            var bestScales = new Dictionary<string, decimal>();
+            // 6. محاسبه آمار اولیه (قبل از بهینه‌سازی)
+            var initialStats = CalculateStatistics(matchedData, elements, 0m, 1m, request.MinDiffPercent, request.MaxDiffPercent);
 
+            var elementOptimizations = new Dictionary<string, ElementOptimization>(StringComparer.OrdinalIgnoreCase);
+            var bestBlanks = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            var bestScales = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+
+            // 7. شروع حلقه بهینه‌سازی (محاسبات ریاضی)
             foreach (var element in elements)
             {
                 string selectedModel;
@@ -79,68 +86,177 @@ public class OptimizationService : IOptimizationService
                 if (request.UseMultiModel)
                 {
                     (optimalBlank, optimalScale, passedAfter, selectedModel) = OptimizeElementMultiModel(
-                        matchedData, element, request.MinDiffPercent, request.MaxDiffPercent,
+                        matchedData, element,
+                        request.MinDiffPercent, request.MaxDiffPercent,
                         request.MaxIterations, request.PopulationSize);
                 }
                 else
                 {
                     (optimalBlank, optimalScale, passedAfter) = OptimizeElementImproved(
-                        matchedData, element, request.MinDiffPercent, request.MaxDiffPercent,
+                        matchedData, element,
+                        request.MinDiffPercent, request.MaxDiffPercent,
                         request.MaxIterations, request.PopulationSize);
                     selectedModel = "A";
                 }
 
-                var passedBefore = initialStats.ElementStats.TryGetValue(element, out var stats) ? stats.Passed : 0;
+                // ذخیره وضعیت آماری
+                initialStats.ElementStats.TryGetValue(element, out var before);
+                var passedBefore = before?.Passed ?? 0;
+                var meanBefore = before?.MeanDiff ?? 0m;
+                var meanAfter = CalculateMeanDiff(matchedData, element, optimalBlank, optimalScale);
 
                 elementOptimizations[element] = new ElementOptimization(
-                    element, optimalBlank, optimalScale, passedBefore, passedAfter,
-                    stats?.MeanDiff ?? 0, CalculateMeanDiff(matchedData, element, optimalBlank, optimalScale),
-                    selectedModel);
+                    element,
+                    optimalBlank,
+                    optimalScale,
+                    passedBefore,
+                    passedAfter,
+                    meanBefore,
+                    meanAfter,
+                    selectedModel
+                );
 
+                // ذخیره بهترین مقادیر پیدا شده در دیکشنری موقت
                 bestBlanks[element] = optimalBlank;
                 bestScales[element] = optimalScale;
-
-                _logger.LogInformation(
-                    "Element {Element}: Selected Model {Model} with Blank={Blank:F4}, Scale={Scale:F4}, Passed={Passed}",
-                    element, selectedModel, optimalBlank, optimalScale, passedAfter);
             }
 
-            var optimizedData = BuildOptimizedData(matchedData, elements, bestBlanks, bestScales,
-                request.MinDiffPercent, request.MaxDiffPercent);
+            // =================================================================================
+            // [اصلاح جدید] شروع فاز ذخیره‌سازی در دیتابیس
+            // =================================================================================
 
-            var totalPassedBefore = elementOptimizations.Values.Sum(e => e.PassedBefore);
-            var totalPassedAfter = elementOptimizations.Values.Sum(e => e.PassedAfter);
+            // الف) ایجاد اسنپ‌شات برای Undo (فقط یک بار برای کل عملیات)
+            await SaveUndoStateAsync(request.ProjectId, "Optimization: Auto Blank/Scale (All Elements)");
+
+            // ب) لود کردن ردیف‌های دیتابیس برای اعمال تغییرات (Tracking فعال است)
+            var rowsToUpdate = await _db.RawDataRows
+                .Where(r => r.ProjectId == request.ProjectId)
+                .ToListAsync();
+
+            var projectToUpdate = await _db.Projects
+                .FirstOrDefaultAsync(p => p.ProjectId == request.ProjectId);
+
+            int totalDbUpdates = 0;
+
+            // ج) اعمال تغییرات روی JSON هر ردیف بر اساس مقادیر بهینه شده
+            foreach (var element in elements)
+            {
+                if (bestBlanks.TryGetValue(element, out var b) && bestScales.TryGetValue(element, out var s))
+                {
+                    // این متد محتوای ColumnData را در rowsToUpdate تغییر می‌دهد
+                    totalDbUpdates += ApplyBlankScaleToDatabase(rowsToUpdate, element, b, s);
+                }
+            }
+
+            // د) ثبت زمان تغییرات و ذخیره نهایی در دیتابیس
+            if (projectToUpdate != null)
+            {
+                projectToUpdate.LastModifiedAt = DateTime.UtcNow;
+            }
+
+            if (totalDbUpdates > 0)
+            {
+                await _db.SaveChangesAsync();
+                _logger.LogInformation("Auto-optimization applied to DB. Project: {Id}, Updated Rows: {Count}", request.ProjectId, totalDbUpdates);
+            }
+            else
+            {
+                _logger.LogWarning("Auto-optimization calculated but no rows were updated in DB. Project: {Id}", request.ProjectId);
+            }
+
+            // =================================================================================
+            // پایان فاز ذخیره‌سازی
+            // =================================================================================
+
+            // 8. آماده‌سازی داده‌های خروجی برای نمایش به کاربر
+            var optimizedData = BuildOptimizedData(
+                matchedData,
+                elements,
+                bestBlanks,
+                bestScales,
+                request.MinDiffPercent,
+                request.MaxDiffPercent);
+
+            var totalPassedBefore = elementOptimizations.Values.Sum(x => x.PassedBefore);
+            var totalPassedAfter = elementOptimizations.Values.Sum(x => x.PassedAfter);
+
             var improvement = totalPassedBefore > 0
-                ? ((decimal)(totalPassedAfter - totalPassedBefore) / totalPassedBefore) * 100
-                : 0;
+                ? ((decimal)(totalPassedAfter - totalPassedBefore) / totalPassedBefore) * 100m
+                : 0m;
 
-            var modelACounts = elementOptimizations.Values.Count(e => e.SelectedModel == "A");
-            var modelBCounts = elementOptimizations.Values.Count(e => e.SelectedModel == "B");
-            var modelCCounts = elementOptimizations.Values.Count(e => e.SelectedModel == "C");
+            MultiModelSummary? modelSummary = null;
+            if (request.UseMultiModel)
+            {
+                var modelACounts = elementOptimizations.Values.Count(e => e.SelectedModel == "A");
+                var modelBCounts = elementOptimizations.Values.Count(e => e.SelectedModel == "B");
+                var modelCCounts = elementOptimizations.Values.Count(e => e.SelectedModel == "C");
 
-            var mostUsedModel = new[] { ("A", modelACounts), ("B", modelBCounts), ("C", modelCCounts) }
-                .OrderByDescending(x => x.Item2).First().Item1;
+                var mostUsedModel = new[] { ("A", modelACounts), ("B", modelBCounts), ("C", modelCCounts) }
+                    .OrderByDescending(x => x.Item2).First().Item1;
 
-            var modelSummary = new MultiModelSummary(
-                modelACounts, modelBCounts, modelCCounts, mostUsedModel,
-                $"Model A: {modelACounts} elements, Model B: {modelBCounts} elements, Model C: {modelCCounts} elements");
+                modelSummary = new MultiModelSummary(
+                    modelACounts,
+                    modelBCounts,
+                    modelCCounts,
+                    mostUsedModel,
+                    $"Model A: {modelACounts} elements, Model B: {modelBCounts} elements, Model C: {modelCCounts} elements");
+            }
 
-            var result = new BlankScaleOptimizationResult(
-                matchedData.Count, totalPassedBefore, totalPassedAfter, improvement,
-                elementOptimizations, optimizedData, modelSummary);
-
-            return Result<BlankScaleOptimizationResult>.Success(result);
+            return Result<BlankScaleOptimizationResult>.Success(new BlankScaleOptimizationResult(
+                matchedData.Count,
+                totalPassedBefore,
+                totalPassedAfter,
+                improvement,
+                elementOptimizations,
+                optimizedData,
+                modelSummary));
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to optimize Blank & Scale for project {ProjectId}", request.ProjectId);
+            _logger.LogError(ex, "OptimizeBlankScale failed for {ProjectId}", request.ProjectId);
             return Result<BlankScaleOptimizationResult>.Fail("Failed to optimize: " + ex.Message);
         }
     }
 
+    /// <summary>
+    /// APPLY manual blank/scale (Drift-like):
+    /// - Create snapshot for undo
+    /// - Update DB ("Corr Con") for the target element
+    /// </summary>
     public async Task<Result<ManualBlankScaleResult>> ApplyManualBlankScaleAsync(ManualBlankScaleRequest request)
     {
-        return await PreviewBlankScaleAsync(request);
+        try
+        {
+            var project = await _db.Projects.FirstOrDefaultAsync(p => p.ProjectId == request.ProjectId);
+            if (project == null)
+                return Result<ManualBlankScaleResult>.Fail("Project not found");
+
+            // Snapshot BEFORE apply
+            await SaveUndoStateAsync(request.ProjectId, $"Optimization(ManualBlankScale:{request.Element})");
+
+            // Apply to DB
+            var trackedRows = await _db.RawDataRows
+                .Where(r => r.ProjectId == request.ProjectId)
+                .OrderBy(r => r.DataId)
+                .ToListAsync();
+
+            var updated = ApplyBlankScaleToDatabase(trackedRows, request.Element, request.Blank, request.Scale);
+
+            project.LastModifiedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "ManualBlankScale applied. Project={ProjectId} Element={Element} Blank={Blank} Scale={Scale} UpdatedRows={Updated}",
+                request.ProjectId, request.Element, request.Blank, request.Scale, updated);
+
+            // Return preview-style result for UI
+            return await PreviewBlankScaleAsync(request);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ApplyManualBlankScale failed for {ProjectId}", request.ProjectId);
+            return Result<ManualBlankScaleResult>.Fail("Failed to apply: " + ex.Message);
+        }
     }
 
     public async Task<Result<ManualBlankScaleResult>> PreviewBlankScaleAsync(ManualBlankScaleRequest request)
@@ -151,17 +267,17 @@ public class OptimizationService : IOptimizationService
             var crmData = await GetCrmDataAsync();
             var matchedData = MatchWithCrm(projectData, crmData);
 
-            if (!matchedData.Any())
+            if (matchedData.Count == 0)
                 return Result<ManualBlankScaleResult>.Fail("No matching CRM data found");
 
             var elements = new List<string> { request.Element };
-            var blanks = new Dictionary<string, decimal> { { request.Element, request.Blank } };
-            var scales = new Dictionary<string, decimal> { { request.Element, request.Scale } };
+            var blanks = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase) { [request.Element] = request.Blank };
+            var scales = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase) { [request.Element] = request.Scale };
 
-            var beforeStats = CalculateStatistics(matchedData, elements, 0, 1, -10, 10);
-            var afterStats = CalculateStatistics(matchedData, elements, request.Blank, request.Scale, -10, 10);
+            var beforeStats = CalculateStatistics(matchedData, elements, 0m, 1m, -10m, 10m);
+            var afterStats = CalculateStatistics(matchedData, elements, request.Blank, request.Scale, -10m, 10m);
 
-            var optimizedData = BuildOptimizedData(matchedData, elements, blanks, scales, -10, 10);
+            var optimizedData = BuildOptimizedData(matchedData, elements, blanks, scales, -10m, 10m);
 
             var passedBefore = beforeStats.ElementStats.TryGetValue(request.Element, out var bs) ? bs.Passed : 0;
             var passedAfter = afterStats.ElementStats.TryGetValue(request.Element, out var afs) ? afs.Passed : 0;
@@ -171,13 +287,12 @@ public class OptimizationService : IOptimizationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to preview Blank & Scale");
+            _logger.LogError(ex, "PreviewBlankScale failed");
             return Result<ManualBlankScaleResult>.Fail("Failed to preview: " + ex.Message);
         }
     }
 
-    public async Task<Result<BlankScaleOptimizationResult>> GetCurrentStatisticsAsync(
-        Guid projectId, decimal minDiff = -10m, decimal maxDiff = 10m)
+    public async Task<Result<BlankScaleOptimizationResult>> GetCurrentStatisticsAsync(Guid projectId, decimal minDiff = -10m, decimal maxDiff = 10m)
     {
         try
         {
@@ -185,50 +300,652 @@ public class OptimizationService : IOptimizationService
             var crmData = await GetCrmDataAsync();
             var matchedData = MatchWithCrm(projectData, crmData);
 
-            if (!matchedData.Any())
+            if (matchedData.Count == 0)
                 return Result<BlankScaleOptimizationResult>.Fail("No matching CRM data found");
 
             var elements = GetCommonElements(matchedData);
-            var stats = CalculateStatistics(matchedData, elements, 0, 1, minDiff, maxDiff);
+            var stats = CalculateStatistics(matchedData, elements, 0m, 1m, minDiff, maxDiff);
 
             var elementOptimizations = elements.ToDictionary(
                 e => e,
-                e => new ElementOptimization(e, 0, 1,
-                    stats.ElementStats.TryGetValue(e, out var s) ? s.Passed : 0,
-                    stats.ElementStats.TryGetValue(e, out var s2) ? s2.Passed : 0,
-                    s?.MeanDiff ?? 0, s2?.MeanDiff ?? 0));
+                e =>
+                {
+                    stats.ElementStats.TryGetValue(e, out var s);
+                    return new ElementOptimization(e, 0m, 1m, s?.Passed ?? 0, s?.Passed ?? 0, s?.MeanDiff ?? 0m, s?.MeanDiff ?? 0m);
+                },
+                StringComparer.OrdinalIgnoreCase);
 
-            var blanks = elements.ToDictionary(e => e, e => 0m);
-            var scales = elements.ToDictionary(e => e, e => 1m);
+            var blanks = elements.ToDictionary(e => e, _ => 0m, StringComparer.OrdinalIgnoreCase);
+            var scales = elements.ToDictionary(e => e, _ => 1m, StringComparer.OrdinalIgnoreCase);
+
             var optimizedData = BuildOptimizedData(matchedData, elements, blanks, scales, minDiff, maxDiff);
 
             return Result<BlankScaleOptimizationResult>.Success(new BlankScaleOptimizationResult(
-                matchedData.Count, stats.TotalPassed, stats.TotalPassed, 0, elementOptimizations, optimizedData, null));
+                matchedData.Count,
+                stats.TotalPassed,
+                stats.TotalPassed,
+                0m,
+                elementOptimizations,
+                optimizedData,
+                null));
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get current statistics");
+            _logger.LogError(ex, "GetCurrentStatistics failed for {ProjectId}", projectId);
             return Result<BlankScaleOptimizationResult>.Fail("Failed to get statistics: " + ex.Message);
         }
     }
 
-    #region Improved Differential Evolution Algorithm (scipy-like)
+    public async Task<object> GetDebugSamplesAsync(Guid projectId)
+    {
+        var labels = await _db.RawDataRows.AsNoTracking()
+            .Where(r => r.ProjectId == projectId)
+            .Select(r => r.SampleId)
+            .Where(x => x != null && x != "")
+            .Distinct()
+            .ToListAsync();
+
+        var crmIds = await _db.CrmData.AsNoTracking()
+            .Select(c => c.CrmId)
+            .Where(x => x != null && x != "")
+            .Distinct()
+            .ToListAsync();
+
+        return new
+        {
+            totalLabels = labels.Count,
+            sampleLabels = labels.Take(50).ToList(),
+            totalCrm = crmIds.Count,
+            sampleCrm = crmIds.Take(50).ToList()
+        };
+    }
+
+    // ---------------------------
+    // Snapshot + DB Apply (Drift-like)
+    // ---------------------------
+
+    private async Task SaveUndoStateAsync(Guid projectId, string operation)
+    {
+        var rows = await _db.RawDataRows.AsNoTracking()
+            .Where(r => r.ProjectId == projectId)
+            .OrderBy(r => r.DataId)
+            .Select(r => new SavedRowData
+            {
+                DataId = (int)r.DataId,
+                SampleId = r.SampleId,
+                ColumnData = r.ColumnData ?? ""
+            })
+            .ToListAsync();
+
+        var json = JsonSerializer.Serialize(rows);
+
+        _db.ProjectStates.Add(new ProjectState
+        {
+            ProjectId = projectId,
+            Data = json,
+            Description = $"Undo:{operation}",
+            Timestamp = DateTime.UtcNow
+        });
+
+        await _db.SaveChangesAsync();
+    }
 
     /// <summary>
-    /// Improved DE algorithm with:
-    /// - best1bin strategy (uses best individual for mutation)
-    /// - Dithering (F varies between 0.5 and 1.0)
-    /// - Convergence detection
-    /// - Similar to scipy.optimize.differential_evolution defaults
+    /// Apply Python formula: corrected = (original - blank_val + blank_adjust) * scale
+    /// blank_val is loaded from Blank rows (Type=Blk) for each element
     /// </summary>
+    private int ApplyBlankScaleToDatabase(
+        List<Domain.Entities.RawDataRow> trackedRows,
+        string targetElement,
+        decimal blankAdjust,
+        decimal scale,
+        Dictionary<string, decimal>? blankValues = null)
+    {
+        if (trackedRows.Count == 0) return 0;
+
+        // First, find blank_val for this element if not provided
+        if (blankValues == null)
+        {
+            blankValues = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            var elementPattern = new Regex(@"([A-Za-z]+)", RegexOptions.IgnoreCase);
+
+            foreach (var row in trackedRows)
+            {
+                if (string.IsNullOrWhiteSpace(row.ColumnData)) continue;
+
+                try
+                {
+                    using var doc = JsonDocument.Parse(row.ColumnData);
+                    var root = doc.RootElement;
+
+                    // Check if this is a Blank row
+                    if (root.TryGetProperty("Type", out var typeProp))
+                    {
+                        var typeVal = typeProp.ValueKind == JsonValueKind.String ? typeProp.GetString() : typeProp.ToString();
+                        if (string.Equals(typeVal, "Blk", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(typeVal, "Blank", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (root.TryGetProperty("Element", out var eProp))
+                            {
+                                var rawElement = eProp.ValueKind == JsonValueKind.String ? eProp.GetString() : eProp.ToString();
+                                var m = elementPattern.Match(rawElement ?? "");
+                                if (m.Success)
+                                {
+                                    var element = m.Groups[1].Value;
+                                    if (TryGetDecimal(root, "Soln Conc", out var blankConc))
+                                    {
+                                        if (!blankValues.ContainsKey(element))
+                                            blankValues[element] = blankConc;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+        }
+
+        // Get blank_val for target element
+        var blankVal = blankValues.TryGetValue(targetElement, out var bv) ? bv : 0m;
+
+        // "Ag 328.068" -> "Ag"
+        var elemPattern = new Regex(@"([A-Za-z]+)", RegexOptions.IgnoreCase);
+
+        int updated = 0;
+
+        foreach (var row in trackedRows)
+        {
+            if (string.IsNullOrWhiteSpace(row.ColumnData))
+                continue;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(row.ColumnData);
+                var root = doc.RootElement;
+
+                // Element
+                string? rawElement = null;
+                if (root.TryGetProperty("Element", out var elProp))
+                    rawElement = elProp.ValueKind == JsonValueKind.String ? elProp.GetString() : elProp.ToString();
+
+                if (string.IsNullOrWhiteSpace(rawElement))
+                    continue;
+
+                var match = elemPattern.Match(rawElement);
+                if (!match.Success)
+                    continue;
+
+                var cleanElement = match.Groups[1].Value;
+                if (!string.Equals(cleanElement, targetElement, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                // Corr Con
+                if (!TryGetDecimal(root, "Corr Con", out var corrCon))
+                    continue;
+
+                // Python formula: (original - blank_val + blank_adjust) * scale
+                var corrected = (corrCon - blankVal + blankAdjust) * scale;
+
+                row.ColumnData = UpdateJsonNumber(row.ColumnData, "Corr Con", corrected);
+                updated++;
+            }
+            catch
+            {
+                // ignore parse errors
+            }
+        }
+
+        return updated;
+    }
+
+    private static bool TryGetDecimal(JsonElement root, string propName, out decimal value)
+    {
+        value = 0m;
+        if (!root.TryGetProperty(propName, out var p))
+            return false;
+
+        if (p.ValueKind == JsonValueKind.Number)
+            return p.TryGetDecimal(out value);
+
+        if (p.ValueKind == JsonValueKind.String && decimal.TryParse(p.GetString(), out var d))
+        {
+            value = d;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string UpdateJsonNumber(string json, string key, decimal newValue)
+    {
+        using var doc = JsonDocument.Parse(json);
+
+        var props = new List<(string Name, JsonElement Value)>();
+        foreach (var p in doc.RootElement.EnumerateObject())
+            props.Add((p.Name, p.Value.Clone()));
+
+        using var ms = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(ms))
+        {
+            writer.WriteStartObject();
+
+            bool wrote = false;
+            foreach (var (name, val) in props)
+            {
+                if (string.Equals(name, key, StringComparison.OrdinalIgnoreCase))
+                {
+                    writer.WriteNumber(key, newValue);
+                    wrote = true;
+                }
+                else
+                {
+                    writer.WritePropertyName(name);
+                    val.WriteTo(writer);
+                }
+            }
+
+            if (!wrote)
+                writer.WriteNumber(key, newValue);
+
+            writer.WriteEndObject();
+        }
+
+        return Encoding.UTF8.GetString(ms.ToArray());
+    }
+
+    private sealed class SavedRowData
+    {
+        public int DataId { get; set; }
+        public string? SampleId { get; set; }
+        public string ColumnData { get; set; } = "";
+    }
+
+    // ---------------------------
+    // Data Loading / Matching
+    // ---------------------------
+
+    private async Task<List<RmSampleData>> GetProjectRmDataAsync(Guid projectId)
+    {
+        var rawRows = await _db.RawDataRows.AsNoTracking()
+            .Where(r => r.ProjectId == projectId)
+            .ToListAsync();
+
+        // First pass: collect Blank values per element
+        var blankValues = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        var elementPattern = new Regex(@"([A-Za-z]+)", RegexOptions.IgnoreCase);
+
+        foreach (var row in rawRows)
+        {
+            if (string.IsNullOrWhiteSpace(row.ColumnData))
+                continue;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(row.ColumnData);
+                var root = doc.RootElement;
+
+                // Check if this is a Blank row (Type = "Blk" or "Blank")
+                if (root.TryGetProperty("Type", out var typeProp))
+                {
+                    var typeVal = typeProp.ValueKind == JsonValueKind.String ? typeProp.GetString() : typeProp.ToString();
+                    if (string.Equals(typeVal, "Blk", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(typeVal, "Blank", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Get element
+                        if (root.TryGetProperty("Element", out var eProp))
+                        {
+                            var rawElement = eProp.ValueKind == JsonValueKind.String ? eProp.GetString() : eProp.ToString();
+                            var m = elementPattern.Match(rawElement ?? "");
+                            if (m.Success)
+                            {
+                                var element = m.Groups[1].Value;
+
+                                // Get Soln Conc as blank value
+                                if (TryGetDecimal(root, "Soln Conc", out var blankConc))
+                                {
+                                    // Keep first blank value per element (or could average them)
+                                    if (!blankValues.ContainsKey(element))
+                                        blankValues[element] = blankConc;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        _logger.LogDebug("Found {Count} blank values for elements", blankValues.Count);
+
+        // Second pass: collect RM sample data with their blank values
+        var result = new List<RmSampleData>();
+        var rmPattern = new Regex(@"^(OREAS|SRM|CRM|NIST|BCR|TILL|GBW|RM|PAR)\b", RegexOptions.IgnoreCase);
+
+        foreach (var row in rawRows)
+        {
+            if (string.IsNullOrWhiteSpace(row.SampleId))
+                continue;
+
+            // only RM-like rows
+            if (!rmPattern.IsMatch(row.SampleId) &&
+                !row.SampleId.Contains("par", StringComparison.OrdinalIgnoreCase) &&
+                !row.SampleId.Contains("rm", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(row.ColumnData))
+                continue;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(row.ColumnData);
+                var root = doc.RootElement;
+
+                // element
+                string element = "";
+                if (root.TryGetProperty("Element", out var eProp))
+                {
+                    var rawElement = eProp.ValueKind == JsonValueKind.String ? eProp.GetString() : eProp.ToString();
+                    var m = elementPattern.Match(rawElement ?? "");
+                    if (m.Success)
+                        element = m.Groups[1].Value;
+                }
+
+                if (string.IsNullOrWhiteSpace(element))
+                    continue;
+
+                // concentration
+                decimal? conc = null;
+                if (TryGetDecimal(root, "Corr Con", out var cc))
+                    conc = cc;
+                else if (TryGetDecimal(root, "Soln Conc", out var sc))
+                    conc = sc;
+
+                if (!conc.HasValue)
+                    continue;
+
+                var values = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    [element] = conc.Value
+                };
+
+                // Get blank value for this element
+                var blanks = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase);
+                if (blankValues.TryGetValue(element, out var bv))
+                    blanks[element] = bv;
+                else
+                    blanks[element] = 0m; // Default to 0 if no blank found
+
+                result.Add(new RmSampleData(row.SampleId!, values, blanks));
+            }
+            catch
+            {
+                // ignore broken json row
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Returns CRM map: CrmId -> (Element -> Value)
+    /// Duplicate CrmId rows will be merged safely (prevents "same key added" crash).
+    /// </summary>
+    private async Task<Dictionary<string, Dictionary<string, decimal>>> GetCrmDataAsync()
+    {
+        var crmRecords = await _db.CrmData.AsNoTracking().ToListAsync();
+
+        var result = new Dictionary<string, Dictionary<string, decimal>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var crm in crmRecords)
+        {
+            if (string.IsNullOrWhiteSpace(crm.CrmId))
+                continue;
+
+            if (string.IsNullOrWhiteSpace(crm.ElementValues))
+                continue;
+
+            Dictionary<string, decimal>? values;
+            try
+            {
+                values = JsonSerializer.Deserialize<Dictionary<string, decimal>>(crm.ElementValues);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (values == null || values.Count == 0)
+                continue;
+
+            if (!result.TryGetValue(crm.CrmId, out var dict))
+            {
+                dict = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+                result[crm.CrmId] = dict;
+            }
+
+            // merge strategy: keep MAX (safe + stable)
+            foreach (var kv in values)
+            {
+                if (!dict.TryGetValue(kv.Key, out var old))
+                    dict[kv.Key] = kv.Value;
+                else
+                    dict[kv.Key] = Math.Max(old, kv.Value);
+            }
+        }
+
+        return result;
+    }
+
+    private List<MatchedSample> MatchWithCrm(List<RmSampleData> projectData, Dictionary<string, Dictionary<string, decimal>> crmData)
+    {
+        var result = new List<MatchedSample>();
+        if (projectData.Count == 0 || crmData.Count == 0) return result;
+
+        // extracts first number (e.g. "OREAS 100a" -> "100", "CRM 252 y" -> "252")
+        var numberPattern = new Regex(@"(\d+)", RegexOptions.IgnoreCase);
+
+        foreach (var sample in projectData)
+        {
+            var sm = numberPattern.Match(sample.SolutionLabel);
+            var sampleNum = sm.Success ? sm.Groups[1].Value : "";
+            if (string.IsNullOrEmpty(sampleNum))
+                continue;
+
+            string? matchedCrmId = null;
+
+            foreach (var crmId in crmData.Keys)
+            {
+                var cm = numberPattern.Match(crmId);
+                if (!cm.Success) continue;
+
+                if (cm.Groups[1].Value == sampleNum)
+                {
+                    matchedCrmId = crmId;
+                    break;
+                }
+            }
+
+            if (matchedCrmId == null)
+                continue;
+
+            var crmValues = crmData[matchedCrmId]
+                .ToDictionary(k => k.Key, v => (decimal?)v.Value, StringComparer.OrdinalIgnoreCase);
+
+            result.Add(new MatchedSample(sample.SolutionLabel, matchedCrmId, sample.Values, crmValues, sample.BlankValues));
+        }
+
+        return result;
+    }
+
+    private static List<string> GetCommonElements(List<MatchedSample> data)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var s in data)
+        {
+            foreach (var k in s.SampleValues.Keys)
+            {
+                if (s.CrmValues.ContainsKey(k))
+                    set.Add(k);
+            }
+        }
+
+        return set.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    // ---------------------------
+    // Statistics + Build result data
+    // ---------------------------
+
+    /// <summary>
+    /// Python formula: adjusted = (sample_val - blank_val + blank_adjust) * scale
+    /// Here: blank = blank_adjust (optimization parameter)
+    ///       blank_val = from sample's BlankValues dictionary
+    /// </summary>
+    private (int TotalPassed, Dictionary<string, ElementStats> ElementStats) CalculateStatistics(
+        List<MatchedSample> data,
+        List<string> elements,
+        decimal blankAdjust,
+        decimal scale,
+        decimal minDiff,
+        decimal maxDiff)
+    {
+        int total = 0;
+        var stats = new Dictionary<string, ElementStats>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var element in elements)
+        {
+            int passed = 0;
+            var diffs = new List<decimal>();
+
+            foreach (var s in data)
+            {
+                if (!s.SampleValues.TryGetValue(element, out var sv) || !sv.HasValue) continue;
+                if (!s.CrmValues.TryGetValue(element, out var cv) || !cv.HasValue || cv.Value == 0m) continue;
+
+                // Get blank_val for this element (default to 0 if not found)
+                var blankVal = s.BlankValues.TryGetValue(element, out var bv) && bv.HasValue ? bv.Value : 0m;
+
+                // Python formula: (sample_val - blank_val + blank_adjust) * scale
+                var corrected = (sv.Value - blankVal + blankAdjust) * scale;
+                var diff = ((corrected - cv.Value) / cv.Value) * 100m;
+
+                diffs.Add(diff);
+
+                if (diff >= minDiff && diff <= maxDiff)
+                    passed++;
+            }
+
+            var mean = diffs.Count > 0 ? diffs.Average() : 0m;
+            stats[element] = new ElementStats(passed, mean);
+            total += passed;
+        }
+
+        return (total, stats);
+    }
+
+    private decimal CalculateMeanDiff(List<MatchedSample> data, string element, decimal blankAdjust, decimal scale)
+    {
+        var diffs = new List<decimal>();
+
+        foreach (var s in data)
+        {
+            if (!s.SampleValues.TryGetValue(element, out var sv) || !sv.HasValue) continue;
+            if (!s.CrmValues.TryGetValue(element, out var cv) || !cv.HasValue || cv.Value == 0m) continue;
+
+            // Get blank_val for this element
+            var blankVal = s.BlankValues.TryGetValue(element, out var bv) && bv.HasValue ? bv.Value : 0m;
+
+            // Python formula: (sample_val - blank_val + blank_adjust) * scale
+            var corrected = (sv.Value - blankVal + blankAdjust) * scale;
+            var diff = ((corrected - cv.Value) / cv.Value) * 100m;
+            diffs.Add(diff);
+        }
+
+        return diffs.Count > 0 ? diffs.Average() : 0m;
+    }
+
+    private static List<OptimizedSampleDto> BuildOptimizedData(
+        List<MatchedSample> data,
+        List<string> elements,
+        Dictionary<string, decimal> blankAdjusts,
+        Dictionary<string, decimal> scales,
+        decimal minDiff,
+        decimal maxDiff)
+    {
+        var result = new List<OptimizedSampleDto>();
+
+        foreach (var sample in data)
+        {
+            var optimizedValues = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase);
+            var diffBefore = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            var diffAfter = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            var passBefore = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            var passAfter = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var element in elements)
+            {
+                if (!sample.SampleValues.TryGetValue(element, out var sv) || !sv.HasValue) continue;
+                if (!sample.CrmValues.TryGetValue(element, out var cv) || !cv.HasValue || cv.Value == 0m) continue;
+
+                var blankAdjust = blankAdjusts.TryGetValue(element, out var ba) ? ba : 0m;
+                var scale = scales.TryGetValue(element, out var ss) ? ss : 1m;
+
+                // Get blank_val for this element
+                var blankVal = sample.BlankValues.TryGetValue(element, out var bv) && bv.HasValue ? bv.Value : 0m;
+
+                var original = sv.Value;
+
+                // Python formula: (sample_val - blank_val + blank_adjust) * scale
+                var optimized = (original - blankVal + blankAdjust) * scale;
+
+                optimizedValues[element] = optimized;
+
+                var db = ((original - cv.Value) / cv.Value) * 100m;
+                var da = ((optimized - cv.Value) / cv.Value) * 100m;
+
+                diffBefore[element] = db;
+                diffAfter[element] = da;
+
+                passBefore[element] = db >= minDiff && db <= maxDiff;
+                passAfter[element] = da >= minDiff && da <= maxDiff;
+            }
+
+            result.Add(new OptimizedSampleDto(
+                sample.SolutionLabel,
+                sample.CrmId,
+                sample.SampleValues,
+                sample.CrmValues,
+                optimizedValues,
+                diffBefore,
+                diffAfter,
+                passBefore,
+                passAfter
+            ));
+        }
+
+        return result;
+    }
+
+    // ---------------------------
+    // Optimization algorithms
+    // ---------------------------
+
     private (decimal Blank, decimal Scale, int Passed) OptimizeElementImproved(
-        List<MatchedSample> data, string element, decimal minDiff, decimal maxDiff, int maxIterations, int populationSize)
+        List<MatchedSample> data,
+        string element,
+        decimal minDiff,
+        decimal maxDiff,
+        int maxIterations,
+        int populationSize)
     {
         var blankBounds = (-100.0, 100.0);
         var scaleBounds = (0.5, 2.0);
 
-        // Initialize population
-        var population = new List<(double Blank, double Scale)>();
+        var population = new List<(double Blank, double Scale)>(populationSize);
         for (int i = 0; i < populationSize; i++)
         {
             population.Add((
@@ -238,250 +955,8 @@ public class OptimizationService : IOptimizationService
 
         var fitness = population.Select(p => EvaluateFitness(data, element, (decimal)p.Blank, (decimal)p.Scale, minDiff, maxDiff)).ToList();
 
-        // Track best for convergence detection
-        double bestFitness = fitness.Max();
-        int generationsWithoutImprovement = 0;
-        double previousBest = bestFitness;
-
-        for (int iter = 0; iter < maxIterations; iter++)
-        {
-            // Find current best individual for best1bin strategy
-            int bestIdx = fitness.IndexOf(fitness.Max());
-            var best = population[bestIdx];
-
-            for (int i = 0; i < populationSize; i++)
-            {
-                // Dithering: vary F between 0.5 and 1.0
-                double F = 0.5 + _random.NextDouble() * 0.5;
-                double CR = DefaultCR;
-
-                // best1bin: use best individual instead of random
-                var candidates = Enumerable.Range(0, populationSize)
-                    .Where(j => j != i && j != bestIdx)
-                    .OrderBy(_ => _random.Next())
-                    .Take(2)
-                    .ToList();
-
-                var r1 = population[candidates[0]];
-                var r2 = population[candidates[1]];
-
-                // Mutation: best + F * (r1 - r2)
-                var mutantBlank = best.Blank + F * (r1.Blank - r2.Blank);
-                var mutantScale = best.Scale + F * (r1.Scale - r2.Scale);
-
-                // Boundary handling (bounce-back like scipy)
-                mutantBlank = BounceBack(mutantBlank, blankBounds.Item1, blankBounds.Item2);
-                mutantScale = BounceBack(mutantScale, scaleBounds.Item1, scaleBounds.Item2);
-
-                // Binomial crossover
-                var current = population[i];
-                int jRand = _random.Next(2); // Ensure at least one parameter from mutant
-
-                var trialBlank = (jRand == 0 || _random.NextDouble() < CR) ? mutantBlank : current.Blank;
-                var trialScale = (jRand == 1 || _random.NextDouble() < CR) ? mutantScale : current.Scale;
-
-                var trialFitness = EvaluateFitness(data, element, (decimal)trialBlank, (decimal)trialScale, minDiff, maxDiff);
-
-                // Selection
-                if (trialFitness >= fitness[i])
-                {
-                    population[i] = (trialBlank, trialScale);
-                    fitness[i] = trialFitness;
-                }
-            }
-
-            // Convergence check
-            double currentBest = fitness.Max();
-            if (Math.Abs(currentBest - previousBest) < Tolerance)
-            {
-                generationsWithoutImprovement++;
-                if (generationsWithoutImprovement >= ConvergenceWindow)
-                {
-                    _logger.LogDebug("Converged after {Iterations} iterations for element {Element}", iter, element);
-                    break;
-                }
-            }
-            else
-            {
-                generationsWithoutImprovement = 0;
-            }
-            previousBest = currentBest;
-        }
-
-        var finalBestIdx = fitness.IndexOf(fitness.Max());
-        var finalBest = population[finalBestIdx];
-        return ((decimal)finalBest.Blank, (decimal)finalBest.Scale, (int)fitness[finalBestIdx]);
-    }
-
-    /// <summary>
-    /// Bounce-back boundary handling (similar to scipy)
-    /// </summary>
-    private double BounceBack(double value, double min, double max)
-    {
-        if (value < min)
-        {
-            var diff = min - value;
-            value = min + (diff % (max - min));
-        }
-        else if (value > max)
-        {
-            var diff = value - max;
-            value = max - (diff % (max - min));
-        }
-        return Math.Clamp(value, min, max);
-    }
-
-    /// <summary>
-    /// Evaluate fitness using Python-compatible formula
-    /// CORRECTED: Changed from (value + blank) to (value - blank)
-    /// Python: corrected = (original - blank) * scale
-    /// </summary>
-    private double EvaluateFitness(List<MatchedSample> data, string element, decimal blank, decimal scale, decimal minDiff, decimal maxDiff)
-    {
-        int passed = 0;
-        foreach (var sample in data)
-        {
-            if (!sample.SampleValues.TryGetValue(element, out var sampleValue) || !sampleValue.HasValue)
-                continue;
-            if (!sample.CrmValues.TryGetValue(element, out var crmValue) || !crmValue.HasValue || crmValue.Value == 0)
-                continue;
-
-            // CORRECTED: Python formula is (original - blank) * scale
-            var correctedValue = (sampleValue.Value - blank) * scale;
-            var diffPercent = ((correctedValue - crmValue.Value) / crmValue.Value) * 100;
-
-            if (diffPercent >= minDiff && diffPercent <= maxDiff)
-                passed++;
-        }
-        return passed;
-    }
-
-    #endregion
-
-    #region Model B & C - Advanced Objective Functions (Huber Loss)
-
-    /// <summary>
-    /// Huber loss function (same as scipy.special.huber)
-    /// </summary>
-    private double HuberLoss(double delta, double r)
-    {
-        double absR = Math.Abs(r);
-        if (absR <= delta)
-            return 0.5 * r * r;
-        else
-            return delta * (absR - 0.5 * delta);
-    }
-
-    /// <summary>
-    /// CORRECTED: Changed from (value + blank) to (value - blank)
-    /// </summary>
-    private double ObjectiveB_Huber(List<MatchedSample> data, string element, decimal blank, decimal scale, decimal delta = 1.0m)
-    {
-        double totalLoss = 0;
-        int count = 0;
-
-        foreach (var sample in data)
-        {
-            if (!sample.SampleValues.TryGetValue(element, out var sampleValue) || !sampleValue.HasValue)
-                continue;
-            if (!sample.CrmValues.TryGetValue(element, out var crmValue) || !crmValue.HasValue || crmValue.Value == 0)
-                continue;
-
-            // CORRECTED: Python formula is (original - blank) * scale
-            var correctedValue = (sampleValue.Value - blank) * scale;
-            var error = (double)((correctedValue - crmValue.Value) / crmValue.Value * 100);
-
-            totalLoss += HuberLoss((double)delta, error);
-            count++;
-        }
-
-        return count > 0 ? totalLoss / count : double.MaxValue;
-    }
-
-    /// <summary>
-    /// CORRECTED: Changed from (value + blank) to (value - blank)
-    /// </summary>
-    private double ObjectiveC_SSE(List<MatchedSample> data, string element, decimal blank, decimal scale)
-    {
-        double totalSSE = 0;
-        int count = 0;
-
-        foreach (var sample in data)
-        {
-            if (!sample.SampleValues.TryGetValue(element, out var sampleValue) || !sampleValue.HasValue)
-                continue;
-            if (!sample.CrmValues.TryGetValue(element, out var crmValue) || !crmValue.HasValue || crmValue.Value == 0)
-                continue;
-
-            // CORRECTED: Python formula is (original - blank) * scale
-            var correctedValue = (sampleValue.Value - blank) * scale;
-            var diffPercent = (double)((correctedValue - crmValue.Value) / crmValue.Value * 100);
-            totalSSE += diffPercent * diffPercent;
-            count++;
-        }
-
-        return count > 0 ? totalSSE / count : double.MaxValue;
-    }
-
-    private (decimal Blank, decimal Scale, int Passed, string SelectedModel) OptimizeElementMultiModel(
-        List<MatchedSample> data, string element, decimal minDiff, decimal maxDiff, int maxIterations, int populationSize)
-    {
-        // Model A: Maximize pass count
-        var resultA = OptimizeElementImproved(data, element, minDiff, maxDiff, maxIterations, populationSize);
-
-        // Model B: Minimize Huber loss
-        var resultB = OptimizeWithObjective(data, element, minDiff, maxDiff, maxIterations, populationSize,
-            (d, e, b, s) => -ObjectiveB_Huber(d, e, b, s));
-
-        // Model C: Minimize SSE
-        var resultC = OptimizeWithObjective(data, element, minDiff, maxDiff, maxIterations, populationSize,
-            (d, e, b, s) => -ObjectiveC_SSE(d, e, b, s));
-
-        int passedB = (int)EvaluateFitness(data, element, resultB.Blank, resultB.Scale, minDiff, maxDiff);
-        int passedC = (int)EvaluateFitness(data, element, resultC.Blank, resultC.Scale, minDiff, maxDiff);
-
-        var candidates = new[]
-        {
-            (Model: "A", Blank: resultA.Blank, Scale: resultA.Scale, Passed: resultA.Passed,
-             Huber: ObjectiveB_Huber(data, element, resultA.Blank, resultA.Scale),
-             SSE: ObjectiveC_SSE(data, element, resultA.Blank, resultA.Scale)),
-            (Model: "B", Blank: resultB.Blank, Scale: resultB.Scale, Passed: passedB,
-             Huber: ObjectiveB_Huber(data, element, resultB.Blank, resultB.Scale),
-             SSE: ObjectiveC_SSE(data, element, resultB.Blank, resultB.Scale)),
-            (Model: "C", Blank: resultC.Blank, Scale: resultC.Scale, Passed: passedC,
-             Huber: ObjectiveB_Huber(data, element, resultC.Blank, resultC.Scale),
-             SSE: ObjectiveC_SSE(data, element, resultC.Blank, resultC.Scale))
-        };
-
-        // Select best model: prioritize pass count, then SSE, then Huber
-        var best = candidates.OrderByDescending(c => c.Passed).ThenBy(c => c.SSE).ThenBy(c => c.Huber).First();
-
-        _logger.LogDebug(
-            "Element {Element}: Model A(Passed={PassA}), Model B(Passed={PassB}), Model C(Passed={PassC}) -> Selected: {Selected}",
-            element, resultA.Passed, passedB, passedC, best.Model);
-
-        return (best.Blank, best.Scale, best.Passed, best.Model);
-    }
-
-    private (decimal Blank, decimal Scale) OptimizeWithObjective(
-        List<MatchedSample> data, string element, decimal minDiff, decimal maxDiff, int maxIterations, int populationSize,
-        Func<List<MatchedSample>, string, decimal, decimal, double> objectiveFunc)
-    {
-        var blankBounds = (-100.0, 100.0);
-        var scaleBounds = (0.5, 2.0);
-
-        var population = new List<(double Blank, double Scale)>();
-        for (int i = 0; i < populationSize; i++)
-        {
-            population.Add((
-                _random.NextDouble() * (blankBounds.Item2 - blankBounds.Item1) + blankBounds.Item1,
-                _random.NextDouble() * (scaleBounds.Item2 - scaleBounds.Item1) + scaleBounds.Item1));
-        }
-
-        var fitness = population.Select(p => objectiveFunc(data, element, (decimal)p.Blank, (decimal)p.Scale)).ToList();
-
         double previousBest = fitness.Max();
-        int generationsWithoutImprovement = 0;
+        int stagnant = 0;
 
         for (int iter = 0; iter < maxIterations; iter++)
         {
@@ -490,7 +965,7 @@ public class OptimizationService : IOptimizationService
 
             for (int i = 0; i < populationSize; i++)
             {
-                double F = 0.5 + _random.NextDouble() * 0.5; // Dithering
+                double F = 0.5 + _random.NextDouble() * 0.5; // dithering
                 double CR = DefaultCR;
 
                 var candidates = Enumerable.Range(0, populationSize)
@@ -511,7 +986,7 @@ public class OptimizationService : IOptimizationService
                 var trialBlank = (jRand == 0 || _random.NextDouble() < CR) ? mutantBlank : current.Blank;
                 var trialScale = (jRand == 1 || _random.NextDouble() < CR) ? mutantScale : current.Scale;
 
-                var trialFitness = objectiveFunc(data, element, (decimal)trialBlank, (decimal)trialScale);
+                var trialFitness = EvaluateFitness(data, element, (decimal)trialBlank, (decimal)trialScale, minDiff, maxDiff);
                 if (trialFitness > fitness[i])
                 {
                     population[i] = (trialBlank, trialScale);
@@ -519,333 +994,84 @@ public class OptimizationService : IOptimizationService
                 }
             }
 
-            double currentBest = fitness.Max();
+            var currentBest = fitness.Max();
             if (Math.Abs(currentBest - previousBest) < Tolerance)
-            {
-                generationsWithoutImprovement++;
-                if (generationsWithoutImprovement >= ConvergenceWindow)
-                    break;
-            }
+                stagnant++;
             else
-            {
-                generationsWithoutImprovement = 0;
-            }
+                stagnant = 0;
+
+            if (stagnant >= ConvergenceWindow)
+                break;
+
             previousBest = currentBest;
         }
 
-        var finalBestIdx = fitness.IndexOf(fitness.Max());
+        int finalBestIdx = fitness.IndexOf(fitness.Max());
         var finalBest = population[finalBestIdx];
-        return ((decimal)finalBest.Blank, (decimal)finalBest.Scale);
+
+        var passed = CountPassed(data, element, (decimal)finalBest.Blank, (decimal)finalBest.Scale, minDiff, maxDiff);
+        return ((decimal)finalBest.Blank, (decimal)finalBest.Scale, passed);
     }
 
-    #endregion
-
-    #region Helper Methods
-
-    private async Task<List<RmSampleData>> GetProjectRmDataAsync(Guid projectId)
+    private (decimal Blank, decimal Scale, int Passed, string SelectedModel) OptimizeElementMultiModel(
+        List<MatchedSample> data,
+        string element,
+        decimal minDiff,
+        decimal maxDiff,
+        int maxIterations,
+        int populationSize)
     {
-        var rawRows = await _db.RawDataRows.AsNoTracking().Where(r => r.ProjectId == projectId).ToListAsync();
-        var result = new List<RmSampleData>();
+        // اگر multi-model دقیق‌تری داشتی، همینجا جایگزین کن.
+        // فعلاً برای پایداری: Model A
+        var (b, s, p) = OptimizeElementImproved(data, element, minDiff, maxDiff, maxIterations, populationSize);
+        return (b, s, p, "A");
+    }
 
-        // Pattern to find standard names (CRM, OREAS, RM, PAR, etc.)
-        var rmPattern = new System.Text.RegularExpressions.Regex(@"^(OREAS|SRM|CRM|NIST|BCR|TILL|GBW|RM|PAR)[\s\-_]*(\d+|BLANK)?", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        // Pattern to extract clean element name (Ag 328 -> Ag)
-        var elementPattern = new System.Text.RegularExpressions.Regex(@"([A-Za-z]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    private static double EvaluateFitness(List<MatchedSample> data, string element, decimal blankAdjust, decimal scale, decimal minDiff, decimal maxDiff)
+        => CountPassed(data, element, blankAdjust, scale, minDiff, maxDiff);
 
-        foreach (var row in rawRows)
+    private static int CountPassed(List<MatchedSample> data, string element, decimal blankAdjust, decimal scale, decimal minDiff, decimal maxDiff)
+    {
+        int passed = 0;
+
+        foreach (var s in data)
         {
-            try
-            {
-                var solutionLabel = row.SampleId ?? "";
+            if (!s.SampleValues.TryGetValue(element, out var sv) || !sv.HasValue) continue;
+            if (!s.CrmValues.TryGetValue(element, out var cv) || !cv.HasValue || cv.Value == 0m) continue;
 
-                // Check if it is a standard sample?
-                // If label is empty or doesn't match patterns, skip
-                if (string.IsNullOrEmpty(solutionLabel) || !rmPattern.IsMatch(solutionLabel))
-                {
-                    // Second chance: maybe user manually entered "252 par" which above pattern doesn't catch
-                    // Can add specific conditions here
-                    if (!solutionLabel.Contains("par", StringComparison.OrdinalIgnoreCase) &&
-                        !solutionLabel.Contains("RM", StringComparison.OrdinalIgnoreCase))
-                        continue;
-                }
+            // Get blank_val for this element
+            var blankVal = s.BlankValues.TryGetValue(element, out var bv) && bv.HasValue ? bv.Value : 0m;
 
-                var data = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(row.ColumnData);
-                if (data == null) continue;
+            // Python formula: (sample_val - blank_val + blank_adjust) * scale
+            var corrected = (sv.Value - blankVal + blankAdjust) * scale;
+            var diff = ((corrected - cv.Value) / cv.Value) * 100m;
 
-                var values = new Dictionary<string, decimal?>();
-
-                // --- New logic for OES files (Long Format) ---
-                // 1. Find element name from Element column
-                string cleanElement = string.Empty;
-                if (data.TryGetValue("Element", out var elemVal) && elemVal.ValueKind == JsonValueKind.String)
-                {
-                    var rawElement = elemVal.GetString(); // e.g. "Ag 328.068"
-                    var match = elementPattern.Match(rawElement ?? "");
-                    if (match.Success)
-                    {
-                        cleanElement = match.Groups[1].Value; // "Ag"
-                    }
-                }
-
-                // 2. Find concentration value (priority with Corr Con)
-                decimal? concentration = null;
-                if (data.TryGetValue("Corr Con", out var cc))
-                {
-                    if (cc.ValueKind == JsonValueKind.Number) concentration = cc.GetDecimal();
-                    else if (cc.ValueKind == JsonValueKind.String && decimal.TryParse(cc.GetString(), out var d)) concentration = d;
-                }
-
-                if (concentration == null && data.TryGetValue("Soln Conc", out var sc))
-                {
-                    if (sc.ValueKind == JsonValueKind.Number) concentration = sc.GetDecimal();
-                    else if (sc.ValueKind == JsonValueKind.String && decimal.TryParse(sc.GetString(), out var d)) concentration = d;
-                }
-
-                // 3. If we have element and concentration, add as a virtual column
-                // This makes the system think there is a column named "Ag"
-                if (!string.IsNullOrEmpty(cleanElement) && concentration.HasValue)
-                {
-                    // مثلاً: values["Ag"] = 0.009
-                    values[cleanElement] = concentration.Value;
-                }
-                // ---------------------------------------------------
-
-                // Copy other columns (for safety)
-                foreach (var kvp in data)
-                {
-                    if (kvp.Key == "Solution Label" || kvp.Key == "Element") continue;
-
-                    if (kvp.Value.ValueKind == JsonValueKind.Number)
-                        values[kvp.Key] = kvp.Value.GetDecimal();
-                    else if (kvp.Value.ValueKind == JsonValueKind.String && decimal.TryParse(kvp.Value.GetString(), out var val))
-                        values[kvp.Key] = val;
-                }
-
-                result.Add(new RmSampleData(solutionLabel, values));
-            }
-            catch { }
+            if (diff >= minDiff && diff <= maxDiff)
+                passed++;
         }
-        return result;
+
+        return passed;
     }
 
-    private async Task<Dictionary<string, Dictionary<string, decimal>>> GetCrmDataAsync()
+    private static double BounceBack(double value, double min, double max)
     {
-        var crmRecords = await _db.CrmData.AsNoTracking().ToListAsync();
-        var result = new Dictionary<string, Dictionary<string, decimal>>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var crm in crmRecords)
-        {
-            try
-            {
-                var values = JsonSerializer.Deserialize<Dictionary<string, decimal>>(crm.ElementValues);
-                if (values == null) continue;
-
-                // If this CRM is not added yet, create new dictionary
-                if (!result.ContainsKey(crm.CrmId))
-                {
-                    result[crm.CrmId] = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
-                }
-
-                // Merge logic: Check all elements and replace if value is greater
-                foreach (var kvp in values)
-                {
-                    if (!result[crm.CrmId].ContainsKey(kvp.Key))
-                    {
-                        result[crm.CrmId][kvp.Key] = kvp.Value;
-                    }
-                    else
-                    {
-                        // If new value is greater (e.g. more complete digestion), update
-                        if (kvp.Value > result[crm.CrmId][kvp.Key])
-                        {
-                            result[crm.CrmId][kvp.Key] = kvp.Value;
-                        }
-                    }
-                }
-            }
-            catch { }
-        }
-        return result;
+        if (value < min) return min + (min - value);
+        if (value > max) return max - (value - max);
+        return value;
     }
 
-    private List<MatchedSample> MatchWithCrm(List<RmSampleData> projectData, Dictionary<string, Dictionary<string, decimal>> crmData)
-    {
-        var result = new List<MatchedSample>();
-        // Regex to extract number from CRM label (e.g., "CRM 252  y" -> "252", "OREAS 100a" -> "100")
-        var numberPattern = new System.Text.RegularExpressions.Regex(@"(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        
-        foreach (var sample in projectData)
-        {
-            // Extract number from sample label
-            var sampleMatch = numberPattern.Match(sample.SolutionLabel);
-            var sampleNumber = sampleMatch.Success ? sampleMatch.Groups[1].Value : "";
-            
-            // Skip BLANK samples (no number to match)
-            if (string.IsNullOrEmpty(sampleNumber)) continue;
-            
-            // Find CRM in database that contains the same number
-            var matchedCrm = crmData.Keys.FirstOrDefault(k =>
-            {
-                var crmMatch = numberPattern.Match(k);
-                if (!crmMatch.Success) return false;
-                var crmNumber = crmMatch.Groups[1].Value;
-                return crmNumber == sampleNumber;
-            });
+    // ---------------------------
+    // Internal types
+    // ---------------------------
 
-            if (matchedCrm != null)
-            {
-                var crmValues = crmData[matchedCrm].ToDictionary(kvp => kvp.Key, kvp => (decimal?)kvp.Value);
-                result.Add(new MatchedSample(sample.SolutionLabel, matchedCrm, sample.Values, crmValues));
-            }
-        }
-        return result;
-    }
+    private sealed record RmSampleData(string SolutionLabel, Dictionary<string, decimal?> Values, Dictionary<string, decimal?> BlankValues);
 
-    private List<string> GetCommonElements(List<MatchedSample> data)
-    {
-        var sampleElements = data.SelectMany(d => d.SampleValues.Keys).Distinct();
-        var crmElements = data.SelectMany(d => d.CrmValues.Keys).Distinct();
-        return sampleElements.Intersect(crmElements, StringComparer.OrdinalIgnoreCase).ToList();
-    }
+    private sealed record MatchedSample(
+        string SolutionLabel,
+        string CrmId,
+        Dictionary<string, decimal?> SampleValues,
+        Dictionary<string, decimal?> CrmValues,
+        Dictionary<string, decimal?> BlankValues);
 
-    /// <summary>
-    /// CORRECTED: Changed from (value + blank) to (value - blank)
-    /// Python: corrected = (original - blank) * scale
-    /// </summary>
-    private (int TotalPassed, Dictionary<string, ElementStats> ElementStats) CalculateStatistics(
-        List<MatchedSample> data, List<string> elements, decimal blank, decimal scale, decimal minDiff, decimal maxDiff)
-    {
-        var elementStats = new Dictionary<string, ElementStats>();
-        int totalPassed = 0;
-
-        foreach (var element in elements)
-        {
-            int passed = 0;
-            var diffs = new List<decimal>();
-
-            foreach (var sample in data)
-            {
-                if (!sample.SampleValues.TryGetValue(element, out var sv) || !sv.HasValue) continue;
-                if (!sample.CrmValues.TryGetValue(element, out var cv) || !cv.HasValue || cv.Value == 0) continue;
-
-                // CORRECTED: Python formula is (original - blank) * scale
-                var corrected = (sv.Value - blank) * scale;
-                var diff = ((corrected - cv.Value) / cv.Value) * 100;
-                diffs.Add(diff);
-
-                if (diff >= minDiff && diff <= maxDiff) passed++;
-            }
-
-            elementStats[element] = new ElementStats(passed, diffs.Any() ? diffs.Average() : 0);
-            totalPassed += passed;
-        }
-        return (totalPassed, elementStats);
-    }
-
-    /// <summary>
-    /// CORRECTED: Changed from (value + blank) to (value - blank)
-    /// </summary>
-    private decimal CalculateMeanDiff(List<MatchedSample> data, string element, decimal blank, decimal scale)
-    {
-        var diffs = new List<decimal>();
-        foreach (var sample in data)
-        {
-            if (!sample.SampleValues.TryGetValue(element, out var sv) || !sv.HasValue) continue;
-            if (!sample.CrmValues.TryGetValue(element, out var cv) || !cv.HasValue || cv.Value == 0) continue;
-
-            // CORRECTED: Python formula is (original - blank) * scale
-            var corrected = (sv.Value - blank) * scale;
-            var diff = ((corrected - cv.Value) / cv.Value) * 100;
-            diffs.Add(diff);
-        }
-        return diffs.Any() ? diffs.Average() : 0;
-    }
-
-    /// <summary>
-    /// CORRECTED: Changed from (value + blank) to (value - blank)
-    /// Python: corrected = (original - blank) * scale
-    /// </summary>
-    private List<OptimizedSampleDto> BuildOptimizedData(
-        List<MatchedSample> data, List<string> elements, Dictionary<string, decimal> blanks,
-        Dictionary<string, decimal> scales, decimal minDiff, decimal maxDiff)
-    {
-        var result = new List<OptimizedSampleDto>();
-
-        foreach (var sample in data)
-        {
-            var optimizedValues = new Dictionary<string, decimal?>();
-            var diffBefore = new Dictionary<string, decimal>();
-            var diffAfter = new Dictionary<string, decimal>();
-            var passBefore = new Dictionary<string, bool>();
-            var passAfter = new Dictionary<string, bool>();
-
-            foreach (var element in elements)
-            {
-                if (!sample.SampleValues.TryGetValue(element, out var sv)) continue;
-                if (!sample.CrmValues.TryGetValue(element, out var cv) || !cv.HasValue || cv.Value == 0) continue;
-
-                var blank = blanks.TryGetValue(element, out var b) ? b : 0;
-                var scale = scales.TryGetValue(element, out var s) ? s : 1;
-
-                var original = sv ?? 0;
-                // CORRECTED: Python formula is (original - blank) * scale
-                var optimized = (original - blank) * scale;
-                optimizedValues[element] = optimized;
-
-                var diffB = ((original - cv.Value) / cv.Value) * 100;
-                var diffA = ((optimized - cv.Value) / cv.Value) * 100;
-
-                diffBefore[element] = diffB;
-                diffAfter[element] = diffA;
-                passBefore[element] = diffB >= minDiff && diffB <= maxDiff;
-                passAfter[element] = diffA >= minDiff && diffA <= maxDiff;
-            }
-
-            result.Add(new OptimizedSampleDto(
-                sample.SolutionLabel, sample.CrmId, sample.SampleValues, sample.CrmValues,
-                optimizedValues, diffBefore, diffAfter, passBefore, passAfter));
-        }
-        return result;
-    }
-
-    public async Task<object> GetDebugSamplesAsync(Guid projectId)
-    {
-        // Get ALL distinct SampleIds from project to find CRM/RM samples
-        var distinctSampleIds = await _db.RawDataRows.AsNoTracking()
-            .Where(r => r.ProjectId == projectId)
-            .Select(r => r.SampleId)
-            .Distinct()
-            .ToListAsync();
-        
-        // Match CRM/OREAS/etc. at start, optionally followed by numbers/spaces/letters
-        // Examples: "CRM 252  y", "CRM BLANK  R", "OREAS 100a", "CRM258"
-        var rmPattern = new System.Text.RegularExpressions.Regex(@"^(OREAS|SRM|CRM|NIST|BCR|TILL|GBW)[\s\-_]*(\d+|BLANK)?", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        
-        var allLabels = distinctSampleIds.Where(s => !string.IsNullOrEmpty(s)).ToList();
-        var rmLabels = allLabels.Where(s => rmPattern.IsMatch(s!)).ToList();
-        
-        // Get sample raw data for debugging
-        var rawRows = await _db.RawDataRows.AsNoTracking().Where(r => r.ProjectId == projectId).Take(5).ToListAsync();
-        var sampleColumnData = rawRows.Select(r => r.ColumnData ?? "null").ToList();
-        
-        var totalRows = await _db.RawDataRows.CountAsync(r => r.ProjectId == projectId);
-        var crmIds = await _db.CrmData.AsNoTracking().Select(c => c.CrmId).Distinct().Take(20).ToListAsync();
-        
-        return new
-        {
-            totalRows = totalRows,
-            allLabelsCount = allLabels.Count,
-            rmLabelsCount = rmLabels.Count,
-            sampleLabels = allLabels.Distinct().Take(30).ToList(),
-            rmLabels = rmLabels.Distinct().Take(30).ToList(),
-            sampleCrmIds = crmIds,
-            rawColumnDataSamples = sampleColumnData  // Debug: show raw JSON
-        };
-    }
-
-    private record RmSampleData(string SolutionLabel, Dictionary<string, decimal?> Values);
-    private record MatchedSample(string SolutionLabel, string CrmId, Dictionary<string, decimal?> SampleValues, Dictionary<string, decimal?> CrmValues);
-    private record ElementStats(int Passed, decimal MeanDiff);
-
-    #endregion
+    private sealed record ElementStats(int Passed, decimal MeanDiff);
 }

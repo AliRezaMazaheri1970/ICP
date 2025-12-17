@@ -1,9 +1,14 @@
-﻿var builder = WebApplication.CreateBuilder(args);
+﻿using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
+var builder = WebApplication.CreateBuilder(args);
 
 // ============================================
+// Services
+// ============================================
+
 // YARP Reverse Proxy
-// ============================================
-
 builder.Services
     .AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
@@ -22,17 +27,20 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Request timeouts (برای Route-level TimeoutPolicy)
+// Request timeouts (برای Route-level TimeoutPolicy در YARP)
 builder.Services.AddRequestTimeouts(options =>
 {
-    options.AddPolicy("Default", TimeSpan.FromSeconds(60));  // برای اکثر API ها
-    options.AddPolicy("Long", TimeSpan.FromMinutes(5));      // برای Undo/Export
+    options.AddPolicy("Default", TimeSpan.FromSeconds(60)); // برای اکثر API ها
+    options.AddPolicy("Long", TimeSpan.FromMinutes(5));     // برای Undo/Export
 });
+
+// (اختیاری) اگر Authorization middleware داری و بعداً لازم میشه
+builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
 // ============================================
-// Middleware
+// Middleware (Order is IMPORTANT)
 // ============================================
 
 // Logging middleware
@@ -46,10 +54,23 @@ app.Use(async (context, next) =>
     logger.LogInformation("← {StatusCode}", context.Response.StatusCode);
 });
 
+// ✅ مهم: باید قبل از Map* ها بیاد
+app.UseRouting();
+
+// ✅ مهم‌ترین خط برای رفع 500 YARP TimeoutPolicy
+// باید بین UseRouting و endpoint mapping (MapReverseProxy و ...) باشد
+app.UseRequestTimeouts();
+
 // CORS
 app.UseCors("AllowAll");
 
-// Health check
+// (اختیاری) اگر نیاز داری
+app.UseAuthorization();
+
+// ============================================
+// Endpoints
+// ============================================
+
 app.MapHealthChecks("/health");
 
 // Gateway info
@@ -66,10 +87,7 @@ app.MapGet("/", () => new
     }
 });
 
-// ✅ YARP Reverse Proxy + Apply request timeouts to proxy pipeline
-app.MapReverseProxy(proxyPipeline =>
-{
-    proxyPipeline.UseRequestTimeouts();
-});
+// ✅ YARP Reverse Proxy
+app.MapReverseProxy();
 
 app.Run();

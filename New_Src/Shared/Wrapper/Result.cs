@@ -65,3 +65,5 @@ public class Result<T> : Result
     /// <returns>A failed Result.</returns>
     public static new Result<T> Fail(string message) => new Result<T>(false, default, new[] { message });
 }
+
+public record ElementStats(int Passed, decimal MeanDiff, decimal MinDiff, decimal MaxDiff, decimal Variance);
