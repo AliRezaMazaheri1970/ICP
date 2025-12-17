@@ -64,7 +64,7 @@ public class CorrectionService : ICorrectionService
                     decimal weight;
                     if (weightElement.ValueKind == JsonValueKind.Number)
                         weight = weightElement.GetDecimal();
-                    else if (weightElement.ValueKind == JsonValueKind.String && 
+                    else if (weightElement.ValueKind == JsonValueKind.String &&
                              decimal.TryParse(weightElement.GetString(), out var parsedWeight))
                         weight = parsedWeight;
                     else
@@ -73,7 +73,7 @@ public class CorrectionService : ICorrectionService
                     if (weight < request.WeightMin || weight > request.WeightMax)
                     {
                         decimal corrCon = 0m;
-                        if (root.TryGetProperty("Corr Con", out var corrConElement) && 
+                        if (root.TryGetProperty("Corr Con", out var corrConElement) &&
                             corrConElement.ValueKind != JsonValueKind.Null)
                         {
                             if (corrConElement.ValueKind == JsonValueKind.Number)
@@ -149,7 +149,7 @@ public class CorrectionService : ICorrectionService
                     decimal volume;
                     if (volumeElement.ValueKind == JsonValueKind.Number)
                         volume = volumeElement.GetDecimal();
-                    else if (volumeElement.ValueKind == JsonValueKind.String && 
+                    else if (volumeElement.ValueKind == JsonValueKind.String &&
                              decimal.TryParse(volumeElement.GetString(), out var parsedVolume))
                         volume = parsedVolume;
                     else
@@ -158,7 +158,7 @@ public class CorrectionService : ICorrectionService
                     if (volume != request.ExpectedVolume)
                     {
                         decimal corrCon = 0m;
-                        if (root.TryGetProperty("Corr Con", out var corrConElement) && 
+                        if (root.TryGetProperty("Corr Con", out var corrConElement) &&
                             corrConElement.ValueKind != JsonValueKind.Null)
                         {
                             if (corrConElement.ValueKind == JsonValueKind.Number)
@@ -249,17 +249,17 @@ public class CorrectionService : ICorrectionService
                     if (!elementsToCheck.Contains(elementPrefix))
                         continue;
 
-                    // Extract Soln Conc
+                    // Extract Corr Con (مطابق پایتون که از Corr Con استفاده می‌کنه)
                     decimal? value = null;
-                    if (root.TryGetProperty("Soln Conc", out var solnConcElement))
+                    if (root.TryGetProperty("Corr Con", out var corrConElement))
                     {
-                        if (solnConcElement.ValueKind == JsonValueKind.Number)
+                        if (corrConElement.ValueKind == JsonValueKind.Number)
                         {
-                            value = solnConcElement.GetDecimal();
+                            value = corrConElement.GetDecimal();
                         }
-                        else if (solnConcElement.ValueKind == JsonValueKind.String)
+                        else if (corrConElement.ValueKind == JsonValueKind.String)
                         {
-                            var strVal = solnConcElement.GetString();
+                            var strVal = corrConElement.GetString();
                             // "-----" = null
                             if (!string.IsNullOrWhiteSpace(strVal) &&
                                 strVal != "-----" &&
@@ -268,7 +268,6 @@ public class CorrectionService : ICorrectionService
                                 value = parsed;
                             }
                         }
-                        // If it was null in JSON, value remains null
                     }
 
                     if (!pivotedData.ContainsKey(sampleId))
@@ -327,19 +326,18 @@ public class CorrectionService : ICorrectionService
                     decimal threshold = mean * thresholdFactor;
                     rowValuesNullable[elem] = valNullable;
 
-                    // Count all elements
-                    totalElementsChecked++;
-
-                    // ✅ Only null = missing
-                    // 0 is a real value (like Blank)
+                    // ✅ اصلاح شده: null/NaN در شمارش شرکت نمی‌کنه (مثل پایتون)
                     if (!valNullable.HasValue)
                     {
                         details[elem] = 0;
-                        continue;  // null = NOT below threshold
+                        continue;  // null = skip (نه below، نه above)
                     }
 
                     decimal val = valNullable.Value;
                     details[elem] = mean != 0 ? (val / mean) * 100m : 0m;
+
+                    // ✅ فقط مقادیر غیر-null در شمارش شرکت می‌کنن
+                    totalElementsChecked++;
 
                     // val < threshold
                     if (val < threshold)
@@ -422,6 +420,11 @@ public class CorrectionService : ICorrectionService
                         : row.SampleId;
 
                     if (solutionLabel == null || !request.SolutionLabels.Contains(solutionLabel))
+                        continue;
+
+                    // ✅ Filter Type == 'Samp' (مطابق پایتون)
+                    if (root.TryGetProperty("Type", out var typeElement) &&
+                        typeElement.GetString() != "Samp")
                         continue;
 
                     // Extract Old Weight
@@ -664,8 +667,12 @@ public class CorrectionService : ICorrectionService
             if (!rawRows.Any())
                 return Result<List<DfSampleDto>>.Fail("No data found for project");
 
-            var samples = new List<DfSampleDto>();
+            var badDfSamples = new List<DfSampleDto>();
+            var seenLabels = new HashSet<string>(); // برای drop_duplicates
             int rowNum = 1;
+
+            // ✅ Regex مطابق پایتون: D(\d+)(?:-|\b|$)
+            var dfPattern = new Regex(@"D(\d+)(?:-|\b|$)", RegexOptions.IgnoreCase);
 
             foreach (var row in rawRows)
             {
@@ -674,27 +681,50 @@ public class CorrectionService : ICorrectionService
                     using var doc = JsonDocument.Parse(row.ColumnData);
                     var root = doc.RootElement;
 
+                    // ✅ فیلتر Type == 'Samp' (مطابق پایتون)
+                    if (root.TryGetProperty("Type", out var typeElement) &&
+                        typeElement.GetString() != "Samp")
+                    {
+                        rowNum++;
+                        continue;
+                    }
+
                     var solutionLabel = root.TryGetProperty("Solution Label", out var labelElement)
                         ? labelElement.GetString() ?? row.SampleId ?? $"Row-{rowNum}"
                         : row.SampleId ?? $"Row-{rowNum}";
 
-                    decimal df = 1m; // Default
+                    // ✅ drop_duplicates بر اساس Solution Label
+                    if (seenLabels.Contains(solutionLabel))
+                    {
+                        rowNum++;
+                        continue;
+                    }
+
+                    decimal actualDf = 1m; // Default
                     if (root.TryGetProperty("DF", out var dfElement) && dfElement.ValueKind != JsonValueKind.Null)
                     {
                         if (dfElement.ValueKind == JsonValueKind.Number)
-                            df = dfElement.GetDecimal();
+                            actualDf = dfElement.GetDecimal();
                         else if (dfElement.ValueKind == JsonValueKind.String &&
                                  decimal.TryParse(dfElement.GetString(), out var parsedDf))
-                            df = parsedDf;
+                            actualDf = parsedDf;
                     }
 
-                    string? sampleType = null;
-                    if (root.TryGetProperty("Type", out var typeElement) && typeElement.ValueKind == JsonValueKind.String)
+                    // ✅ محاسبه Expected DF از Solution Label (مطابق پایتون)
+                    decimal expectedDf = 1m; // Default مثل df_value در پایتون
+                    var match = dfPattern.Match(solutionLabel);
+                    if (match.Success && decimal.TryParse(match.Groups[1].Value, out var extractedDf))
                     {
-                        sampleType = typeElement.GetString();
+                        expectedDf = extractedDf;
                     }
 
-                    samples.Add(new DfSampleDto(rowNum, solutionLabel, df, sampleType));
+                    // ✅ فقط اگر DF != Expected DF باشد (مطابق پایتون)
+                    if (actualDf != expectedDf)
+                    {
+                        seenLabels.Add(solutionLabel);
+                        badDfSamples.Add(new DfSampleDto(rowNum, solutionLabel, actualDf, "Samp"));
+                    }
+
                     rowNum++;
                 }
                 catch (JsonException)
@@ -704,7 +734,7 @@ public class CorrectionService : ICorrectionService
                 }
             }
 
-            return Result<List<DfSampleDto>>.Success(samples);
+            return Result<List<DfSampleDto>>.Success(badDfSamples);
         }
         catch (Exception ex)
         {
@@ -994,7 +1024,7 @@ public class CorrectionService : ICorrectionService
                 {
                     // Use SampleId as the primary identifier (set during import)
                     var sampleId = row.SampleId ?? "Unknown";
-                    
+
                     // PROTECT CRM/RM samples from deletion - they should never be deleted
                     // even if their Solution Label matches a blank pattern
                     if (rmPattern.IsMatch(sampleId))
