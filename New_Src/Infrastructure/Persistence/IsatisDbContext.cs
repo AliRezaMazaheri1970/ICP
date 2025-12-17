@@ -47,6 +47,9 @@ public class IsatisDbContext : DbContext
     /// <summary>
     /// Configures the model mapping using the fluent API.
     /// </summary>
+
+    public DbSet<Users> Users { get; set; }
+
     /// <param name="modelBuilder">The model builder.</param>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
