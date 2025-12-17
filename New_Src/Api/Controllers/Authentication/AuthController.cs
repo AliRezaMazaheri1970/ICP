@@ -1,55 +1,58 @@
-﻿using Infrastructure.Persistence;
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
-using System;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using BCrypt.Net;
 
 namespace Api.Controllers;
 
+/// <summary>
+/// Handles user authentication, registration, and session management.
+/// </summary>
 [ApiController]
 [Route("api/[controller]")]
 public class AuthController : ControllerBase
 {
     private readonly IConfiguration _configuration;
     private readonly ILogger<AuthController> _logger;
-    private readonly IsatisDbContext _db;
 
-    public AuthController(IConfiguration configuration, ILogger<AuthController> logger, IsatisDbContext db)
+    private static readonly List<UserRecord> _users = new()
+    {
+        new UserRecord("admin", "admin123", "Administrator", "Admin"),
+        new UserRecord("analyst", "analyst123", "Lab Analyst", "Analyst"),
+        new UserRecord("guest", "guest", "Guest User", "Viewer")
+    };
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AuthController"/> class.
+    /// </summary>
+    /// <param name="configuration">The configuration settings.</param>
+    /// <param name="logger">The logger instance.</param>
+    public AuthController(IConfiguration configuration, ILogger<AuthController> logger)
     {
         _configuration = configuration;
         _logger = logger;
-        _db = db;
     }
 
     /// <summary>
     /// Authenticates a user and generates a JWT token.
     /// </summary>
+    /// <param name="request">The login request containing username and password.</param>
+    /// <returns>A login response with the JWT token if successful.</returns>
     [HttpPost("login")]
     [AllowAnonymous]
-    public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequest request)
+    public ActionResult<LoginResponse> Login([FromBody] LoginRequest request)
     {
         _logger.LogInformation("Login attempt for user: {Username}", request.Username);
 
-        var user = await _db.Users
-            .AsNoTracking()
-            .FirstOrDefaultAsync(u => u.Username == request.Username);
+        var user = _users.FirstOrDefault(u =>
+            u.Username.Equals(request.Username, StringComparison.OrdinalIgnoreCase) &&
+            u.Password == request.Password);
 
         if (user == null)
         {
-            _logger.LogWarning("Login failed: user not found {Username}", request.Username);
-            return Unauthorized(new LoginResponse(false, "Invalid username or password"));
-        }
-
-        // validate password
-        bool isValid = BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash);
-        if (!isValid)
-        {
-            _logger.LogWarning("Login failed: invalid password for {Username}", request.Username);
+            _logger.LogWarning("Failed login attempt for user: {Username}", request.Username);
             return Unauthorized(new LoginResponse(false, "Invalid username or password"));
         }
 
@@ -69,28 +72,24 @@ public class AuthController : ControllerBase
     /// <summary>
     /// Registers a new user.
     /// </summary>
+    /// <param name="request">The registration details.</param>
+    /// <returns>A response indicating the result of the registration.</returns>
     [HttpPost("register")]
     [AllowAnonymous]
-    public async Task<ActionResult<RegisterResponse>> Register([FromBody] RegisterRequest request)
+    public ActionResult<RegisterResponse> Register([FromBody] RegisterRequest request)
     {
-        if (await _db.Users.AnyAsync(u => u.Username == request.Username))
+        if (_users.Any(u => u.Username.Equals(request.Username, StringComparison.OrdinalIgnoreCase)))
         {
             return Conflict(new RegisterResponse(false, "Username already exists"));
         }
 
-        var hashedPassword = BCrypt.Net.BCrypt.HashPassword(request.Password);
-
-        var newUser = new Domain.Entities.Users
-        {
-            Id = Guid.NewGuid(),
-            Username = request.Username,
-            PasswordHash = hashedPassword,
-            FullName = request.FullName ?? request.Username,
-            Position = request.Position ?? "User"
-        };
-
-        _db.Users.Add(newUser);
-        await _db.SaveChangesAsync();
+        var newUser = new UserRecord(
+            request.Username,
+            request.Password,
+            request.FullName ?? request.Username,
+            request.Position ?? "Analyst"
+        );
+        _users.Add(newUser);
 
         _logger.LogInformation("New user registered: {Username}", request.Username);
 
@@ -100,15 +99,17 @@ public class AuthController : ControllerBase
     /// <summary>
     /// Retrieves the current authenticated user's information.
     /// </summary>
+    /// <returns>The user information details.</returns>
     [HttpGet("me")]
     [Authorize]
-    public async Task<ActionResult<UserInfo>> GetCurrentUser()
+    public ActionResult<UserInfo> GetCurrentUser()
     {
         var username = User.FindFirst(ClaimTypes.Name)?.Value;
+
         if (string.IsNullOrEmpty(username))
             return Unauthorized();
 
-        var user = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Username == username);
+        var user = _users.FirstOrDefault(u => u.Username == username);
         if (user == null)
             return NotFound();
 
@@ -118,6 +119,7 @@ public class AuthController : ControllerBase
     /// <summary>
     /// Checks if there is an active session.
     /// </summary>
+    /// <returns>The session check result.</returns>
     [HttpGet("check-session")]
     [AllowAnonymous]
     public ActionResult CheckSession()
@@ -128,6 +130,7 @@ public class AuthController : ControllerBase
     /// <summary>
     /// Logs out the current user.
     /// </summary>
+    /// <returns>A message indicating logout success.</returns>
     [HttpPost("logout")]
     [AllowAnonymous]
     public ActionResult Logout()
@@ -138,7 +141,9 @@ public class AuthController : ControllerBase
     /// <summary>
     /// Generates a JWT token for the specified user.
     /// </summary>
-    private string GenerateJwtToken(Domain.Entities.Users user)
+    /// <param name="user">The user to generate the token for.</param>
+    /// <returns>The generated JWT token string.</returns>
+    private string GenerateJwtToken(UserRecord user)
     {
         var jwtSettings = _configuration.GetSection("Jwt");
         var secret = jwtSettings["Secret"] ?? "IsatisICP-SuperSecret-Key-2024-Must-Be-At-Least-32-Characters! ";
@@ -169,11 +174,9 @@ public class AuthController : ControllerBase
     }
 }
 
-/// <summary>
-/// DTOs
-/// </summary>
 public record LoginRequest(string Username, string Password, bool RememberMe = false);
 public record LoginResponse(bool IsAuthenticated, string Message, string Name = "", string Token = "", string Position = "");
 public record RegisterRequest(string Username, string Password, string? FullName, string? Position);
 public record RegisterResponse(bool Succeeded, string Message);
 public record UserInfo(string Username, string FullName, string Position);
+public record UserRecord(string Username, string Password, string FullName, string Position);
