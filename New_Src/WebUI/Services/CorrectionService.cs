@@ -1,98 +1,8 @@
-﻿using System.Text.Json;
-using System.Text.Json.Serialization;
-using Application.DTOs; 
+﻿using Application.DTOs; // ✅ استفاده از DTOهای مشترک
+using System.Net.Http.Json;
+using System.Text.Json;
+
 namespace WebUI.Services;
-
-// ============================================
-// Correction DTOs
-// ============================================
-
-public class BadSampleDto
-{
-    [JsonPropertyName("solutionLabel")]
-    public string SolutionLabel { get; set; } = "";
-
-    [JsonPropertyName("actualValue")]
-    public decimal ActualValue { get; set; }
-
-    [JsonPropertyName("corrCon")]
-    public decimal CorrCon { get; set; }
-
-    [JsonPropertyName("expectedValue")]
-    public decimal ExpectedValue { get; set; }
-
-    [JsonPropertyName("deviation")]
-    public decimal Deviation { get; set; }
-}
-
-public class EmptyRowDto
-{
-    [JsonPropertyName("solutionLabel")]
-    public string SolutionLabel { get; set; } = "";
-
-    [JsonPropertyName("elementValues")]
-    public Dictionary<string, decimal?> ElementValues { get; set; } = new();
-
-    [JsonPropertyName("elementAverages")]
-    public Dictionary<string, decimal> ElementAverages { get; set; } = new();
-
-    [JsonPropertyName("percentOfAverage")]
-    public Dictionary<string, decimal> PercentOfAverage { get; set; } = new();
-
-    [JsonPropertyName("elementsBelowThreshold")]
-    public int ElementsBelowThreshold { get; set; }
-
-    [JsonPropertyName("totalElementsChecked")]
-    public int TotalElementsChecked { get; set; }
-
-    [JsonPropertyName("overallScore")]
-    public decimal OverallScore { get; set; }
-}
-
-public class CorrectionResultDto
-{
-    [JsonPropertyName("totalRows")]
-    public int TotalRows { get; set; }
-
-    [JsonPropertyName("correctedRows")]
-    public int CorrectedRows { get; set; }
-
-    [JsonPropertyName("correctedSamples")]
-    public List<CorrectedSampleInfo> CorrectedSamples { get; set; } = new();
-}
-
-public class CorrectedSampleInfo
-{
-    [JsonPropertyName("solutionLabel")]
-    public string SolutionLabel { get; set; } = "";
-
-    [JsonPropertyName("oldValue")]
-    public decimal OldValue { get; set; }
-
-    [JsonPropertyName("newValue")]
-    public decimal NewValue { get; set; }
-
-    [JsonPropertyName("oldCorrCon")]
-    public decimal OldCorrCon { get; set; }
-
-    [JsonPropertyName("newCorrCon")]
-    public decimal NewCorrCon { get; set; }
-}
-
-public class DfSampleDto
-{
-    [JsonPropertyName("rowNumber")]
-    public int RowNumber { get; set; }
-
-    [JsonPropertyName("solutionLabel")]
-    public string SolutionLabel { get; set; } = "";
-
-    [JsonPropertyName("currentDf")]
-    public decimal CurrentDf { get; set; }
-
-    [JsonPropertyName("sampleType")]
-    public string? SampleType { get; set; }
-}
 
 // ============================================
 // Correction Service
@@ -103,39 +13,30 @@ public class CorrectionService
     private readonly HttpClient _httpClient;
     private readonly ILogger<CorrectionService> _logger;
     private readonly AuthService _authService;
+    private readonly JsonSerializerOptions _jsonOptions;
 
     public CorrectionService(IHttpClientFactory clientFactory, ILogger<CorrectionService> logger, AuthService authService)
     {
         _httpClient = clientFactory.CreateClient("Api");
         _logger = logger;
         _authService = authService;
+        // ✅ تنظیم برای مپ کردن حروف کوچک/بزرگ (camelCase به PascalCase)
+        _jsonOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
     }
 
     /// <summary>
     /// Find samples with bad weights
     /// </summary>
-    public async Task<ServiceResult<List<BadSampleDto>>> FindBadWeightsAsync(Guid projectId, decimal min = 0.190m, decimal max = 0.210m)
+    public async Task<ServiceResult<List<BadSampleDto>>> FindBadWeightsAsync(Guid projectId, decimal min = 0.09m, decimal max = 0.11m)
     {
         try
         {
             SetAuthHeader();
+            // استفاده از کلاس درخواست استاندارد بک‌اند
+            var request = new FindBadWeightsRequest(projectId, min, max);
 
-            var request = new { projectId, weightMin = min, weightMax = max };
             var response = await _httpClient.PostAsJsonAsync("correction/bad-weights", request);
-            var content = await response.Content.ReadAsStringAsync();
-
-            if (response.IsSuccessStatusCode)
-            {
-                var result = JsonSerializer.Deserialize<ApiResult<List<BadSampleDto>>>(content,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-                if (result?.Succeeded == true && result.Data != null)
-                    return ServiceResult<List<BadSampleDto>>.Success(result.Data);
-
-                return ServiceResult<List<BadSampleDto>>.Fail(result?.Message ?? "Failed");
-            }
-
-            return ServiceResult<List<BadSampleDto>>.Fail($"Server error: {response.StatusCode}");
+            return await HandleResponseAsync<List<BadSampleDto>>(response);
         }
         catch (Exception ex)
         {
@@ -147,28 +48,15 @@ public class CorrectionService
     /// <summary>
     /// Find samples with bad volumes
     /// </summary>
-    public async Task<ServiceResult<List<BadSampleDto>>> FindBadVolumesAsync(Guid projectId, decimal expectedVolume = 50m)
+    public async Task<ServiceResult<List<BadSampleDto>>> FindBadVolumesAsync(Guid projectId, decimal expectedVolume = 10m)
     {
         try
         {
             SetAuthHeader();
+            var request = new FindBadVolumesRequest(projectId, expectedVolume);
 
-            var request = new { projectId, expectedVolume };
             var response = await _httpClient.PostAsJsonAsync("correction/bad-volumes", request);
-            var content = await response.Content.ReadAsStringAsync();
-
-            if (response.IsSuccessStatusCode)
-            {
-                var result = JsonSerializer.Deserialize<ApiResult<List<BadSampleDto>>>(content,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-                if (result?.Succeeded == true && result.Data != null)
-                    return ServiceResult<List<BadSampleDto>>.Success(result.Data);
-
-                return ServiceResult<List<BadSampleDto>>.Fail(result?.Message ?? "Failed");
-            }
-
-            return ServiceResult<List<BadSampleDto>>.Fail($"Server error: {response.StatusCode}");
+            return await HandleResponseAsync<List<BadSampleDto>>(response);
         }
         catch (Exception ex)
         {
@@ -185,22 +73,8 @@ public class CorrectionService
         try
         {
             SetAuthHeader();
-
             var response = await _httpClient.GetAsync($"correction/{projectId}/df-samples");
-            var content = await response.Content.ReadAsStringAsync();
-
-            if (response.IsSuccessStatusCode)
-            {
-                var result = JsonSerializer.Deserialize<ApiResult<List<DfSampleDto>>>(content,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-                if (result?.Succeeded == true && result.Data != null)
-                    return ServiceResult<List<DfSampleDto>>.Success(result.Data);
-
-                return ServiceResult<List<DfSampleDto>>.Fail(result?.Message ?? "Failed");
-            }
-
-            return ServiceResult<List<DfSampleDto>>.Fail($"Server error: {response.StatusCode}");
+            return await HandleResponseAsync<List<DfSampleDto>>(response);
         }
         catch (Exception ex)
         {
@@ -212,37 +86,20 @@ public class CorrectionService
     /// <summary>
     /// Find empty/outlier rows
     /// </summary>
-    public async Task<ServiceResult<List<Application.DTOs.EmptyRowDto>>> FindEmptyRowsAsync(Guid projectId, decimal thresholdPercent = 70m)
+    public async Task<ServiceResult<List<EmptyRowDto>>> FindEmptyRowsAsync(Guid projectId, decimal thresholdPercent = 70m)
     {
         try
         {
             SetAuthHeader();
+            var request = new FindEmptyRowsRequest(projectId, thresholdPercent);
 
-            var request = new { projectId, thresholdPercent };
             var response = await _httpClient.PostAsJsonAsync("correction/empty-rows", request);
-            var content = await response.Content.ReadAsStringAsync();
-
-            if (response.IsSuccessStatusCode)
-            {
-                // ✅ Important Change: Explicitly using Application.DTOs.EmptyRowDto
-                var result = JsonSerializer.Deserialize<ApiResult<List<Application.DTOs.EmptyRowDto>>>(content,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-                if (result?.Succeeded == true && result.Data != null)
-                {
-                    // Now result.Data is of the correct type and will cast without error
-                    return ServiceResult<List<Application.DTOs.EmptyRowDto>>.Success(result.Data);
-                }
-
-                return ServiceResult<List<Application.DTOs.EmptyRowDto>>.Fail(result?.Message ?? "Failed");
-            }
-
-            return ServiceResult<List<Application.DTOs.EmptyRowDto>>.Fail($"Server error: {response.StatusCode}");
+            return await HandleResponseAsync<List<EmptyRowDto>>(response);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error finding empty rows");
-            return ServiceResult<List<Application.DTOs.EmptyRowDto>>.Fail($"Error: {ex.Message}");
+            return ServiceResult<List<EmptyRowDto>>.Fail($"Error: {ex.Message}");
         }
     }
 
@@ -255,23 +112,10 @@ public class CorrectionService
         try
         {
             SetAuthHeader();
+            var request = new WeightCorrectionRequest(projectId, solutionLabels, newWeight);
 
-            var request = new { projectId, solutionLabels, newWeight };
             var response = await _httpClient.PostAsJsonAsync("correction/weight", request);
-            var content = await response.Content.ReadAsStringAsync();
-
-            if (response.IsSuccessStatusCode)
-            {
-                var result = JsonSerializer.Deserialize<ApiResult<CorrectionResultDto>>(content,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-                if (result?.Succeeded == true && result.Data != null)
-                    return ServiceResult<CorrectionResultDto>.Success(result.Data);
-
-                return ServiceResult<CorrectionResultDto>.Fail(result?.Message ?? "Failed");
-            }
-
-            return ServiceResult<CorrectionResultDto>.Fail($"Server error: {response.StatusCode}");
+            return await HandleResponseAsync<CorrectionResultDto>(response);
         }
         catch (Exception ex)
         {
@@ -289,23 +133,10 @@ public class CorrectionService
         try
         {
             SetAuthHeader();
+            var request = new VolumeCorrectionRequest(projectId, solutionLabels, newVolume);
 
-            var request = new { projectId, solutionLabels, newVolume };
             var response = await _httpClient.PostAsJsonAsync("correction/volume", request);
-            var content = await response.Content.ReadAsStringAsync();
-
-            if (response.IsSuccessStatusCode)
-            {
-                var result = JsonSerializer.Deserialize<ApiResult<CorrectionResultDto>>(content,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-                if (result?.Succeeded == true && result.Data != null)
-                    return ServiceResult<CorrectionResultDto>.Success(result.Data);
-
-                return ServiceResult<CorrectionResultDto>.Fail(result?.Message ?? "Failed");
-            }
-
-            return ServiceResult<CorrectionResultDto>.Fail($"Server error: {response.StatusCode}");
+            return await HandleResponseAsync<CorrectionResultDto>(response);
         }
         catch (Exception ex)
         {
@@ -323,26 +154,10 @@ public class CorrectionService
         try
         {
             SetAuthHeader();
+            var request = new DfCorrectionRequest(projectId, solutionLabels, newDf);
 
-            var request = new { ProjectId = projectId, SolutionLabels = solutionLabels, NewDf = newDf };
             var response = await _httpClient.PostAsJsonAsync("correction/df", request);
-            var content = await response.Content.ReadAsStringAsync();
-
-            _logger.LogInformation("DF Correction response: {StatusCode}, Content: {Content}", 
-                response.StatusCode, content);
-
-            if (response.IsSuccessStatusCode)
-            {
-                var result = JsonSerializer.Deserialize<ApiResult<CorrectionResultDto>>(content,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-                if (result?.Succeeded == true && result.Data != null)
-                    return ServiceResult<CorrectionResultDto>.Success(result.Data);
-
-                return ServiceResult<CorrectionResultDto>.Fail(result?.Message ?? "Failed");
-            }
-
-            return ServiceResult<CorrectionResultDto>.Fail($"Server error: {response.StatusCode}");
+            return await HandleResponseAsync<CorrectionResultDto>(response);
         }
         catch (Exception ex)
         {
@@ -359,26 +174,10 @@ public class CorrectionService
         try
         {
             SetAuthHeader();
+            var request = new DeleteRowsRequest(projectId, solutionLabels);
 
-            var request = new { ProjectId = projectId, SolutionLabels = solutionLabels };
             var response = await _httpClient.PostAsJsonAsync("correction/delete-rows", request);
-            var content = await response.Content.ReadAsStringAsync();
-
-            _logger.LogInformation("Delete rows response: {StatusCode}, Content: {Content}", 
-                response.StatusCode, content);
-
-            if (response.IsSuccessStatusCode)
-            {
-                var result = JsonSerializer.Deserialize<ApiResult<int>>(content,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-                if (result?.Succeeded == true)
-                    return ServiceResult<int>.Success(result.Data);
-
-                return ServiceResult<int>.Fail(result?.Message ?? "Failed");
-            }
-
-            return ServiceResult<int>.Fail($"Server error: {response.StatusCode}");
+            return await HandleResponseAsync<int>(response);
         }
         catch (Exception ex)
         {
@@ -386,6 +185,50 @@ public class CorrectionService
             return ServiceResult<int>.Fail($"Error: {ex.Message}");
         }
     }
+
+    /// <summary>
+    /// Apply Optimization (Added for compatibility)
+    /// </summary>
+    public async Task<ServiceResult<CorrectionResultDto>> ApplyOptimizationAsync(
+        Guid projectId, Dictionary<string, ElementSettings> elementSettings)
+    {
+        try
+        {
+            SetAuthHeader();
+            var request = new ApplyOptimizationRequest(projectId, elementSettings);
+
+            var response = await _httpClient.PostAsJsonAsync("correction/apply-optimization", request);
+            return await HandleResponseAsync<CorrectionResultDto>(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error applying optimization");
+            return ServiceResult<CorrectionResultDto>.Fail($"Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Undo last correction (Added for compatibility)
+    /// </summary>
+    public async Task<ServiceResult<bool>> UndoLastCorrectionAsync(Guid projectId)
+    {
+        try
+        {
+            SetAuthHeader();
+            var request = new { }; // Empty body
+            var response = await _httpClient.PostAsJsonAsync($"correction/{projectId}/undo", request);
+            return await HandleResponseAsync<bool>(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error undoing last correction");
+            return ServiceResult<bool>.Fail($"Error: {ex.Message}");
+        }
+    }
+
+    // ============================================
+    // Helpers
+    // ============================================
 
     private void SetAuthHeader()
     {
@@ -395,5 +238,21 @@ public class CorrectionService
             _httpClient.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
         }
+    }
+
+    private async Task<ServiceResult<T>> HandleResponseAsync<T>(HttpResponseMessage response)
+    {
+        var content = await response.Content.ReadAsStringAsync();
+
+        if (response.IsSuccessStatusCode)
+        {
+            var result = JsonSerializer.Deserialize<ApiResult<T>>(content, _jsonOptions);
+            if (result?.Succeeded == true && result.Data != null)
+                return ServiceResult<T>.Success(result.Data);
+
+            return ServiceResult<T>.Fail(result?.Message ?? "Failed");
+        }
+
+        return ServiceResult<T>.Fail($"Server error: {response.StatusCode}");
     }
 }

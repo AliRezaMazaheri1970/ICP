@@ -72,7 +72,7 @@ justify-space-between align-center">
                                StartIcon="@Icons.Material.Filled.Search"
                                OnClick="FindBadVolumes"
                                Disabled="@(_isLoading ||
-                               _isApplying)">
+                                                              _isApplying)">
                     @if (_isLoading)
                         {
                             <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
@@ -113,7 +113,7 @@ justify-space-between align-center">
                                    StartIcon="@Icons.Material.Filled.Build"
                                    OnClick="ApplyCorrection"
                                    Disabled="@(!_selectedSamples.Any() ||
-                                   _isApplying)">
+                                                                      _isApplying)">
                     @if (_isApplying)
                             {
                                 <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
@@ -128,7 +128,7 @@ justify-space-between align-center">
 
             @* Results *@
             <MudItem xs="12" md="8">
-                <MudPaper Elevation="0" Class="pa-4 custom-card-all" >
+                <MudPaper Elevation="0" Class="pa-4 custom-card-all">
 
                     <div class="d-flex justify-space-between align-center mb-4 ">
 
@@ -237,7 +237,7 @@ justify-space-between align-center">
                             </MudText> *@
                         </div>
 
-                                }
+                    }
                 </MudPaper>
             </MudItem>
         </MudGrid>

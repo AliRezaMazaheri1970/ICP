@@ -52,7 +52,13 @@ public static class DependencyInjection
         services.AddScoped<IReportService, ReportService>();
         services.AddScoped<IDriftCorrectionService, DriftCorrectionService>();
         services.AddScoped<IOptimizationService, OptimizationService>();
-        services.AddScoped<ICorrectionService, CorrectionService>();
+
+        // ✅ REPLACED: Old CorrectionService removed, new segregated services added
+        services.AddScoped<IWeightCorrectionService, WeightCorrectionService>();
+        services.AddScoped<IVolumeCorrectionService, VolumeCorrectionService>();
+        services.AddScoped<IDfCorrectionService, DfCorrectionService>();
+        services.AddScoped<IRowCorrectionService, RowCorrectionService>();
+
         services.AddScoped<IChangeLogService, ChangeLogService>();
         services.AddScoped<IVersionService, VersionService>();
 

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Routing;
 using MudBlazor;
 using WebUI.Services;
+using Application.DTOs;
 
 namespace WebUI.Pages.Process
 {
