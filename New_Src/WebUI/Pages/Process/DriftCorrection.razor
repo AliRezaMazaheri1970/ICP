@@ -149,27 +149,27 @@
                     {
                         @* Summary Cards *@
                         <MudGrid Class="mb-4">
-                            <MudItem xs="6" sm="3">
+                            <MudItem xs="12" sm="6" md="3">
                                 <MudPaper Elevation="0" Class="pa-3 text-center" Style="background: var(--mud-palette-info-lighten);">
-                                    <MudText Typo="Typo.h4" Class="color-white">@_analysisResult.TotalSamples</MudText>
+                                    <MudText Typo="Typo.h4" Color="Color.Dark">@_analysisResult.TotalSamples</MudText>
                                     <MudText Typo="Typo.caption">Total Samples</MudText>
                                 </MudPaper>
                             </MudItem>
-                            <MudItem xs="6" sm="3">
+                            <MudItem xs="12" sm="6" md="3">
                                 <MudPaper Elevation="0" Class="pa-3 text-center" Style="background: var(--mud-palette-success-lighten);">
-                                    <MudText Typo="Typo.h4" Class="color-white">@_analysisResult.SegmentsFound</MudText>
+                                    <MudText Typo="Typo.h4" Color="Color.Dark">@_analysisResult.SegmentsFound</MudText>
                                     <MudText Typo="Typo.caption">Segments</MudText>
                                 </MudPaper>
                             </MudItem>
-                            <MudItem xs="6" sm="3">
+                            <MudItem xs="12" sm="6" md="3">
                                 <MudPaper Elevation="0" Class="pa-3 text-center" Style="background: var(--mud-palette-warning-lighten);">
-                                    <MudText Typo="Typo.h4" Class="color-white">@_analysisResult.ElementDrifts.Count</MudText>
+                                    <MudText Typo="Typo.h4" Color="Color.Dark">@_analysisResult.ElementDrifts.Count</MudText>
                                     <MudText Typo="Typo.caption">Elements Analyzed</MudText>
                                 </MudPaper>
                             </MudItem>
-                            <MudItem xs="6" sm="3">
+                            <MudItem xs="12" sm="6" md="3">
                                 <MudPaper Elevation="0" Class="pa-3 text-center" Style="background: var(--mud-palette-secondary-lighten);">
-                                    <MudText Typo="Typo.h4" Class="color-white">@_analysisResult.CorrectedSamples</MudText>
+                                    <MudText Typo="Typo.h4" Color="Color.Dark">@_analysisResult.CorrectedSamples</MudText>
                                     <MudText Typo="Typo.caption">Corrected</MudText>
                                 </MudPaper>
                             </MudItem>
@@ -192,6 +192,7 @@
                                   Hover="true"
                                   Dense="true"
                                   FixedHeader="true"
+                                  Height="380px"
                                   Breakpoint="Breakpoint.None"
                                   HorizontalScrollbar="true">
 
@@ -246,14 +247,19 @@
                                            Variant="Variant.Outlined"
                                            Dense="true"
                                            Style="width: 100px;">
-                                    <MudSelectItem Value="15">15</MudSelectItem>
+                                    <MudSelectItem Value="10">10</MudSelectItem>
+                                    <MudSelectItem Value="20">20</MudSelectItem>
                                     <MudSelectItem Value="30">30</MudSelectItem>
-                                    <MudSelectItem Value="45">45</MudSelectItem>
+
+                                    <MudSelectItem Value="40">40</MudSelectItem>
+                                    <MudSelectItem Value="50">50</MudSelectItem>
                                     <MudSelectItem Value="60">60</MudSelectItem>
-                                    <MudSelectItem Value="75">75</MudSelectItem>
+
+                                    <MudSelectItem Value="70">70</MudSelectItem>
+                                    <MudSelectItem Value="80">80</MudSelectItem>
                                     <MudSelectItem Value="90">90</MudSelectItem>
-                                    <MudSelectItem Value="105">105</MudSelectItem>
-                                    <MudSelectItem Value="120">120</MudSelectItem>
+
+                                    <MudSelectItem Value="100">100</MudSelectItem>
                                 </MudSelect>
 
                                 <MudPagination Count="@_totalPages"
@@ -275,6 +281,8 @@
                                     <MudTable Items="@_analysisResult.CorrectedData.Take(20)"
                                               Hover="true"
                                               Dense="true"
+                                              FixedHeader="true"
+                                              Height="170px"
                                               Breakpoint="Breakpoint.None"
                                               HorizontalScrollbar="true">
                                         <HeaderContent>
@@ -347,9 +355,11 @@
         background-color: var(--mud-palette-surface);
         border-radius: var(--mud-default-borderradius);
         transition: box-shadow 300ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;
-        height: 550px;
-        overflow: scroll;
+        /* height: 400px;
+        overflow: scroll; */
     }
+
+   
 </style>
 
 @code {
@@ -370,7 +380,7 @@
 
     // Pagination for ElementDrifts
     private int _currentPage = 1;
-    private int _pageSize = 15;
+    private int _pageSize = 10;
     private int _totalCount = 0;
     private int _totalPages => _totalCount == 0
         ? 1

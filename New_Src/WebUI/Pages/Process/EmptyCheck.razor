@@ -175,7 +175,7 @@
                 }
             </MudItem>
 
-            <MudItem xs="12" md="9">
+            <MudItem xs="12" md="9" >
                 <MudPaper Elevation="0" Class="pa-4 custom-card-all">
                     <div class="d-flex justify-space-between align-center mb-4">
                         <MudText Typo="Typo.h6">
@@ -209,6 +209,7 @@
                                   Hover="true"
                                   Dense="true"
                                   FixedHeader="true"
+                                  Height="362px"
                                   T="EmptyRowDto"
                                   Breakpoint="Breakpoint.None"
                                   HorizontalScrollbar="true"
@@ -302,9 +303,11 @@
                                     <MudText Typo="Typo.subtitle2" Class="mb-2">
                                         Selected: <strong>@_selectedEmpty.SolutionLabel</strong>
                                     </MudText>
-                                    <MudSimpleTable Breakpoint="Breakpoint.None"
+                                    <MudSimpleTable FixedHeader="true"
+                                        
+                                        Breakpoint="Breakpoint.None"
                                                     HorizontalScrollbar="true"
-                                        Dense="true" Style="height:180px; overflow:scroll;">
+                                        Dense="true" Style="overflow:scroll;height:170px;">
                                         <thead>
                                             <tr>
                                                 <th>Element</th>
@@ -381,9 +384,11 @@
         background-color: var(--mud-palette-surface);
         border-radius: var(--mud-default-borderradius);
         transition: box-shadow 300ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;
-        height: 362px;
-        overflow: scroll;
+        /* height: 362px;
+        overflow: scroll; */
     }
+
+    
 </style>
 
     @code {

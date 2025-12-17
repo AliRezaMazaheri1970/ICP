@@ -80,7 +80,7 @@
                                StartIcon="@Icons.Material.Filled.Search"
                                OnClick="FindBadWeights"
                                Disabled="@(_isLoading ||
-                                                              _isApplying)">
+                                                                                             _isApplying)">
                     @if (_isLoading)
                         {
                             <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
@@ -91,7 +91,22 @@
 
                     @if (_badSamples != null && _badSamples.Any())
                     {
-
+                        <div class="d-flex justify-center mt-4 gap-2">
+                            <MudButton Variant="Variant.Outlined"
+                                       Size="Size.Small"
+                                       Color="Color.Warning"
+                                       OnClick="SelectAll"
+                                       Class="flex-grow-1">
+                                Select All
+                            </MudButton>
+                            <MudButton Variant="Variant.Outlined"
+                                       Size="Size.Small"
+                                       Color="Color.Warning"
+                                       OnClick="ClearSelection"
+                                       Class="flex-grow-1">
+                                Clear Selection
+                            </MudButton>
+                        </div>
                         <MudDivider Class="my-4" />
 
                         <MudText Typo="Typo.subtitle2" Class="mb-2">Correction</MudText>
@@ -110,7 +125,7 @@
                                    StartIcon="@Icons.Material.Filled.Build"
                                    OnClick="ApplyCorrection"
                                    Disabled="@(!_selectedSamples.Any() ||
-                                                                      _isApplying)">
+                                                                                                         _isApplying)">
                     @if (_isApplying)
                             {
                                 <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
@@ -123,8 +138,8 @@
                 </MudPaper>
             </MudItem>
 
-            <MudItem xs="12" md="8" Class="">
-                <MudPaper Elevation="0" Class="pa-4 custom-card-all " >
+            <MudItem xs="12" md="8">
+                <MudPaper Elevation="0" Class="pa-4 custom-card-all ">
 
                     <div class="d-flex justify-space-between align-center mb-4">
 
@@ -166,8 +181,9 @@
                                   Hover="true"
                                   Dense="true"
                                   Breakpoint="Breakpoint.None" HorizontalScrollbar="true"
-                                  
                                   MultiSelection="true"
+                                  FixedHeader="true"
+                                  Height="450px"
                                   @bind-SelectedItems="_selectedSamples"
                                   SelectOnRowClick="true">
 
@@ -195,7 +211,7 @@
                                 <MudTd>
                                     <MudChip T="string"
                                              Color="@(Math.Abs(context.Deviation) > 20 ?
-                                                                                          Color.Error : Color.Warning)">
+                                                                                                                                       Color.Error : Color.Warning)">
                                 @context.Deviation.ToString("F1")%
                             </MudChip>
 
@@ -293,7 +309,7 @@
         border-spacing: 0;
         border-collapse: collapse;
         /* height: 200px; */
-        overflow: scroll;
+        /* overflow: scroll; */
     }
 
     .mud-table-dense * .mud-table-row .mud-table-cell {
@@ -307,8 +323,8 @@
         background-color: var(--mud-palette-surface);
         border-radius: var(--mud-default-borderradius);
         transition: box-shadow 300ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;
-        height: 450px;
-        overflow: scroll;
+        /* height: 450px; */
+        /* overflow: scroll; */
     }
 </style>
 
