@@ -10,6 +10,9 @@ from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex
 from PyQt6.QtGui import QFont, QPixmap
 import logging
 import os
+from .Common.Freeze_column import FreezeTableWidget
+from db.db import get_db_connection,resource_path
+from utils.var_main import LOGO_PNG_PATH 
 # Setup logging
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -61,92 +64,6 @@ class CRMTableModel(QAbstractTableModel):
                 return str(self._df.columns[section])
             return str(section + 1)
         return None
-
-class FreezeTableWidget(QTableView):
-    """Custom QTableView with a frozen first column."""
-    def __init__(self, model, parent=None):
-        super().__init__(parent)
-        self.frozenTableView = QTableView(self)
-        self.setModel(model)
-        self.frozenTableView.setModel(model)
-        self.init()
-
-        self.horizontalHeader().sectionResized.connect(self.updateSectionWidth)
-        self.verticalHeader().sectionResized.connect(self.updateSectionHeight)
-        self.frozenTableView.verticalScrollBar().valueChanged.connect(self.frozenVerticalScroll)
-        self.verticalScrollBar().valueChanged.connect(self.mainVerticalScroll)
-        self.model().modelReset.connect(self.resetFrozenTable)
-
-    def init(self):
-        self.frozenTableView.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.frozenTableView.verticalHeader().hide()
-        self.frozenTableView.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
-        self.viewport().stackUnder(self.frozenTableView)
-        self.frozenTableView.setSelectionModel(self.selectionModel())
-        
-        self.updateFrozenColumns()
-        self.frozenTableView.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.frozenTableView.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerItem)
-        self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerItem)
-        self.frozenTableView.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerItem)
-        self.updateFrozenTableGeometry()
-        self.frozenTableView.show()
-
-    def updateFrozenColumns(self):
-        """Ensure only the first column is visible in the frozen table."""
-        for col in range(self.model().columnCount()):
-            self.frozenTableView.setColumnHidden(col, col != 0)
-        if self.model().columnCount() > 0:
-            self.frozenTableView.setColumnWidth(0, self.columnWidth(0) or 100)
-
-    def resetFrozenTable(self):
-        """Handle model reset to ensure frozen table is correctly updated."""
-        self.updateFrozenColumns()
-        self.updateFrozenTableGeometry()
-
-    def updateSectionWidth(self, logicalIndex, oldSize, newSize):
-        if logicalIndex == 0:
-            self.frozenTableView.setColumnWidth(0, newSize)
-            self.updateFrozenTableGeometry()
-
-    def updateSectionHeight(self, logicalIndex, oldSize, newSize):
-        self.frozenTableView.setRowHeight(logicalIndex, newSize)
-
-    def frozenVerticalScroll(self, value):
-        self.verticalScrollBar().setValue(value)
-        self.viewport().update()
-
-    def mainVerticalScroll(self, value):
-        self.frozenTableView.verticalScrollBar().setValue(value)
-        self.viewport().update()
-
-    def updateFrozenTableGeometry(self):
-        """Update the geometry of the frozen table."""
-        if self.model().columnCount() > 0:
-            self.frozenTableView.setGeometry(
-                self.verticalHeader().width() + self.frameWidth(),
-                self.frameWidth(),
-                self.columnWidth(0),
-                self.viewport().height() + self.horizontalHeader().height()
-            )
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.updateFrozenTableGeometry()
-
-    def moveCursor(self, cursorAction, modifiers):
-        current = super().moveCursor(cursorAction, modifiers)
-        if cursorAction == QAbstractItemView.CursorAction.MoveLeft and current.column() > 0:
-            visual_x = self.visualRect(current).topLeft().x()
-            if visual_x < self.frozenTableView.columnWidth(0):
-                new_value = self.horizontalScrollBar().value() + visual_x - self.frozenTableView.columnWidth(0)
-                self.horizontalScrollBar().setValue(int(new_value))
-        return current
-
-    def scrollTo(self, index, hint=QAbstractItemView.ScrollHint.EnsureVisible):
-        if index.column() > 0:
-            super().scrollTo(index, hint)
 
 class CRMTab(QWidget):
     """CRMTab for managing pivoted CRM data with SQLite."""
@@ -228,7 +145,7 @@ class CRMTab(QWidget):
         # Add logo to subtab bar
         subtab_layout.addStretch()
         logo_label = QLabel()
-        logo_label.setPixmap(QPixmap("logo.png").scaled(100, 40, Qt.AspectRatioMode.KeepAspectRatio))
+        logo_label.setPixmap(QPixmap(LOGO_PNG_PATH).scaled(100, 40, Qt.AspectRatioMode.KeepAspectRatio))
         logo_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         subtab_layout.addWidget(logo_label)
 
@@ -292,24 +209,12 @@ class CRMTab(QWidget):
         content_layout.addWidget(self.table_view)
 
         self.ui_initialized = True
-
-    def resource_path(self,relative_path):
-        """Get absolute path to resource, works for dev and for PyInstaller."""
-        try:
-            # PyInstaller creates a temp folder and stores path in _MEIPASS
-            base_path = sys._MEIPASS
-        except Exception:
-            # In development mode, use the current directory
-            base_path = os.path.abspath(".")
-
-        return os.path.join(base_path, relative_path)
+        
     def init_db(self):
         """Initialize SQLite database."""
         try:
             # Use resource_path to get the correct path to the database
-            db_path = self.resource_path("crm_data.db")
-            self.conn = sqlite3.connect(db_path)
-            logger.info(f"Connected to SQLite database at {db_path}")
+            self.conn =get_db_connection()
         except Exception as e:
             logger.error(f"Failed to connect to SQLite database: {str(e)}")
             QMessageBox.warning(self, "Error", f"Failed to connect to database:\n{str(e)}")
@@ -409,7 +314,7 @@ class CRMTab(QWidget):
             model = CRMTableModel(self, df, decimal_places=int(self.decimal_places.currentText()))
             self.table_view.setModel(model)
             self.table_view.frozenTableView.setModel(model)
-            self.table_view.updateFrozenColumns()
+            self.table_view.update_frozen_columns
             
             for col_idx, col in enumerate(df.columns):
                 max_width = max([len(str(x)) for x in df[col].dropna()] + [len(str(col))], default=10)
@@ -629,7 +534,6 @@ class CRMTab(QWidget):
     def reset_cache(self):
         """Reset cache and close database connection."""
         if self.conn:
-            self.conn.close()
             logger.info("SQLite database connection closed")
         self.conn = None
         self.pivot_data = None
@@ -641,5 +545,4 @@ class CRMTab(QWidget):
     def __del__(self):
         """Ensure database connection is closed when object is destroyed."""
         if self.conn:
-            self.conn.close()
             logger.info("SQLite database connection closed in destructor")

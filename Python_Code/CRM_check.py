@@ -1,113 +1,34 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableView, QHeaderView, 
     QGroupBox, QMessageBox, QLineEdit, QLabel, QComboBox, QFileDialog,
-    QDialog, QRadioButton, QCheckBox,QLineEdit
+    QDialog, QRadioButton, QCheckBox, QButtonGroup, QDialogButtonBox
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import pyqtSignal
 import pandas as pd
 import re
 import logging
-from .crm_manager import CRMManager
-from ..pivot.freeze_table_widget import FreezeTableWidget
-from .pivot_table_model import PivotTableModel
-from .pivot_plot_dialog import PivotPlotWindow
-
+import sqlite3
+from ...Common.Freeze_column import FreezeTableWidget
+from ..pivot_table_model import PivotTableModel
+from ..verification.crm_calibration import PivotPlotWindow
+from openpyxl.styles import PatternFill
+from openpyxl.utils import get_column_letter
+from styles.common import common_styles
+from screens.process.crm.crm_manager import CRMManager
 # Setup logging
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 # Global stylesheet
-global_style = """
-    QWidget {
-        background-color: #F5F7FA;
-        font-family: 'Inter', 'Segoe UI', sans-serif;
-        font-size: 13px;
-    }
-    QGroupBox {
-        font-weight: bold;
-        color: #1A3C34;
-        margin-top: 15px;
-        border: 1px solid #D0D7DE;
-        border-radius: 6px;
-        padding: 10px;
-    }
-    QGroupBox::title {
-        subcontrol-origin: margin;
-        subcontrol-position: top left;
-        padding: 0 5px;
-        left: 10px;
-    }
-    QPushButton {
-        background-color: #2E7D32;
-        color: white;
-        border: none;
-        padding: 8px 16px;
-        font-weight: 600;
-        font-size: 13px;
-        border-radius: 6px;
-    }
-    QPushButton:hover {
-        background-color: #1B5E20;
-    }
-    QPushButton:disabled {
-        background-color: #E0E0E0;
-        color: #6B7280;
-    }
-    QTableView {
-        background-color: #FFFFFF;
-        border: 1px solid #D0D7DE;
-        gridline-color: #E5E7EB;
-        font-size: 12px;
-        selection-background-color: #DBEAFE;
-        selection-color: #1A3C34;
-    }
-    QHeaderView::section {
-        background-color: #F9FAFB;
-        font-weight: 600;
-        color: #1A3C34;
-        border: 1px solid #D0D7DE;
-        padding: 6px;
-    }
-    QTableView::item:selected {
-        background-color: #DBEAFE;
-        color: #1A3C34;
-    }
-    QTableView::item {
-        padding: 0px;
-    }
-    QLineEdit {
-        padding: 6px;
-        border: 1px solid #D0D7DE;
-        border-radius: 4px;
-        font-size: 13px;
-    }
-    QLineEdit:focus {
-        border: 1px solid #2E7D32;
-    }
-    QLabel {
-        font-size: 13px;
-        color: #1A3C34;
-    }
-    QComboBox {
-        padding: 6px;
-        border: 1px solid #D0D7DE;
-        border-radius: 4px;
-        font-size: 13px;
-    }
-    QComboBox:focus {
-        border: 1px solid #2E7D32;
-    }
-"""
-
 class CrmCheck(QWidget):
     data_changed = pyqtSignal()
-
+    
     def __init__(self, app, results_frame, parent=None):
         super().__init__(parent)
         self.app = app
         self.results_frame = results_frame
-        self.corrected_crm = {}  # Store CRM corrections: {element: {solution_label: {'scale': scale, 'blank': blank}}}
-        self._inline_crm_rows = {}
+        self.corrected_crm = {}
+        self._inline_crm_rows = {}  # Now uses unique key: {(label, row_index): [crm_data]}
         self._inline_crm_rows_display = {}
         self.included_crms = {}
         self.column_widths = {}
@@ -125,7 +46,7 @@ class CrmCheck(QWidget):
 
     def setup_ui(self):
         """Set up the UI with styling matching EmptyCheckFrame."""
-        self.setStyleSheet(global_style)
+        self.setStyleSheet(common_styles)
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(15, 15, 15, 15)
         main_layout.setSpacing(15)
@@ -237,7 +158,7 @@ class CrmCheck(QWidget):
             logger.warning("Invalid row selected for manual CRM")
             return
 
-        self.crm_manager.open_manual_crm_dialog(solution_label)
+        self.crm_manager.open_manual_crm_dialog(solution_label, row_index)
         self.update_pivot_display()
         self.data_changed.emit()
 
@@ -274,15 +195,18 @@ class CrmCheck(QWidget):
 
         logger.debug(f"Current view data shape: {pivot_data.shape}")
         self._inline_crm_rows_display = self.crm_manager._build_crm_row_lists_for_columns(list(pivot_data.columns))
+        
+        # Build combined_rows with proper tuple keys
         combined_rows = []
-        for sol_label in pivot_data['Solution Label']:
-            if sol_label in self._inline_crm_rows_display:
-                combined_rows.append((sol_label, self._inline_crm_rows_display[sol_label]))
+        for idx, sol_label in enumerate(pivot_data['Solution Label']):
+            row_key = (sol_label, idx)
+            if row_key in self._inline_crm_rows_display:
+                combined_rows.append((row_key, self._inline_crm_rows_display[row_key]))
 
         model = PivotTableModel(self, pivot_data, combined_rows)
         self.table_view.setModel(model)
         self.table_view.frozenTableView.setModel(model)
-        self.table_view.updateFrozenColumns()
+        self.table_view.update_frozen_columns()
         self.table_view.model().layoutChanged.emit()
         self.table_view.frozenTableView.model().layoutChanged.emit()
         self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
@@ -337,32 +261,150 @@ class CrmCheck(QWidget):
             QMessageBox.warning(self, "Warning", f"No backup found for column {column}")
 
     def export_table(self):
-        """Export the current pivot table to a CSV or Excel file."""
-        logger.debug("Attempting to export table")
+        """Export the pivot table with an optional colored CRM block."""
+        logger.debug("Export started")
         pivot_data = self.results_frame.last_filtered_data
         if pivot_data is None or pivot_data.empty:
-            logger.warning("No data to export")
             QMessageBox.warning(self, "Warning", "No data to export!")
             return
 
-        try:
-            file_path, selected_filter = QFileDialog.getSaveFileName(
+        has_crm = bool(self._inline_crm_rows_display)
+
+        export_with_style = False
+        if has_crm:
+            reply = QMessageBox.question(
                 self,
-                "Save Pivot Table",
-                "",
-                "CSV Files (*.csv);;Excel Files (*.xlsx);;All Files (*)"
+                "Export CRM rows",
+                "Colored CRM / Diff(%) rows are present.\n\n"
+                "Do you want to export the full table with colors in Excel?\n"
+                "• Yes – include CRM rows and apply colors\n"
+                "• No  – export only the original pivot table (no extra rows, no colors)",
+                QMessageBox.StandardButton.Yes |
+                QMessageBox.StandardButton.No |
+                QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Yes
             )
-            if not file_path:
-                logger.debug("Export cancelled by user")
+            if reply == QMessageBox.StandardButton.Cancel:
+                return
+            export_with_style = (reply == QMessageBox.StandardButton.Yes)
+
+        file_path, filter_ = QFileDialog.getSaveFileName(
+            self,
+            "Save Pivot Table",
+            "",
+            "Excel Files (*.xlsx);;CSV Files (*.csv);;All Files (*)"
+        )
+        if not file_path:
+            return
+
+        try:
+            # ---------- CSV (no styling possible) ----------
+            if filter_.startswith("CSV") or file_path.lower().endswith(".csv"):
+                if has_crm and export_with_style:
+                    QMessageBox.information(
+                        self, "Info",
+                        "CSV does not support colors or extra rows.\n"
+                        "Only the original table will be exported."
+                    )
+                pivot_data.to_csv(file_path, index=True)
+                QMessageBox.information(self, "Success", f"Exported to\n{file_path}")
                 return
 
-            if selected_filter.startswith("CSV"):
-                pivot_data.to_csv(file_path, index=True)
-            elif selected_filter.startswith("Excel"):
-                pivot_data.to_excel(file_path, index=True, engine='openpyxl')
-            
-            logger.debug(f"Table exported successfully to {file_path}")
-            QMessageBox.information(self, "Success", f"Table exported successfully to {file_path}")
+            # ---------- Excel ----------
+            if not file_path.lower().endswith(".xlsx"):
+                file_path += ".xlsx"
+
+            # Build DataFrame
+            if export_with_style and has_crm:
+                df_to_export = self._build_full_table_with_crm_for_export()
+            else:
+                df_to_export = pivot_data.copy()
+
+            with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
+                df_to_export.to_excel(writer, index=True, sheet_name="Pivot Table")
+
+                if export_with_style and has_crm:
+                    ws = writer.sheets["Pivot Table"]
+                    self._apply_crm_styling_to_worksheet(ws, len(pivot_data))
+
+            QMessageBox.information(self, "Success", f"Exported successfully to\n{file_path}")
+
         except Exception as e:
-            logger.error(f"Failed to export table: {str(e)}")
-            QMessageBox.warning(self, "Error", f"Failed to export table: {str(e)}")
+            logger.exception("Export failed")
+            QMessageBox.critical(self, "Error", f"Export failed:\n{e}")
+
+
+    def _build_full_table_with_crm_for_export(self):
+        """Return a DataFrame that contains original rows + CRM rows + Diff rows."""
+        pivot_data = self.results_frame.last_filtered_data
+        rows = []
+
+        try:
+            dec = int(self.results_frame.decimal_combo.currentText())
+        except Exception:
+            dec = 1
+
+        for idx in range(len(pivot_data)):
+            orig_row = pivot_data.iloc[idx].to_dict()
+            rows.append(orig_row)
+
+            key = (pivot_data.iloc[idx]["Solution Label"], idx)
+            blocks = self._inline_crm_rows_display.get(key, [])
+
+            for block_idx, (values_list, tags) in enumerate(blocks):
+                # CRM row
+                crm_row = orig_row.copy()
+                for col, val in zip(pivot_data.columns, values_list):
+                    crm_row[col] = val if val != "" else None
+                rows.append(crm_row)
+
+                # Diff row (second block)
+                if block_idx == 0 and len(blocks) > 1:
+                    diff_values, diff_tags = blocks[1]
+                    diff_row = orig_row.copy()
+                    diff_row["Solution Label"] = f"{pivot_data.iloc[idx]['Solution Label']} Diff (%)"
+                    for col, val in zip(pivot_data.columns, diff_values):
+                        diff_row[col] = val if val not in ("", "N/A") else None
+                    rows.append(diff_row)
+
+        return pd.DataFrame(rows, columns=pivot_data.columns)
+
+
+    def _apply_crm_styling_to_worksheet(self, ws, original_row_count):
+        """Apply background colors to CRM and Diff rows in the Excel worksheet."""
+        fill_crm        = PatternFill(start_color="E6F3E6", end_color="E6F3E6", fill_type="solid")  # light green
+        fill_diff_base  = PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid")  # light yellow
+        fill_in_range   = PatternFill(start_color="D4EDDA", end_color="D4EDDA", fill_type="solid")  # green
+        fill_out_range  = PatternFill(start_color="F8D7DA", end_color="F8D7DA", fill_type="solid")  # red
+
+        excel_row = 2  # row 1 = header
+
+        for idx in range(original_row_count):
+            sol_label = self.results_frame.last_filtered_data.iloc[idx]["Solution Label"]
+            key = (sol_label, idx)
+            blocks = self._inline_crm_rows_display.get(key, [])
+
+            # original data row – no fill
+            excel_row += 1
+
+            if not blocks:
+                continue
+
+            # ---- CRM row (first block) ----
+            for cell in ws[excel_row]:
+                cell.fill = fill_crm
+            excel_row += 1
+
+            # ---- Diff row (second block, if present) ----
+            if len(blocks) > 1:
+                _, diff_tags = blocks[1]
+                for col_idx, tag in enumerate(diff_tags, start=1):
+                    cell = ws.cell(row=excel_row, column=col_idx)
+                    if tag == "in_range":
+                        cell.fill = fill_in_range
+                    elif tag == "out_range":
+                        cell.fill = fill_out_range
+                    else:
+                        cell.fill = fill_diff_base
+                excel_row += 1
+

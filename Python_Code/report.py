@@ -6,72 +6,8 @@ from PyQt6.QtCore import Qt, QAbstractTableModel, QThread, pyqtSignal
 import pandas as pd
 from collections import defaultdict
 import logging
-
-# Global stylesheet for consistent UI
-global_style = """
-    QWidget {
-        font-family: 'Inter', 'Segoe UI', sans-serif;
-        font-size: 13px;
-        background-color: #F5F7FA;
-    }
-    QGroupBox {
-        font-weight: bold;
-        color: #1A3C34;
-        margin-top: 15px;
-        border: 1px solid #D0D7DE;
-        border-radius: 6px;
-        padding: 10px;
-    }
-    QGroupBox::title {
-        subcontrol-origin: margin;
-        subcontrol-position: top left;
-        padding: 0 5px;
-        left: 10px;
-    }
-    QPushButton {
-        background-color: #2E7D32;
-        color: white;
-        border: none;
-        padding: 8px 16px;
-        font-weight: 600;
-        font-size: 13px;
-        border-radius: 6px;
-    }
-    QPushButton:hover {
-        background-color: #1B5E20;
-    }
-    QPushButton:disabled {
-        background-color: #E0E0E0;
-        color: #6B7280;
-    }
-    QTableView {
-        background-color: #FFFFFF;
-        border: 1px solid #D0D7DE;
-        gridline-color: #E5E7EB;
-        font-size: 12px;
-        selection-background-color: #DBEAFE;
-        selection-color: #1A3C34;
-    }
-    QHeaderView::section {
-        background-color: #F9FAFB;
-        font-weight: 600;
-        color: #1A3C34;
-        border: 1px solid #D0D7DE;
-        padding: 6px;
-    }
-    QTableView::item:selected {
-        background-color: #DBEAFE;
-        color: #1A3C34;
-    }
-    QTableView::item {
-        padding: 0px;
-    }
-    QLabel {
-        font-size: 13px;
-        color: #1A3C34;
-    }
-"""
-
+from styles.common import common_styles
+from utils.utils import is_numeric
 class LoadReportThread(QThread):
     """Thread for loading report data asynchronously."""
     progress = pyqtSignal(int)
@@ -225,7 +161,7 @@ class ReportTab(QWidget):
 
     def setup_ui(self):
         """Set up the UI for ReportTab."""
-        self.setStyleSheet(global_style)
+        self.setStyleSheet(common_styles)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(15, 15, 15, 15)
@@ -239,12 +175,14 @@ class ReportTab(QWidget):
         # Load button
         load_btn = QPushButton("Load Report")
         load_btn.setMinimumWidth(80)
+        load_btn.setEnabled(False)
         load_btn.clicked.connect(self.start_load_report)
         control_layout.addWidget(load_btn)
 
         # Export button
         export_btn = QPushButton("Export Report")
         export_btn.setMinimumWidth(80)
+        export_btn.setEnabled(False)
         export_btn.clicked.connect(self.start_export_report)
         control_layout.addWidget(export_btn)
 
@@ -265,18 +203,6 @@ class ReportTab(QWidget):
         table_layout.addWidget(self.table_view)
 
         main_layout.addWidget(table_group, stretch=1)
-
-    def get_concentration_column(self, df):
-        """Select the appropriate concentration column from DataFrame."""
-        if 'Soln Conc' in df.columns:
-            # self.logger.debug("Using 'Soln Conc' column for concentrations")
-            return 'Soln Conc'
-        elif 'Corr Con' in df.columns:
-            # self.logger.debug("Falling back to 'Corr Con' column for concentrations")
-            return 'Corr Con'
-        else:
-            # self.logger.warning("Neither 'Soln Conc' nor 'Corr Con' found in DataFrame")
-            return None
 
     def generate_report_data(self):
         """Generate report DataFrame and select best wavelengths per row."""
@@ -494,14 +420,6 @@ class ReportTab(QWidget):
         self.export_thread.error.connect(lambda error: [self.progress_dialog.close(), QMessageBox.warning(self, "Error", error)])
         self.progress_dialog.canceled.connect(self.export_thread.terminate)
         self.export_thread.start()
-
-    def is_numeric(self, value):
-        """Check if a value is numeric."""
-        try:
-            float(value)
-            return True
-        except (ValueError, TypeError):
-            return False
 
     def format_value(self, x):
         """Format value for display."""

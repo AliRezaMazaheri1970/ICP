@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLab
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
 import logging
-
+from utils.var_main import LOGO_PNG_PATH
 # Setup logging
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -199,7 +199,7 @@ class MainTabContent(QWidget):
                     # Add logo to subtab bar
                     subtab_layout.addStretch()
                     logo_label = QLabel()
-                    logo_label.setPixmap(QPixmap("logo.png").scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatio))
+                    logo_label.setPixmap(QPixmap(LOGO_PNG_PATH).scaled(40, 40, Qt.AspectRatioMode.KeepAspectRatio))
                     logo_label.setAlignment(Qt.AlignmentFlag.AlignRight)
                     subtab_layout.addWidget(logo_label)
                     
@@ -265,7 +265,7 @@ class MainTabContent(QWidget):
                 # Add logo to subtab bar
                 subtab_layout.addStretch()
                 logo_label = QLabel()
-                logo_label.setPixmap(QPixmap("logo.png").scaled(100, 40, Qt.AspectRatioMode.KeepAspectRatio))
+                logo_label.setPixmap(QPixmap(LOGO_PNG_PATH).scaled(100, 40, Qt.AspectRatioMode.KeepAspectRatio))
                 logo_label.setAlignment(Qt.AlignmentFlag.AlignRight)
                 subtab_layout.addWidget(logo_label)
                 
@@ -369,18 +369,17 @@ class MainTabContent(QWidget):
             self.tabs[self.current_tab].hide()
             self.tab_buttons[self.current_tab].deselect()
             
-        self.tabs[tab_name].show()
+        self.tabs[tab_name].show()  # این مهم است
         self.tab_buttons[tab_name].select()
         self.current_tab = tab_name
-        
+
+        # رنگ‌ها
         colors = TAB_COLORS.get(tab_name, {"bg": "white", "indicator": "black"})
-        
-        # Check if the tab has a subtab bar and indicator
         if self.tab_subtab_map[tab_name].get("has_subtab_bar", False):
-            tab_layout = self.tabs[tab_name].layout()
-            if tab_layout.count() > 0 and tab_layout.itemAt(0) and tab_layout.itemAt(0).widget():
-                tab_layout.itemAt(0).widget().setStyleSheet(f"background-color: {colors['bg']};")
-            if tab_layout.count() > 1 and tab_layout.itemAt(1) and tab_layout.itemAt(1).widget():
-                tab_layout.itemAt(1).widget().setStyleSheet(f"background-color: {colors['indicator']};")
+            layout = self.tabs[tab_name].layout()
+            if layout.count() > 0:
+                layout.itemAt(0).widget().setStyleSheet(f"background-color: {colors['bg']};")
+            if layout.count() > 1:
+                layout.itemAt(1).widget().setStyleSheet(f"background-color: {colors['indicator']};")
         
         logger.debug(f"Switched to tab {tab_name}")

@@ -5,7 +5,6 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QFont, QPixmap, QColor
 from PyQt6.QtCore import Qt
-from .freeze_table_widget import FreezeTableWidget
 from .pivot_table_model import PivotTableModel
 from .pivot_creator import PivotCreator
 from .pivot_exporter import PivotExporter
@@ -19,222 +18,13 @@ import pyqtgraph as pg
 import re
 from datetime import datetime
 
+from utils.var_main import LOGO_PNG_PATH
+from ..Common.Freeze_column import FreezeTableWidget
+from ..Common.column_filter import ColumnFilterDialog
 # Setup logging
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-class ColumnFilterDialog(QDialog):
-    """Dialog for filtering a specific column with search and min/max for numeric columns."""
-    def __init__(self, parent, col_name):
-        super().__init__(parent)
-        self.setWindowTitle(f"Filter Column: {col_name}")
-        self.parent = parent
-        self.col_name = col_name
-        self.checkboxes = {}
-        self.min_edit = None
-        self.max_edit = None
-
-        if self.parent.pivot_data is None:
-            logger.warning(f"No pivot data available for filtering column {col_name}")
-            return
-
-        # Check if column is numeric by attempting conversion
-        try:
-            test_series = pd.to_numeric(self.parent.pivot_data[self.col_name], errors='coerce')
-            self.is_numeric_col = test_series.notna().any() and self.col_name != 'Solution Label'
-            logger.debug(f"Column {col_name} is_numeric after coercion: {self.is_numeric_col}")
-        except Exception as e:
-            self.is_numeric_col = False
-            logger.error(f"Error checking numeric type for {col_name}: {str(e)}")
-
-        unique_values = self.parent.pivot_data[self.col_name].dropna().unique()
-        if self.is_numeric_col:
-            sorted_unique = sorted(unique_values, key=lambda x: float(x) if self.is_numeric(str(x)) else float('inf'))
-        else:
-            sorted_unique = sorted(unique_values, key=str)
-
-        layout = QVBoxLayout(self)
-        self.setMinimumSize(400, 400)  # Ensure dialog is large enough to show tabs
-
-        # Always include list filter tab
-        tab_widget = QTabWidget()
-        list_tab = QWidget()
-        tab_widget.addTab(list_tab, "List Filter")
-        
-        # Add Number Filter tab for numeric columns (excluding Solution Label)
-        if self.is_numeric_col:
-            logger.debug(f"Adding Number Filter tab for column {col_name}")
-            number_tab = QWidget()
-            tab_widget.addTab(number_tab, "Number Filter")
-            self.setup_number_tab(number_tab)
-        else:
-            logger.debug(f"Skipping Number Filter tab for column {col_name}")
-
-        layout.addWidget(tab_widget)
-        self.setup_list_tab(list_tab, sorted_unique)
-
-        buttons = QHBoxLayout()
-        ok_btn = QPushButton("OK")
-        ok_btn.clicked.connect(self.apply_filters)
-        buttons.addWidget(ok_btn)
-
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.clicked.connect(self.reject)
-        buttons.addWidget(cancel_btn)
-
-        layout.addLayout(buttons)
-
-    def setup_list_tab(self, widget, sorted_unique):
-        list_layout = QVBoxLayout(widget)
-
-        self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Search...")
-        self.search_edit.textChanged.connect(self.filter_checkboxes)
-        list_layout.addWidget(self.search_edit)
-
-        scroll = QScrollArea()
-        scroll_widget = QWidget()
-        scroll_layout = QVBoxLayout(scroll_widget)
-        scroll.setWidget(scroll_widget)
-        scroll.setWidgetResizable(True)
-        list_layout.addWidget(scroll)
-
-        curr_filter = self.parent.filters.get(self.col_name, {})
-        selected_values = curr_filter.get('selected_values', set(sorted_unique))  # Default to all selected
-
-        for val in sorted_unique:
-            cb = QCheckBox(str(val))
-            cb.setChecked(val in selected_values)
-            cb.stateChanged.connect(lambda state, v=val: self.update_filter(v, state))
-            self.checkboxes[val] = cb
-            scroll_layout.addWidget(cb)
-
-        buttons = QHBoxLayout()
-        select_all_btn = QPushButton("Select All")
-        select_all_btn.clicked.connect(lambda: self.toggle_all(True))
-        buttons.addWidget(select_all_btn)
-
-        deselect_all_btn = QPushButton("Deselect All")
-        deselect_all_btn.clicked.connect(lambda: self.toggle_all(False))
-        buttons.addWidget(deselect_all_btn)
-
-        list_layout.addLayout(buttons)
-
-    def setup_number_tab(self, widget):
-        number_layout = QVBoxLayout(widget)
-
-        # Min filter
-        min_layout = QHBoxLayout()
-        min_label = QLabel("Minimum:")
-        self.min_edit = QLineEdit()
-        self.min_edit.setPlaceholderText("Enter min value")
-        self.min_edit.setFixedWidth(100)
-        min_layout.addWidget(min_label)
-        min_layout.addWidget(self.min_edit)
-        min_layout.addStretch()
-        number_layout.addLayout(min_layout)
-
-        # Max filter
-        max_layout = QHBoxLayout()
-        max_label = QLabel("Maximum:")
-        self.max_edit = QLineEdit()
-        self.max_edit.setPlaceholderText("Enter max value")
-        self.max_edit.setFixedWidth(100)
-        max_layout.addWidget(max_label)
-        max_layout.addWidget(self.max_edit)
-        max_layout.addStretch()
-        number_layout.addLayout(max_layout)
-
-        # Add info label showing current data range
-        try:
-            data_range = pd.to_numeric(self.parent.pivot_data[self.col_name], errors='coerce').dropna()
-            if not data_range.empty:
-                min_val = data_range.min()
-                max_val = data_range.max()
-                range_label = QLabel(f"Data Range: {min_val:.2f} to {max_val:.2f}")
-                range_label.setStyleSheet("color: blue; font-size: 10px;")
-                number_layout.addWidget(range_label)
-                logger.debug(f"Data range for {self.col_name}: {min_val} to {max_val}")
-            else:
-                logger.warning(f"No valid numeric data for range display in column {self.col_name}")
-        except Exception as e:
-            logger.error(f"Error computing data range for {self.col_name}: {str(e)}")
-
-        # Load current filter values
-        curr_filter = self.parent.filters.get(self.col_name, {})
-        if 'min_val' in curr_filter and curr_filter['min_val'] is not None:
-            self.min_edit.setText(str(curr_filter['min_val']))
-        if 'max_val' in curr_filter and curr_filter['max_val'] is not None:
-            self.max_edit.setText(str(curr_filter['max_val']))
-
-    def filter_checkboxes(self, text):
-        text = text.lower()
-        for val, cb in self.checkboxes.items():
-            if text == '' or text in str(val).lower():
-                cb.setVisible(True)
-                # Comment out automatic check to preserve previous selections
-                # cb.setChecked(True)  # Automatically check matching items
-            else:
-                cb.setVisible(False)
-                cb.setChecked(False)
-
-    def update_filter(self, value, state):
-        self.checkboxes[value].setChecked(state == Qt.CheckState.Checked.value)
-
-    def toggle_all(self, checked):
-        for cb in self.checkboxes.values():
-            if cb.isVisible():
-                cb.setChecked(checked)
-
-    def is_numeric(self, value):
-        try:
-            float(value)
-            return True
-        except (ValueError, TypeError):
-            return False
-
-    def apply_filters(self):
-        selected_values = {val for val, cb in self.checkboxes.items() if cb.isChecked()}
-        if not selected_values and not self.is_numeric_col:
-            QMessageBox.warning(self, "Warning", "No values selected. Please select at least one value.")
-            return
-
-        min_val = None
-        max_val = None
-        if self.is_numeric_col:
-            try:
-                if self.min_edit and self.min_edit.text().strip():
-                    min_val = float(self.min_edit.text())
-                    logger.debug(f"Min filter set for {self.col_name}: {min_val}")
-                if self.max_edit and self.max_edit.text().strip():
-                    max_val = float(self.max_edit.text())
-                    logger.debug(f"Max filter set for {self.col_name}: {max_val}")
-                # Validate min/max against data range
-                if min_val is not None or max_val is not None:
-                    data_range = pd.to_numeric(self.parent.pivot_data[self.col_name], errors='coerce').dropna()
-                    if not data_range.empty:
-                        min_data, max_data = data_range.min(), data_range.max()
-                        if (min_val is not None and min_val > max_data) or (max_val is not None and max_val < min_data):
-                            QMessageBox.warning(self, "Invalid Filter", f"Filter range ({min_val}, {max_val}) is outside data range ({min_data:.2f}, {max_data:.2f})")
-                            return
-            except ValueError:
-                QMessageBox.warning(self, "Invalid Input", "Min and Max must be numeric values.")
-                return
-
-        # If numeric, convert selected_values to float
-        if self.is_numeric_col and self.col_name != 'Solution Label':
-            selected_values = {float(val) for val in selected_values if self.is_numeric(str(val))}
-
-        filter_settings = {'selected_values': selected_values}
-        if min_val is not None:
-            filter_settings['min_val'] = min_val
-        if max_val is not None:
-            filter_settings['max_val'] = max_val
-
-        self.parent.filters[self.col_name] = filter_settings
-        logger.debug(f"Applied filters for {self.col_name}: {filter_settings}")
-        self.parent.update_pivot_display()
-        self.accept()
 
 class PlotDialog(QDialog):
     """Dialog for displaying a pyqtgraph plot in a new window with white background."""
@@ -302,117 +92,6 @@ class PlotOptionsDialog(QDialog):
             parent.plot_all_columns(selected_item)
         self.accept()
 
-class FreezeTableWidget(QTableView):
-    """A QTableView with a frozen first column that does not scroll horizontally."""
-    def __init__(self, model, pivot_tab=None):
-        super().__init__(pivot_tab)
-        self.pivot_tab = pivot_tab
-        self.frozenTableView = QTableView(self)
-        self.setModel(model)
-        self.frozenTableView.setModel(model)
-        self.init()
-
-        self.horizontalHeader().sectionResized.connect(self.updateSectionWidth)
-        self.verticalHeader().sectionResized.connect(self.updateSectionHeight)
-        self.frozenTableView.horizontalHeader().sectionClicked.connect(self.on_frozen_header_clicked)
-        self.frozenTableView.verticalScrollBar().valueChanged.connect(self.frozenVerticalScroll)
-        self.verticalScrollBar().valueChanged.connect(self.mainVerticalScroll)
-        self.model().modelReset.connect(self.resetFrozenTable)
-
-    def init(self):
-        self.frozenTableView.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.frozenTableView.verticalHeader().hide()
-        self.frozenTableView.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
-        self.viewport().stackUnder(self.frozenTableView)
-        
-        self.frozenTableView.setStyleSheet("""
-            QTableView { 
-                border: none;
-                selection-background-color: #999;
-            }
-        """)
-        self.frozenTableView.setSelectionModel(self.selectionModel())
-        
-        self.updateFrozenColumns()
-        
-        self.frozenTableView.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.frozenTableView.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.frozenTableView.show()
-        self.frozenTableView.viewport().repaint()
-        
-        self.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerItem)
-        self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerItem)
-        self.frozenTableView.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerItem)
-        
-        self.updateFrozenTableGeometry()
-
-    def updateFrozenColumns(self):
-        for col in range(self.model().columnCount()):
-            self.frozenTableView.setColumnHidden(col, col != 0)
-        if self.model().columnCount() > 0:
-            self.frozenTableView.setColumnWidth(0, self.columnWidth(0) or 100)
-
-    def resetFrozenTable(self):
-        self.updateFrozenColumns()
-        self.updateFrozenTableGeometry()
-
-    def updateSectionWidth(self, logicalIndex, oldSize, newSize):
-        if logicalIndex == 0:
-            self.frozenTableView.setColumnWidth(0, newSize)
-            self.updateFrozenTableGeometry()
-            self.frozenTableView.viewport().repaint()
-
-    def updateSectionHeight(self, logicalIndex, oldSize, newSize):
-        self.frozenTableView.setRowHeight(logicalIndex, newSize)
-        self.frozenTableView.viewport().repaint()
-
-    def frozenVerticalScroll(self, value):
-        self.viewport().stackUnder(self.frozenTableView)
-        self.verticalScrollBar().setValue(value)
-        self.frozenTableView.viewport().repaint()
-        self.viewport().update()
-
-    def mainVerticalScroll(self, value):
-        self.viewport().stackUnder(self.frozenTableView)
-        self.frozenTableView.verticalScrollBar().setValue(value)
-        self.frozenTableView.viewport().repaint()
-        self.viewport().update()
-
-    def updateFrozenTableGeometry(self):
-        self.frozenTableView.setGeometry(
-            self.verticalHeader().width() + self.frameWidth(),
-            self.frameWidth(),
-            self.columnWidth(0),
-            self.viewport().height() + self.horizontalHeader().height()
-        )
-        self.frozenTableView.viewport().repaint()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.updateFrozenTableGeometry()
-        self.frozenTableView.viewport().repaint()
-
-    def moveCursor(self, cursorAction, modifiers):
-        current = super().moveCursor(cursorAction, modifiers)
-        if cursorAction == QAbstractItemView.CursorAction.MoveLeft and current.column() > 0:
-            visual_x = self.visualRect(current).topLeft().x()
-            if visual_x < self.frozenTableView.columnWidth(0):
-                new_value = self.horizontalScrollBar().value() + visual_x - self.frozenTableView.columnWidth(0)
-                self.horizontalScrollBar().setValue(int(new_value))
-        self.frozenTableView.viewport().repaint()
-        return current
-
-    def scrollTo(self, index, hint=QAbstractItemView.ScrollHint.EnsureVisible):
-        if index.column() > 0:
-            super().scrollTo(index, hint)
-        self.frozenTableView.viewport().repaint()
-
-    def on_frozen_header_clicked(self, section):
-        if section == 0 and self.pivot_tab:
-            col_name = self.model().headerData(section, Qt.Orientation.Horizontal)
-            if col_name:
-                self.pivot_tab.on_header_clicked(section)
-
 class PivotTab(QWidget):
     """PivotTab with inline duplicate rows, difference coloring, plot visualization, and editable cells."""
     def __init__(self, app, parent_frame):
@@ -426,7 +105,6 @@ class PivotTab(QWidget):
         self.row_filter_values = {}
         self.column_filter_values = {}
         self.filters = {}
-        self.original_df = None
         self.column_widths = {}
         self.cached_formatted = {}
         self.current_view_df = None
@@ -441,7 +119,6 @@ class PivotTab(QWidget):
         self.use_oxide_var = QCheckBox("Use Oxide")
         self.duplicate_threshold = 10.0
         self.duplicate_threshold_edit = QLineEdit("10")
-        self.original_pivot_data_backups = {}
         self.pivot_creator = PivotCreator(self)
         self.pivot_exporter = PivotExporter(self)
         self.setup_ui()
@@ -519,7 +196,7 @@ class PivotTab(QWidget):
         export_btn.clicked.connect(self.pivot_exporter.export_pivot)
         subtab_layout.addWidget(export_btn)
         
-        logo_path = "logo.png"
+        logo_path = LOGO_PNG_PATH
         if os.path.exists(logo_path):
             logo_label = QLabel()
             logo_label.setPixmap(QPixmap(logo_path).scaled(100, 40, Qt.AspectRatioMode.KeepAspectRatio))
@@ -539,7 +216,8 @@ class PivotTab(QWidget):
         content_layout.setSpacing(0)
         content_area.setLayout(content_layout)
 
-        self.table_view = FreezeTableWidget(PivotTableModel(self), pivot_tab=self)
+        self.table_view = FreezeTableWidget(PivotTableModel(self), frozen_columns=1, parent=self)
+        self.table_view.set_header_click_callback(self.on_header_clicked)
         self.table_view.setAlternatingRowColors(True)
         self.table_view.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.table_view.setSortingEnabled(True)
@@ -553,6 +231,39 @@ class PivotTab(QWidget):
         self.table_view.horizontalHeader().sectionClicked.connect(self.on_header_clicked)
         self.table_view.doubleClicked.connect(self.on_cell_double_click)
         self.table_view.keyPressEvent = self.handle_key_press
+
+        # Legend بالای جدول
+        # === Legend با اسکرول افقی (برای فایل‌های زیاد) ===
+        self.legend_widget = QWidget()
+        self.legend_widget.setFixedHeight(50)
+        self.legend_widget.setStyleSheet("""
+            QWidget {
+                background-color: #f8f9fa;
+                border-bottom: 1px solid #dee2e6;
+            }
+        """)
+
+        # Scroll Area برای لیجند
+        self.legend_scroll = QScrollArea()
+        self.legend_scroll.setWidgetResizable(True)
+        self.legend_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.legend_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.legend_scroll.setFixedHeight(50)
+        self.legend_scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+        # Widget داخل اسکرول
+        self.legend_container = QWidget()
+        self.legend_layout = QHBoxLayout(self.legend_container)
+        self.legend_layout.setContentsMargins(15, 8, 15, 8)
+        self.legend_layout.setSpacing(20)
+        self.legend_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+
+        self.legend_scroll.setWidget(self.legend_container)
+        
+        # اضافه کردن به layout
+        content_layout.insertWidget(0, self.legend_scroll)
+        self.legend_widget.hide()  # تا وقتی داده نباشه مخفی باشه
+
         content_layout.addWidget(self.table_view)
         
         self.status_label = QLabel("Pivot table will be displayed here.")
@@ -564,14 +275,24 @@ class PivotTab(QWidget):
         layout.addWidget(indicator)
         layout.addWidget(content_area, 1)
 
-    def on_header_clicked(self, section):
+    def on_header_clicked(self, section, col_name=None):
         if self.pivot_data is None:
             return
-        col_name = self.table_view.model().headerData(section, Qt.Orientation.Horizontal)
-        if col_name:
-            logger.debug(f"Header clicked for column: {col_name}")
-            dialog = ColumnFilterDialog(self, col_name)
-            dialog.exec()
+
+        if col_name is None:
+            model = self.table_view.model()
+            if model:
+                col_name = model.headerData(section, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)
+                col_name = str(col_name)
+
+        dialog = ColumnFilterDialog(
+            parent=self,
+            col_name=col_name,
+            data_source=self.pivot_data,
+            column_filters=self.filters,
+            on_apply_callback=self.update_pivot_display
+        )
+        dialog.exec()
 
     def handle_key_press(self, event):
         self.logger.debug(f"Key pressed: {event.key()}")
@@ -586,13 +307,6 @@ class PivotTab(QWidget):
                 self.table_view.clearSelection()
                 self.table_view.setFocus()
         super(QTableView, self.table_view).keyPressEvent(event)
-
-    def is_numeric(self, value):
-        try:
-            float(value)
-            return True
-        except (ValueError, TypeError):
-            return False
 
     def format_value(self, x):
         try:
@@ -762,8 +476,9 @@ class PivotTab(QWidget):
 
         if len(selected_cols) > 1:
             df = df[selected_cols]
-
+ 
         df = df.reset_index(drop=True)
+
         self.current_view_df = df
         self.logger.debug(f"Current view data shape: {df.shape}")
 
@@ -778,10 +493,34 @@ class PivotTab(QWidget):
             if sol_label in self._inline_duplicates_display:
                 combined_rows.append((sol_label, self._inline_duplicates_display[sol_label]))
 
+        # === رنگ‌بندی ردیف‌ها بر اساس فایل + ساخت لیجند ===
+        # === رنگ‌بندی فقط برای Row Header (شماره سطر سمت چپ) ===
+        self.row_header_colors = ['#FFFFFF'] * len(df)  # پیش‌فرض سفید
+        self.file_colors = {}  # برای لیجند
+
+        color_palette = [
+            '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57',
+            '#A29BFE', '#FD79A8', '#55E6C1', '#FFD93D', '#6C5CE7'
+        ]
+
+        for i, file_info in enumerate(self.app.file_ranges):
+            clean_name = file_info['clean_name']
+            start = file_info['start_pivot_row']
+            end = file_info['end_pivot_row']
+            color = color_palette[i % len(color_palette)]
+            self.file_colors[clean_name] = color
+
+            # فقط ردیف‌هایی که الان در نمای فیلتر شده وجود دارن
+            for idx in range(len(df)):
+                if start <= idx <= end:
+                    self.row_header_colors[idx] = color
+
+
+
         model = PivotTableModel(self, df, combined_rows)
         self.table_view.setModel(model)
         self.table_view.frozenTableView.setModel(model)
-        self.table_view.updateFrozenColumns()
+        self.table_view.update_frozen_columns()
         self.table_view.model().layoutChanged.emit()
         self.table_view.frozenTableView.model().layoutChanged.emit()
         self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
@@ -790,6 +529,50 @@ class PivotTab(QWidget):
                 self.table_view.horizontalHeader().resizeSection(col, width)
         self.table_view.viewport().update()
         self.logger.debug("Completed update_pivot_display")
+        
+        # === آپدیت لیجند با اسکرول افقی ===
+        # پاک کردن محتوای قبلی
+        for i in reversed(range(self.legend_layout.count())):
+            item = self.legend_layout.itemAt(i)
+            if item.widget():
+                item.widget().setParent(None)
+
+        if hasattr(self, 'file_colors') and self.file_colors:
+            # عنوان
+            title = QLabel("File Groups:")
+            title.setStyleSheet("font-weight: bold; color: #495057; margin-right: 10px;")
+            self.legend_layout.addWidget(title)
+
+            # اضافه کردن هر فایل با مربع رنگی
+            for file_name, color in self.file_colors.items():
+                color_box = QLabel("■■")
+                color_box.setStyleSheet(f"""
+                    color: {color};
+                    font-size: 20px;
+                    background: transparent;
+                    margin-right: 6px;
+                """)
+                name_label = QLabel(file_name)
+                name_label.setStyleSheet("""
+                    font-size: 11px;
+                    color: #212529;
+                    white-space: nowrap;
+                """)
+
+                item_widget = QWidget()
+                item_layout = QHBoxLayout(item_widget)
+                item_layout.setContentsMargins(0, 0, 0, 0)
+                item_layout.setSpacing(6)
+                item_layout.addWidget(color_box)
+                item_layout.addWidget(name_label)
+                item_layout.addStretch()
+
+                self.legend_layout.addWidget(item_widget)
+
+            self.legend_layout.addStretch()
+            self.legend_scroll.show()
+        else:
+            self.legend_scroll.hide()
 
     def calculate_dynamic_range(self, value):
         try:
@@ -877,19 +660,32 @@ class PivotTab(QWidget):
             QMessageBox.warning(self, "Error", f"Failed to display cell info: {str(e)}")
 
     def open_row_filter_window(self):
-        self.logger.debug("Opening row filter window")
         if self.pivot_data is None:
             QMessageBox.warning(self, "Warning", "No data to filter!")
             return
-        dialog = ColumnFilterDialog(self, 'Solution Label')
+
+        dialog = ColumnFilterDialog(
+            parent=self,
+            col_name='Solution Label',
+            data_source=self.pivot_data,
+            column_filters=self.filters,
+            on_apply_callback=self.update_pivot_display
+        )
         dialog.exec()
 
     def open_column_filter_window(self):
-        self.logger.debug("Opening column filter window")
         if self.pivot_data is None:
             QMessageBox.warning(self, "Warning", "No data to filter!")
             return
-        dialog = ColumnFilterDialog(self, 'Element')
+
+        # برای فیلتر ستون‌ها، از داده اصلی استفاده کن
+        dialog = ColumnFilterDialog(
+            parent=self,
+            col_name='Element',
+            data_source=self.original_df if hasattr(self, 'original_df') else self.pivot_data,
+            column_filters=self.column_filter_values,  # یا self.filters
+            on_apply_callback=self.update_pivot_display
+        )
         dialog.exec()
 
     def reset_cache(self):
@@ -899,10 +695,8 @@ class PivotTab(QWidget):
         self.element_order = None
         self.column_widths.clear()
         self.cached_formatted.clear()
-        self.original_df = None
         self._inline_duplicates.clear()
         self._inline_duplicates_display.clear()
-        self.original_pivot_data_backups.clear()
         self.filters.clear()
         if self.current_plot_dialog:
             self.logger.debug("Closing existing plot dialog")
@@ -981,13 +775,3 @@ class PivotTab(QWidget):
         plot_item.setLabel('left', 'Values')
         plot_item.addLegend()
         dialog.show()
-
-    def backup_column(self, column):
-        if self.pivot_data is not None and column in self.pivot_data.columns and column not in self.original_pivot_data_backups:
-            self.original_pivot_data_backups[column] = self.pivot_data[column].copy()
-
-    def restore_column(self, column):
-        if column in self.original_pivot_data_backups:
-            self.pivot_data[column] = self.original_pivot_data_backups[column].copy()
-            del self.original_pivot_data_backups[column]
-            self.update_pivot_display()

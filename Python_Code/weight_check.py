@@ -6,7 +6,7 @@ import numpy as np
 import time
 import logging
 from collections import deque
-
+from styles.common import common_styles
 # Setup logging
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -66,87 +66,7 @@ class WeightCheckFrame(QWidget):
     def setup_ui(self):
         """Set up the UI with enhanced controls and a modern layout."""
         start_time = time.time()
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #F5F7FA;
-                font-family: 'Inter', 'Segoe UI', sans-serif;
-                font-size: 13px;
-            }
-            QGroupBox {
-                font-weight: bold;
-                color: #1A3C34;
-                margin-top: 15px;
-                border: 1px solid #D0D7DE;
-                border-radius: 6px;
-                padding: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 0 5px;
-                left: 10px;
-            }
-            QLineEdit {
-                background-color: #FFFFFF;
-                border: 1px solid #D0D7DE;
-                padding: 6px;
-                border-radius: 6px;
-                font-size: 13px;
-            }
-            QLineEdit:focus {
-                border: 1px solid #2E7D32;
-            }
-            QPushButton {
-                background-color: #2E7D32;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                font-weight: 600;
-                font-size: 13px;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #1B5E20;
-            }
-            QPushButton:disabled {
-                background-color: #E0E0E0;
-                color: #6B7280;
-            }
-            QLabel {
-                color: #1A3C34;
-                font-size: 13px;
-            }
-            QTableView {
-                background-color: #FFFFFF;
-                border: 1px solid #D0D7DE;
-                gridline-color: #E5E7EB;
-                font-size: 12px;
-                selection-background-color: #DBEAFE;
-                selection-color: #1A3C34;
-                padding: 0px;
-                margin: 0px;
-            }
-            QHeaderView::section {
-                background-color: #F9FAFB;
-                font-weight: 600;
-                color: #1A3C34;
-                border: 1px solid #D0D7DE;
-                padding: 2px;
-            }
-            QTableView::item:selected {
-                background-color: #DBEAFE;
-                color: #1A3C34;
-            }
-            QTableView::item {
-                padding: 0px;
-            }
-            QTableView QCheckBox {
-                margin: 2px;
-                padding: 2px;
-                min-width: 20px;
-                min-height: 20px;
-            }
-        """)
+        self.setStyleSheet(common_styles)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(15, 15, 15, 15)

@@ -5,211 +5,11 @@ import pandas as pd
 import numpy as np
 import time
 import logging
-
+from ..Common.column_filter import ColumnFilterDialog
+from styles.common import common_styles
 # Setup logging with minimal output
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
-
-class ColumnFilterDialog(QDialog):
-    """Dialog for filtering a specific column with list and numeric filters."""
-    def __init__(self, parent, col_name):
-        super().__init__(parent)
-        self.setWindowTitle(f"Filter Column: {col_name}")
-        self.parent = parent
-        self.col_name = col_name
-        self.checkboxes = {}
-        self.min_edit = None
-        self.max_edit = None
-
-        if self.parent.empty_rows is None or self.col_name not in self.parent.empty_rows.columns:
-            logger.warning(f"No data available for filtering column {col_name}")
-            return
-
-        # Check if column is numeric by attempting conversion
-        try:
-            test_series = pd.to_numeric(self.parent.empty_rows[self.col_name], errors='coerce')
-            self.is_numeric_col = test_series.notna().any() and self.col_name != 'Solution Label'
-        except Exception as e:
-            self.is_numeric_col = False
-            logger.error(f"Error checking numeric type for {col_name}: {str(e)}")
-
-        # Get unique values, including NaN
-        unique_values = self.parent.empty_rows[self.col_name].replace(np.nan, 'NaN').astype(str).unique()
-        sorted_unique = sorted(unique_values, key=str)
-
-        layout = QVBoxLayout(self)
-        self.setMinimumSize(400, 400)
-
-        # Tab widget for list and numeric filters
-        tab_widget = QTabWidget()
-        list_tab = QWidget()
-        tab_widget.addTab(list_tab, "List Filter")
-        
-        if self.is_numeric_col:
-            number_tab = QWidget()
-            tab_widget.addTab(number_tab, "Number Filter")
-            self.setup_number_tab(number_tab)
-        
-        layout.addWidget(tab_widget)
-        self.setup_list_tab(list_tab, sorted_unique)
-
-        # OK and Cancel buttons
-        action_buttons = QHBoxLayout()
-        ok_btn = QPushButton("OK")
-        ok_btn.clicked.connect(self.apply_filters)
-        action_buttons.addWidget(ok_btn)
-
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.clicked.connect(self.reject)
-        action_buttons.addWidget(cancel_btn)
-
-        layout.addLayout(action_buttons)
-
-    def setup_list_tab(self, widget, sorted_unique):
-        """Set up the list filter tab with checkboxes for unique values."""
-        list_layout = QVBoxLayout(widget)
-
-        self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Search...")
-        self.search_edit.textChanged.connect(self.filter_checkboxes)
-        list_layout.addWidget(self.search_edit)
-
-        scroll = QScrollArea()
-        scroll_widget = QWidget()
-        scroll_layout = QVBoxLayout(scroll_widget)
-        scroll.setWidget(scroll_widget)
-        scroll.setWidgetResizable(True)
-        list_layout.addWidget(scroll)
-
-        curr_filter = self.parent.filters.get(self.col_name, {})
-        selected_values = curr_filter.get('selected_values', set(sorted_unique))
-
-        for val in sorted_unique:
-            cb = QCheckBox(str(val))
-            cb.setChecked(val in selected_values)
-            cb.stateChanged.connect(lambda state, v=val: self.update_filter(v, state))
-            self.checkboxes[val] = cb
-            scroll_layout.addWidget(cb)
-
-        buttons = QHBoxLayout()
-        select_all_btn = QPushButton("Select All")
-        select_all_btn.clicked.connect(lambda: self.toggle_all(True))
-        buttons.addWidget(select_all_btn)
-
-        deselect_all_btn = QPushButton("Deselect All")
-        deselect_all_btn.clicked.connect(lambda: self.toggle_all(False))
-        buttons.addWidget(deselect_all_btn)
-
-        list_layout.addLayout(buttons)
-
-    def setup_number_tab(self, widget):
-        """Set up the numeric filter tab with min/max inputs."""
-        number_layout = QVBoxLayout(widget)
-
-        # Min filter
-        min_layout = QHBoxLayout()
-        min_label = QLabel("Minimum:")
-        self.min_edit = QLineEdit()
-        self.min_edit.setPlaceholderText("Enter min value")
-        self.min_edit.setFixedWidth(100)
-        min_layout.addWidget(min_label)
-        min_layout.addWidget(self.min_edit)
-        min_layout.addStretch()
-        number_layout.addLayout(min_layout)
-
-        # Max filter
-        max_layout = QHBoxLayout()
-        max_label = QLabel("Maximum:")
-        self.max_edit = QLineEdit()
-        self.max_edit.setPlaceholderText("Enter max value")
-        self.max_edit.setFixedWidth(100)
-        max_layout.addWidget(max_label)
-        max_layout.addWidget(self.max_edit)
-        max_layout.addStretch()
-        number_layout.addLayout(max_layout)
-
-        # Display data range
-        try:
-            data_range = pd.to_numeric(self.parent.empty_rows[self.col_name], errors='coerce').dropna()
-            if not data_range.empty:
-                min_val = data_range.min()
-                max_val = data_range.max()
-                range_label = QLabel(f"Data Range: {min_val:.2f} to {max_val:.2f}")
-                range_label.setStyleSheet("color: blue; font-size: 10px;")
-                number_layout.addWidget(range_label)
-            else:
-                logger.warning(f"No valid numeric data for range display in column {self.col_name}")
-        except Exception as e:
-            logger.error(f"Error computing data range for {self.col_name}: {str(e)}")
-
-        # Load current filter values
-        curr_filter = self.parent.filters.get(self.col_name, {})
-        if 'min_val' in curr_filter and curr_filter['min_val'] is not None:
-            self.min_edit.setText(str(curr_filter['min_val']))
-        if 'max_val' in curr_filter and curr_filter['max_val'] is not None:
-            self.max_edit.setText(str(curr_filter['max_val']))
-
-    def filter_checkboxes(self, text):
-        """Filter checkboxes based on search text."""
-        text = text.lower()
-        for val, cb in self.checkboxes.items():
-            if text == '' or text in str(val).lower():
-                cb.setVisible(True)
-            else:
-                cb.setVisible(False)
-                cb.setChecked(False)
-
-    def update_filter(self, value, state):
-        """Update the checkbox state for a value."""
-        self.checkboxes[value].setChecked(state == Qt.CheckState.Checked.value)
-
-    def toggle_all(self, checked):
-        """Select or deselect all visible checkboxes."""
-        for cb in self.checkboxes.values():
-            if cb.isVisible():
-                cb.setChecked(checked)
-
-    def apply_filters(self):
-        """Apply the selected filters and update the parent table."""
-        selected_values = {val for val, cb in self.checkboxes.items() if cb.isChecked()}
-        if not selected_values and not self.is_numeric_col:
-            QMessageBox.warning(self, "Warning", "No values selected. Please select at least one value.")
-            return
-
-        min_val = None
-        max_val = None
-        if self.is_numeric_col:
-            try:
-                if self.min_edit and self.min_edit.text().strip():
-                    min_val = float(self.min_edit.text())
-                if self.max_edit and self.max_edit.text().strip():
-                    max_val = float(self.max_edit.text())
-                if min_val is not None and max_val is not None and min_val > max_val:
-                    QMessageBox.warning(self, "Invalid Filter", "Minimum value cannot be greater than maximum value.")
-                    return
-            except ValueError:
-                QMessageBox.warning(self, "Invalid Input", "Min and Max must be numeric values.")
-                return
-
-        # Convert string values to numeric where possible, keep 'NaN' as np.nan
-        converted_values = set()
-        for val in selected_values:
-            if val == 'NaN':
-                converted_values.add(np.nan)
-            else:
-                try:
-                    converted_values.add(float(val))
-                except ValueError:
-                    converted_values.add(val)
-
-        filter_settings = {'selected_values': converted_values}
-        if self.is_numeric_col:
-            filter_settings['min_val'] = min_val
-            filter_settings['max_val'] = max_val
-
-        self.parent.filters[self.col_name] = filter_settings
-        self.parent.update_empty_table()
-        self.accept()
 
 class ElementSelectionDialog(QDialog):
     """Dialog for selecting main elements with checkboxes."""
@@ -309,83 +109,7 @@ class EmptyCheckFrame(QWidget):
 
     def setup_ui(self):
         """Set up the UI with enhanced controls."""
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #F5F7FA;
-                font-family: 'Inter', 'Segoe UI', sans-serif;
-                font-size: 13px;
-            }
-            QGroupBox {
-                font-weight: bold;
-                color: #1A3C34;
-                margin-top: 15px;
-                border: 1px solid #D0D7DE;
-                border-radius: 6px;
-                padding: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 0 5px;
-                left: 10px;
-            }
-            QLineEdit {
-                background-color: #FFFFFF;
-                border: 1px solid #D0D7DE;
-                padding: 6px;
-                border-radius: 6px;
-                font-size: 13px;
-            }
-            QLineEdit:focus {
-                border: 1px solid #2E7D32;
-            }
-            QPushButton {
-                background-color: #2E7D32;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                font-weight: 600;
-                font-size: 13px;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #1B5E20;
-            }
-            QPushButton:disabled {
-                background-color: #E0E0E0;
-                color: #6B7280;
-            }
-            QLabel {
-                color: #1A3C34;
-                font-size: 13px;
-            }
-            QTableView {
-                background-color: #FFFFFF;
-                border: 1px solid #D0D7DE;
-                gridline-color: #E5E7EB;
-                font-size: 12px;
-                selection-background-color: #DBEAFE;
-                selection-color: #1A3C34;
-            }
-            QHeaderView::section {
-                background-color: #F9FAFB;
-                font-weight: 600;
-                color: #1A3C34;
-                border: 1px solid #D0D7DE;
-                padding: 6px;
-            }
-            QTableView::item:selected {
-                background-color: #DBEAFE;
-                color: #1A3C34;
-            }
-            QTableView::item {
-                padding: 0px;
-            }
-            QCheckBox {
-                color: #1A3C34;
-                font-size: 13px;
-            }
-        """)
+        self.setStyleSheet(common_styles)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(15, 15, 15, 15)
@@ -517,17 +241,30 @@ class EmptyCheckFrame(QWidget):
         )
 
     def on_header_clicked(self, section):
-        """Handle header click to open filter dialog."""
         if self.empty_rows is None or self.empty_rows.empty:
             QMessageBox.warning(self, "Warning", "No data to filter!")
             return
+
         model = self.empty_table.model()
+        if model is None:
+            return
+
         col_name = model.headerData(section, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)
-        dialog = ColumnFilterDialog(self, col_name)
+        if col_name is None:
+            return
+
+        logger.debug(f"Opening filter dialog for column: {col_name}")
+
+        dialog = ColumnFilterDialog(
+            parent=self,
+            col_name=col_name,
+            data_source=self.empty_rows,  # داده اصلی
+            column_filters=self.filters,  # فیلترهای فعلی
+            on_apply_callback=self.update_empty_table  # بعد از اعمال → آپدیت جدول
+        )
         dialog.exec()
 
     def clear_filters(self):
-        """Clear all column filters and update the table."""
         self.filters.clear()
         self.update_empty_table()
         QMessageBox.information(self, "Filters Cleared", "All column filters have been cleared.")

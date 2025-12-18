@@ -1,182 +1,210 @@
+# screens/pivot/pivot_creator.py
 import re
-import pandas as pd
-from PyQt6.QtWidgets import QMessageBox
-from .oxide_factors import oxide_factors
 import math
 from functools import reduce
+import numpy as np
+import pandas as pd
+from PyQt6.QtWidgets import QMessageBox
+
+
+def gcd_list(numbers):
+    if not numbers:
+        return 1
+    return reduce(math.gcd, numbers)
+
 
 class PivotCreator:
-    """Handles pivot table creation for the PivotTab."""
+    """ساخت پیوت فقط با NumPy — در آخر به pandas تبدیل میشود تا با کد قدیمی سازگار باشد"""
+
     def __init__(self, pivot_tab):
         self.pivot_tab = pivot_tab
 
     def create_pivot(self):
-        """Create and populate the pivot table from the application data."""
-        df = self.pivot_tab.app.get_data()
-        if df is None or df.empty:
-            QMessageBox.warning(self.pivot_tab, "Warning", "No data to display!")
+        df = self.pivot_tab.app.init_data
+        if df is None or len(df) == 0:
+            QMessageBox.warning(self.pivot_tab, "هشدار", "داده‌ای برای نمایش وجود ندارد!")
+            self.pivot_tab.pivot_data = None
+            self.pivot_tab.update_pivot_display()
             return
 
         try:
-            self.pivot_tab.original_df = df.copy()
-            df_filtered = df[df['Type'].isin(['Samp', 'Sample'])].copy()
-            if df_filtered.empty:
-                QMessageBox.warning(self.pivot_tab, "Warning", "No sample data found after filtering!")
+            records = df.to_dict('records')
+            samples = [r for r in records if str(r.get('Type', '')).strip() in ('Samp', 'Sample')]
+            if not samples:
+                QMessageBox.warning(self.pivot_tab, "هشدار", "هیچ نمونه‌ای (Sample/Samp) یافت نشد!")
+                self.pivot_tab.pivot_data = None
+                self.pivot_tab.update_pivot_display()
                 return
 
-            df_filtered['original_index'] = df_filtered.index
-            df_filtered = df_filtered.reset_index(drop=True)
+            # حفظ ترتیب اصلی
+            for i, rec in enumerate(samples):
+                rec['_orig_index'] = i
 
-            def calculate_set_size(solution_label, df_subset):
-                counts = df_subset['Element'].value_counts().values
-                if len(counts) > 0:
-                    g = reduce(math.gcd, counts)
-                    total_rows = len(df_subset)
-                    if g > 0 and total_rows % g == 0:
-                        most_common_size = total_rows // g
-                    else:
-                        most_common_size = total_rows
-                else:
-                    most_common_size = 1
-                return most_common_size
+            # تمیزکاری
+            for rec in samples:
+                label = rec.get('Solution Label')
+                rec['Solution Label'] = 'Unknown' if not label or str(label).strip() in ('', 'nan') else str(label).strip()
+                elem = str(rec.get('Element', ''))
+                rec['Element'] = elem.split('_')[0]
 
+            value_col = 'Int' if self.pivot_tab.use_int_var.isChecked() else 'Corr Con'
+
+            # گروه‌بندی بر اساس Solution Label
+            solution_groups = {}
+            for rec in samples:
+                sl = rec['Solution Label']
+                solution_groups.setdefault(sl, []).append(rec)
+
+            # محاسبه اندازه مجموعه
             most_common_sizes = {}
-            for solution_label in df_filtered['Solution Label'].unique():
-                df_subset = df_filtered[df_filtered['Solution Label'] == solution_label]
-                most_common_sizes[solution_label] = calculate_set_size(solution_label, df_subset)
+            for sl, group in solution_groups.items():
+                counts = {}
+                for r in group:
+                    counts[r['Element']] = counts.get(r['Element'], 0) + 1
+                values = list(counts.values())
+                g = gcd_list(values)
+                total = len(group)
+                most_common_sizes[sl] = total // g if g > 1 and total % g == 0 else total
 
-            df_filtered['set_size'] = df_filtered['Solution Label'].map(most_common_sizes)
-            element_counts = df_filtered.groupby(['Solution Label', df_filtered.groupby('Solution Label').cumcount() // df_filtered['set_size'], 'Element']).size().reset_index(name='count')
-            has_repeats = (element_counts['count'] > 1).any()
+            # تشخیص تکرار عنصر
+            has_repeats = False
+            check = {}
+            for rec in samples:
+                sl = rec['Solution Label']
+                pos = next(i for i, r in enumerate(solution_groups[sl]) if r is rec)
+                gid_approx = pos // most_common_sizes[sl]
+                key = (sl, gid_approx, rec['Element'])
+                check[key] = check.get(key, 0) + 1
+                if check[key] > 1:
+                    has_repeats = True
+                    break
 
-            def clean_label(label):
-                m = re.search(r'(\d+)', str(label).replace(' ', ''))
-                if m:
-                    return f"{label.split()[0]} {m.group(1)}"
-                return label
+            def label_key(x):
+                s = str(x).replace(' ', '')
+                m = re.search(r'(\d+)', s)
+                return (s.lower() if not m else s[:m.start()].lower(), int(m.group(1)) if m else 0)
 
-            if not has_repeats:
-                df_filtered['Element'] = df_filtered['Element'].str.split('_').str[0]
-                df_filtered['unique_id'] = df_filtered.groupby(['Solution Label', 'Element']).cumcount()
+            final_rows = []
 
-                self.pivot_tab.solution_label_order = sorted(df_filtered['Solution Label'].drop_duplicates().apply(clean_label).unique().tolist())
-                self.pivot_tab.element_order = df_filtered['Element'].drop_duplicates().tolist()
+            if has_repeats:
+                # حالت تکرار: گروه‌بندی دقیق
+                for rec in samples:
+                    sl = rec['Solution Label']
+                    pos = next(i for i, r in enumerate(solution_groups[sl]) if r is rec)
+                    rec['_group_id'] = pos // most_common_sizes[sl]
 
-                value_column = 'Int' if self.pivot_tab.use_int_var.isChecked() else 'Corr Con'
-                if value_column not in df_filtered.columns:
-                    QMessageBox.warning(self.pivot_tab, "Error", f"Column '{value_column}' not found in data!")
-                    return
+                # شمارش تکرار
+                occ_count = {}
+                for rec in samples:
+                    k = (rec['Solution Label'], rec['_group_id'], rec['Element'])
+                    occ_count[k] = occ_count.get(k, 0) + 1
 
-                pivot_df = df_filtered.pivot_table(
-                    index=['Solution Label', 'unique_id'],
-                    columns='Element',
-                    values=value_column,
-                    aggfunc='first',
-                    sort=False
-                ).reset_index()
-                pivot_df = pivot_df.merge(
-                    df_filtered[['original_index', 'Solution Label', 'unique_id']],
-                    on=['Solution Label', 'unique_id'],
-                    how='left'
-                ).sort_values('original_index').drop(columns=['original_index', 'unique_id']).drop_duplicates()
+                occ_counter = {}
+                for rec in samples:
+                    k = (rec['Solution Label'], rec['_group_id'], rec['Element'])
+                    n = occ_count[k]
+                    idx = occ_counter.get(k, 0) + 1
+                    occ_counter[k] = idx
+                    rec['_col'] = f"{rec['Element']}_{idx}" if n > 1 else rec['Element']
+
+                row_map = {}
+                for rec in samples:
+                    rid = (rec['Solution Label'], rec['_group_id'])
+                    row_map.setdefault(rid, {'Solution Label': rec['Solution Label']})
+                    row_map[rid][rec['_col']] = rec.get(value_col)
+
+                def first_index(rid):
+                    sl, gid = rid
+                    return min(r['_orig_index'] for r in samples if r['Solution Label'] == sl and r.get('_group_id') == gid)
+
+                ordered = sorted(row_map.items(), key=lambda x: first_index(x[0]))
+        
+                final_rows = [row for _, row in ordered]
+
+                first_full = next((row for _, row in row_map.items()
+                                 if len(row) - 1 >= most_common_sizes.get(row['Solution Label'], 1)), None)
+                self.pivot_tab.element_order = sorted(
+                    [k for k in (first_full or final_rows[0]).keys() if k != 'Solution Label'],
+                    key=label_key
+                )
 
             else:
-                df_filtered['group_id'] = 0
-                for solution_label in df_filtered['Solution Label'].unique():
-                    df_subset = df_filtered[df_filtered['Solution Label'] == solution_label].copy()
-                    expected_size = most_common_sizes.get(solution_label, 1)
-                    df_subset['group_id'] = df_subset.groupby('Solution Label').cumcount() // expected_size
-                    df_filtered.loc[df_filtered['Solution Label'] == solution_label, 'group_id'] = df_subset['group_id']
+                # بدون تکرار
+                uid_map = {}
+                for rec in samples:
+                    k = (rec['Solution Label'], rec['Element'])
+                    uid_map[k] = uid_map.get(k, -1) + 1
+                    rec['_uid'] = uid_map[k]
 
-                element_counts = df_filtered.groupby(['Solution Label', 'group_id', 'Element']).size().reset_index(name='count')
-                df_filtered = df_filtered.merge(
-                    element_counts[['Solution Label', 'group_id', 'Element', 'count']],
-                    on=['Solution Label', 'group_id', 'Element'],
-                    how='left'
-                )
-                df_filtered['count'] = df_filtered['count'].fillna(1).astype(int)
-                df_filtered['element_count'] = df_filtered.groupby(['Solution Label', 'group_id', 'Element']).cumcount() + 1
+                row_map = {}
+                for rec in samples:
+                    rid = (rec['Solution Label'], rec['_uid'])
+                    row_map.setdefault(rid, {'Solution Label': rec['Solution Label']})
+                    row_map[rid][rec['Element']] = rec.get(value_col)
 
-                df_filtered['Element_with_id'] = df_filtered.apply(
-                    lambda x: f"{x['Element']}_{x['element_count']}" if x['count'] > 1 else x['Element'],
-                    axis=1
-                )
+                def first_index(rid):
+                    sl, uid = rid
+                    return min((r['_orig_index'] for r in samples if r['Solution Label'] == sl and r.get('_uid') == uid), default=999999)
 
-                expected_columns_dict = {}
-                for solution_label in df_filtered['Solution Label'].unique():
-                    expected_size = most_common_sizes.get(solution_label, 1)
-                    set_sizes_subset = df_filtered[df_filtered['Solution Label'] == solution_label].groupby('group_id').size().reset_index(name='set_size')
-                    valid_groups = set_sizes_subset[set_sizes_subset['set_size'] == expected_size]['group_id']
-                    if not valid_groups.empty:
-                        first_group_id = valid_groups.min()
-                        first_set_elements = df_filtered[
-                            (df_filtered['Solution Label'] == solution_label) & 
-                            (df_filtered['group_id'] == first_group_id)
-                        ]['Element_with_id'].unique().tolist()
-                        expected_columns_dict[solution_label] = first_set_elements
-                    else:
-                        expected_columns_dict[solution_label] = []
+                ordered = sorted(row_map.items(), key=lambda x: first_index(x[0]))
+                final_rows = [row for _, row in ordered]
 
-                self.pivot_tab.solution_label_order = df_filtered[['Solution Label', 'group_id']].drop_duplicates().sort_values('group_id')['Solution Label'].apply(clean_label).tolist()
+                cols = set()
+                for r in final_rows:
+                    cols.update(k for k in r if k != 'Solution Label')
+                self.pivot_tab.element_order = sorted(cols, key=label_key)
 
-                value_column = 'Int' if self.pivot_tab.use_int_var.isChecked() else 'Corr Con'
-                if value_column not in df_filtered.columns:
-                    QMessageBox.warning(self.pivot_tab, "Error", f"Column '{value_column}' not found in data!")
-                    return
+            self.pivot_tab.solution_label_order = sorted(
+                {r['Solution Label'] for r in final_rows}, key=label_key
+            )
 
-                pivot_dfs = []
-                min_index_per_group = {}
-                for solution_label, expected_columns in expected_columns_dict.items():
-                    if not expected_columns:
-                        continue
-                    df_subset = df_filtered[df_filtered['Solution Label'] == solution_label].copy()
-                    self.pivot_tab.element_order = expected_columns
-                    min_index_per_group[solution_label] = df_subset.groupby('group_id')['original_index'].min().to_dict()
-
-                    pivot_subset = df_subset.pivot_table(
-                        index=['Solution Label', 'group_id'],
-                        columns='Element_with_id',
-                        values=value_column,
-                        aggfunc='first',
-                        sort=False
-                    )
-                    pivot_subset = pivot_subset.reset_index()
-                    pivot_subset = pivot_subset.reindex(columns=['Solution Label', 'group_id'] + expected_columns)
-                    pivot_subset['min_original_index'] = pivot_subset['group_id'].map(min_index_per_group[solution_label])
-                    pivot_dfs.append(pivot_subset)
-
-                if not pivot_dfs:
-                    QMessageBox.warning(self.pivot_tab, "Error", "No valid pivot tables created!")
-                    return
-                pivot_df = pd.concat(pivot_dfs, ignore_index=False)
-
-                if 'min_original_index' in pivot_df.columns:
-                    pivot_df = pivot_df.sort_values(by='min_original_index').reset_index(drop=True)
-                columns_to_drop = [col for col in ['group_id', 'min_original_index'] if col in pivot_df.columns]
-                if columns_to_drop:
-                    pivot_df = pivot_df.drop(columns=columns_to_drop)
-
+            # تبدیل اکسید
             if self.pivot_tab.use_oxide_var.isChecked():
-                rename_dict = {}
-                for col in pivot_df.columns:
-                    if col != 'Solution Label':
-                        element = col.split()[0]
-                        if element in oxide_factors:
-                            oxide_formula, factor = oxide_factors[element]
-                            suffix = col.split('_')[-1] if '_' in col and has_repeats else ''
-                            new_col = f"{oxide_formula}_{suffix}" if suffix else oxide_formula
-                            rename_dict[col] = new_col
-                            pivot_df[col] = pd.to_numeric(pivot_df[col], errors='coerce') * factor
-                pivot_df.rename(columns=rename_dict, inplace=True)
+                from .oxide_factors import oxide_factors
+                new_rows = []
+                for row in final_rows:
+                    nr = {'Solution Label': row['Solution Label']}
+                    for k, v in row.items():
+                        if k == 'Solution Label':
+                            continue
+                        try:
+                            val = float(v) if v not in (None, '', 'nan') else None
+                        except:
+                            val = None
+                        elem = k.split('_')[0]
+                        suffix = '_' + k.split('_', 1)[1] if '_' in k and has_repeats else ''
+                        if elem in oxide_factors:
+                            oxide, factor = oxide_factors[elem]
+                            new_k = f"{oxide}{suffix}" if suffix else oxide
+                            nr[new_k] = val * factor if val is not None else None
+                        else:
+                            nr[k] = val
+                    new_rows.append(nr)
+                final_rows = new_rows
 
+            # ساخت DataFrame نهایی (مهم!)
+            if not final_rows:
+                pivot_df = pd.DataFrame({'Solution Label': ['بدون داده']})
+            else:
+                pivot_df = pd.DataFrame(final_rows)
+
+            # اعمال ترتیب دلخواه ستون‌ها
+            if hasattr(self.pivot_tab, 'element_order') and self.pivot_tab.element_order:
+                cols = ['Solution Label'] + [c for c in self.pivot_tab.element_order if c in pivot_df.columns]
+                missing = [c for c in pivot_df.columns if c not in cols]
+                pivot_df = pivot_df[cols + missing]
+
+            # ذخیره نهایی
             self.pivot_tab.pivot_data = pivot_df
             self.pivot_tab.column_widths.clear()
             self.pivot_tab.cached_formatted.clear()
-            # self.pivot_tab._inline_crm_rows.clear()
-            # self.pivot_tab._inline_crm_rows_display.clear()
             self.pivot_tab.row_filter_values.clear()
             self.pivot_tab.column_filter_values.clear()
             self.pivot_tab.update_pivot_display()
 
         except Exception as e:
-            QMessageBox.warning(self.pivot_tab, "Pivot Error", f"Failed to create pivot table: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self.pivot_tab, "خطا", f"خطا در ساخت جدول پیوت:\n{e}")
+            self.pivot_tab.pivot_data = None
+            self.pivot_tab.update_pivot_display()

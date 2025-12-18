@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QCom
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor, QBrush, QPixmap
 import os
-
+from utils.var_main import LOGO_PNG_PATH
 # Setup logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -97,7 +97,7 @@ class ElementsTab(QWidget):
         # Add logo to subtab bar
         subtab_layout.addStretch()
         logo_label = QLabel()
-        logo_path = "logo.png"
+        logo_path = LOGO_PNG_PATH
         if os.path.exists(logo_path):
             logo_label.setPixmap(QPixmap(logo_path).scaled(100, 40, Qt.AspectRatioMode.KeepAspectRatio))
         else:

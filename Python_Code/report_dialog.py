@@ -119,13 +119,6 @@ class ReportDialog(QDialog):
             self.logger.error(f"Error updating report: {str(e)}")
             QMessageBox.warning(self, "Error", f"Failed to update report: {str(e)}")
 
-    def is_numeric(self, value):
-        """Check if a value is numeric."""
-        try:
-            float(value)
-            return True
-        except (ValueError, TypeError):
-            return False
 
     def is_numeric_range(self, range_str):
         """Check if a range string is in the format [number to number], allowing negative numbers and decimals."""

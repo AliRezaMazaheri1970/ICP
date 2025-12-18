@@ -12,101 +12,14 @@ import re
 import random
 import sqlite3
 import numpy as np
-
+from xlsxwriter import Workbook
+from scipy.stats import pearsonr
+from db.db import get_db_connection
+from .Common.Freeze_column import FreezeTableWidget
+from styles.compare_style import compare_styles
 # Setup logging
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
-
-class FreezeTableWidget(QTableView):
-    """A QTableView with a frozen first column that does not scroll horizontally."""
-    def __init__(self, model, parent=None):
-        super().__init__(parent)
-        self.frozenTableView = QTableView(self)
-        self.setModel(model)
-        self.frozenTableView.setModel(model)
-        self.init_ui()
-        self.horizontalHeader().sectionResized.connect(self.updateSectionWidth)
-        self.verticalHeader().sectionResized.connect(self.updateSectionHeight)
-        self.frozenTableView.verticalScrollBar().valueChanged.connect(self.frozenVerticalScroll)
-        self.verticalScrollBar().valueChanged.connect(self.mainVerticalScroll)
-        self.model().modelReset.connect(self.resetFrozenTable)
-
-    def init_ui(self):
-        self.frozenTableView.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.frozenTableView.verticalHeader().hide()
-        self.frozenTableView.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
-        self.viewport().stackUnder(self.frozenTableView)
-        self.frozenTableView.setStyleSheet("QTableView { border: none; selection-background-color: #999; }")
-        self.frozenTableView.setSelectionModel(self.selectionModel())
-        self.updateFrozenColumns()
-        self.frozenTableView.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.frozenTableView.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.frozenTableView.show()
-        self.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerItem)
-        self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerItem)
-        self.frozenTableView.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerItem)
-        self.updateFrozenTableGeometry()
-
-    def updateFrozenColumns(self):
-        for col in range(self.model().columnCount()):
-            self.frozenTableView.setColumnHidden(col, col != 0)
-        if self.model().columnCount() > 0:
-            self.frozenTableView.setColumnWidth(0, self.columnWidth(0) or 100)
-
-    def resetFrozenTable(self):
-        self.updateFrozenColumns()
-        self.updateFrozenTableGeometry()
-
-    def updateSectionWidth(self, logicalIndex, oldSize, newSize):
-        if logicalIndex == 0:
-            self.frozenTableView.setColumnWidth(0, newSize)
-            self.updateFrozenTableGeometry()
-            self.frozenTableView.viewport().repaint()
-
-    def updateSectionHeight(self, logicalIndex, oldSize, newSize):
-        self.frozenTableView.setRowHeight(logicalIndex, newSize)
-        self.frozenTableView.viewport().repaint()
-
-    def frozenVerticalScroll(self, value):
-        self.viewport().stackUnder(self.frozenTableView)
-        self.verticalScrollBar().setValue(value)
-        self.frozenTableView.viewport().repaint()
-        self.viewport().update()
-
-    def mainVerticalScroll(self, value):
-        self.viewport().stackUnder(self.frozenTableView)
-        self.frozenTableView.verticalScrollBar().setValue(value)
-        self.frozenTableView.viewport().repaint()
-        self.viewport().update()
-
-    def updateFrozenTableGeometry(self):
-        self.frozenTableView.setGeometry(
-            self.verticalHeader().width() + self.frameWidth(),
-            self.frameWidth(),
-            self.columnWidth(0),
-            self.viewport().height() + self.horizontalHeader().height()
-        )
-        self.frozenTableView.viewport().repaint()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.updateFrozenTableGeometry()
-        self.frozenTableView.viewport().repaint()
-
-    def moveCursor(self, cursorAction, modifiers):
-        current = super().moveCursor(cursorAction, modifiers)
-        if cursorAction == QAbstractItemView.CursorAction.MoveLeft and current.column() > 0:
-            visual_x = self.visualRect(current).topLeft().x()
-            if visual_x < self.frozenTableView.columnWidth(0):
-                new_value = self.horizontalScrollBar().value() + visual_x - self.frozenTableView.columnWidth(0)
-                self.horizontalScrollBar().setValue(int(new_value))
-        self.frozenTableView.viewport().repaint()
-        return current
-
-    def scrollTo(self, index, hint=QAbstractItemView.ScrollHint.EnsureVisible):
-        if index.column() > 0:
-            super().scrollTo(index, hint)
-        self.frozenTableView.viewport().repaint()
 
 
 class FilterThread(QThread):
@@ -123,48 +36,122 @@ class FilterThread(QThread):
         self.control_element_map = control_element_map
         self.selected_elements = selected_elements
         self.num_matches = num_matches
-        self.min_value = min_value
+        self.min_value = min_value  # حداقل مقدار برای در نظر گرفتن یک طول‌موج به عنوان معتبر
 
     def run(self):
         try:
             match_data = []
-            total_rows = len(self.control_df)
-            THRESHOLD = 0.2
+            total_controls = len(self.control_df)
+
             for idx, (_, control_row) in enumerate(self.control_df.iterrows()):
                 control_id = control_row["SAMPLE ID"]
+
+                # مرحله ۱: محاسبه میانگین هر عنصر در کنترل (فقط مقادیر معتبر)
+                control_elem_avg = {}
+                for elem in self.selected_elements:
+                    values = []
+                    for wl in self.control_element_map.get(elem, []):
+                        col_name = self.control_col_map.get(wl, wl)
+                        val = control_row.get(col_name)
+                        try:
+                            fval = float(val)
+                            if pd.notna(fval) and fval >= self.min_value and fval > 0:
+                                values.append(fval)
+                        except:
+                            continue
+                    if values:
+                        control_elem_avg[elem] = np.mean(values)
+
+                if not control_elem_avg:
+                    # اگر هیچ عنصری در کنترل معتبر نبود → این کنترل را نادیده بگیر
+                    continue
+
                 matching_samples = []
+
                 for _, sample_row in self.sample_df.iterrows():
                     sample_id = sample_row["SAMPLE ID"]
-                    rel_diffs = []
-                    mismatched_elements = []
+
+                    sample_elem_avg = {}
+                    mismatched_elements = set()
+                    valid_count = 0
+
                     for elem in self.selected_elements:
-                        # تمام طول موج‌های این عنصر
-                        control_wls = self.control_element_map.get(elem, [])
-                        for wl in control_wls:
-                            control_val = control_row.get(self.control_col_map.get(wl, wl), pd.NA)
-                            sample_val = sample_row.get(self.sample_col_map.get(wl, wl), pd.NA)
-                            if pd.isna(control_val) or pd.isna(sample_val) or control_val < self.min_value or control_val == 0:
+                        values = []
+                        for wl in self.control_element_map.get(elem, []):
+                            col_name = self.sample_col_map.get(wl, wl)
+                            val = sample_row.get(col_name)
+                            try:
+                                fval = float(val)
+                                if pd.notna(fval) and fval > 0:
+                                    values.append(fval)
+                            except:
                                 continue
-                            rel_diff = abs(control_val - sample_val) / abs(control_val)
-                            rel_diffs.append(rel_diff)
-                            if rel_diff > THRESHOLD:
-                                mismatched_elements.append(elem)
-                    if rel_diffs:
-                        avg_diff = sum(rel_diffs) / len(rel_diffs)
-                        matching_samples.append((sample_id, sample_row, avg_diff, list(set(mismatched_elements))))
-                matching_samples.sort(key=lambda x: (x[2], len(x[3])))
+
+                        if values:
+                            avg_val = np.mean(values)
+                            sample_elem_avg[elem] = avg_val
+
+                            # اگر کنترل مقدار قابل توجهی داشت ولی نمونه نداشت یا خیلی کم بود → نامنطبق
+                            if elem in control_elem_avg:
+                                control_val = control_elem_avg[elem]
+                                if avg_val < control_val * 0.15:  # کمتر از ۱۵٪ مقدار کنترل → احتمالاً غایب
+                                    mismatched_elements.add(elem)
+                                else:
+                                    valid_count += 1
+                        else:
+                            if elem in control_elem_avg and control_elem_avg[elem] >= self.min_value * 2:
+                                mismatched_elements.add(elem)
+
+                    # ساخت بردارهای همبستگی فقط از عناصر مشترک و معتبر
+                    common_elements = [e for e in self.selected_elements if e in control_elem_avg and e in sample_elem_avg]
+                    if len(common_elements) < 2:
+                        pearson_corr = 0.0
+                    else:
+                        control_vec = [control_elem_avg[e] for e in common_elements]
+                        sample_vec = [sample_elem_avg[e] for e in common_elements]
+                        try:
+                            pearson_corr, _ = pearsonr(control_vec, sample_vec)
+                            pearson_corr = max(0.0, pearson_corr)  # منفی نشود
+                        except:
+                            pearson_corr = 0.0
+
+                    # امتیاز نهایی ترکیبی
+                    coverage_ratio = len(common_elements) / len(self.selected_elements)  # چند درصد عناصر مشترک بودند؟
+                    mismatch_penalty = len(mismatched_elements) / len(self.selected_elements)
+                    point_weight = min(len(common_elements) / 10.0, 1.0)  # حداکثر ۱۰ عنصر تأثیر کامل دارد
+
+                    final_score = pearson_corr * coverage_ratio * (1.0 - 0.7 * mismatch_penalty) * point_weight
+                    final_score = max(0.0, min(1.0, final_score))  # بین ۰ تا ۱
+
+                    matching_samples.append((
+                        sample_id,
+                        sample_row,
+                        final_score,
+                        list(mismatched_elements),
+                        len(common_elements),
+                        valid_count,
+                        coverage_ratio
+                    ))
+
+                # مرتب‌سازی بر اساس امتیاز نهایی (نزولی)
+                matching_samples.sort(key=lambda x: (-x[2], len(x[3]), -x[4]))
+                best_matches = matching_samples[:self.num_matches]
+
                 match_data.append({
                     "Control ID": control_id,
-                    "Matching Samples": matching_samples[:self.num_matches],
-                    "Control Row": control_row
+                    "Matching Samples": best_matches,
+                    "Control Row": control_row,
+                    "Control Elem Avg": control_elem_avg  # برای استفاده در تصحیح و اکسپورت
                 })
-                self.progress.emit(int((idx + 1) / total_rows * 100))
-            match_data.sort(key=lambda m: min(s[2] for s in m["Matching Samples"]) if m["Matching Samples"] else float('inf'))
-            self.finished.emit(match_data)
-        except Exception as e:
-            logger.error(f"Error during filtering: {str(e)}")
-            self.error.emit(str(e))
 
+                self.progress.emit(int((idx + 1) / total_controls * 100))
+
+            self.finished.emit(match_data)
+
+        except Exception as e:
+            import traceback
+            logger.error(f"FilterThread error: {str(e)}\n{traceback.format_exc()}")
+            self.error.emit(str(e))
 
 class CompareTab(QWidget):
     update_results = pyqtSignal(dict)
@@ -191,32 +178,7 @@ class CompareTab(QWidget):
         self.setup_ui()
 
     def setup_ui(self):
-        self.setStyleSheet("""
-            QWidget { background-color: #F5F6F5; font: 13px 'Segoe UI'; }
-            QLineEdit { background-color: #FFFFFF; border: 1px solid #B0BEC5; padding: 4px; border-radius: 4px; font: 12px 'Segoe UI'; max-width: 80px; }
-            QPushButton { background-color: #2E7D32; color: white; border: none; padding: 8px 16px; font: bold 13px 'Segoe UI'; border-radius: 5px; }
-            QPushButton:hover { background-color: #1B5E20; }
-            QPushButton:disabled { background-color: #B0BEC5; }
-            QPushButton#filterButton { background-color: #FF9800; }
-            QPushButton#filterButton:hover { background-color: #F57C00; }
-            QPushButton#exportButton { background-color: #D32F2F; }
-            QPushButton#exportButton:hover { background-color: #B71C1C; }
-            QPushButton#correctButton { background-color: #0288D1; }
-            QPushButton#correctButton:hover { background-color: #01579B; }
-            QPushButton#calculateErrorButton { background-color: #0288D1; }
-            QPushButton#calculateErrorButton:hover { background-color: #01579B; }
-            QLabel { font: 14px 'Segoe UI'; color: #212121; }
-            QTableWidget { background-color: white; gridline-color: #E0E0E0; font: 12px 'Segoe UI'; border: 1px solid #E0E0E0; }
-            QHeaderView::section { background-color: #ECEFF1; font: bold 13px 'Segoe UI'; border: 1px solid #E0E0E0; padding: 8px; height: 30px; }
-            QTableWidget::item { padding: 5px; }
-            QTableWidget::item:selected { background-color: #BBDEFB; color: black; }
-            QComboBox { background-color: #FFFFFF; border: 1px solid #B0BEC5; padding: 6px; border-radius: 4px; }
-            QComboBox::drop-down { border-left: 1px solid #B0BEC5; }
-            QGroupBox { font: bold 15px 'Segoe UI'; border: 1px solid #B0BEC5; border-radius: 6px; margin-top: 1.5em; }
-            QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top center; padding: 0 5px; }
-            QProgressDialog { min-width: 300px; }
-            QCheckBox { font: 13px 'Segoe UI'; color: #212121; padding: 4px; }
-        """)
+        self.setStyleSheet(compare_styles)
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
@@ -233,8 +195,7 @@ class CompareTab(QWidget):
         self.file_label = QLabel("No file loaded")
         self.file_label.setStyleSheet("color: #6c757d; font: 13px 'Segoe UI';")
         load_button = QPushButton("Load File")
-        load_button.setStyleSheet('color:gray')
-        load_button.setFixedWidth(160)
+        load_button.setStyleSheet("QPushButton { color: black; background-color: white; border: 1px solid gray; }")
         load_button.clicked.connect(self.load_file)
 
         self.oreas_checkbox = QCheckBox("Compare with OREAS")
@@ -382,12 +343,11 @@ class CompareTab(QWidget):
         return value
 
     def load_oreas_data(self):
-        logger.debug("Loading OREAS data from crm_data.db")
         try:
-            conn = sqlite3.connect("crm_data.db")
+            conn =get_db_connection()
             query = "SELECT * FROM pivot_crm"
             sample_df = pd.read_sql_query(query, conn)
-            conn.close()
+            
             if "CRM ID" not in sample_df.columns:
                 logger.error("CRM ID column not found in pivot_crm table")
                 raise ValueError("CRM ID column not found in pivot_crm table")
@@ -437,6 +397,15 @@ class CompareTab(QWidget):
             cols += [col for col in control_headers if col not in ["SAMPLE ID", "ESI CODE"]]
             control_df = control_df[cols]
 
+            self.control_element_map = {}
+            for col in control_df.columns:
+                if col not in ["SAMPLE ID", "ESI CODE"]:
+                    elem = self.strip_wavelength(col)
+                    if elem not in self.control_element_map:
+                        self.control_element_map[elem] = []
+                    self.control_element_map[elem].append(col)
+
+            logger.debug(f"Control element map: {self.control_element_map}")
             # ========================================
             # 2. Load Sample Data (OREAS or File)
             # ========================================
@@ -446,15 +415,6 @@ class CompareTab(QWidget):
                 self.sample_sheet = "OREAS pivot_crm"
 
                 # ساخت نگاشت: عنصر → تمام طول موج‌های آن در control_df
-                self.control_element_map = {}
-                for col in control_df.columns:
-                    if col not in ["SAMPLE ID", "ESI CODE"]:
-                        elem = self.strip_wavelength(col)
-                        if elem not in self.control_element_map:
-                            self.control_element_map[elem] = []
-                        self.control_element_map[elem].append(col)
-
-                logger.debug(f"Control element map: {self.control_element_map}")
 
                 # گسترش OREAS: تکرار مقدار زیر هر طول موج
                 expanded_rows = []
@@ -661,20 +621,20 @@ class CompareTab(QWidget):
 
     def show_results_window(self, match_data):
         window = QWidget()
-        window.setWindowTitle("Filtering Results")
+        window.setWindowTitle("Filtering Results (Pearson Correlation)")
         window.setStyleSheet("""
             QWidget { background-color: #FFFFFF; }
             QTableView { background-color: white; gridline-color: #E0E0E0; font: 12px 'Segoe UI'; border: 1px solid #E0E0E0; }
             QHeaderView::section { background-color: #ECEFF1; font: bold 13px 'Segoe UI'; border: 1px solid #E0E0E0; padding: 8px; }
             QTableView::item:selected { background-color: #BBDEFB; color: black; }
         """)
-        window.setMinimumSize(1000, 700)
+        window.setMinimumSize(1200, 700)
         layout = QVBoxLayout(window)
         layout.setSpacing(15)
         layout.setContentsMargins(15, 15, 15, 15)
 
-        header_label = QLabel("Filtering Results")
-        header_label.setStyleSheet("font: bold 16px 'Segoe UI'; color: #2E7D32; margin-bottom: 10px;")
+        header_label = QLabel("Filtering Results - Pearson Correlation")
+        header_label.setStyleSheet("font: bold 18px 'Segoe UI'; color: #2E7D32; margin-bottom: 10px;")
         layout.addWidget(header_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
         button_frame = QFrame()
@@ -693,22 +653,20 @@ class CompareTab(QWidget):
         correct_button.clicked.connect(lambda: self.correct_values(window, match_data))
         button_layout.addWidget(correct_button)
 
-        calculate_error_button = QPushButton("Calculate Error")
+        calculate_error_button = QPushButton("Calculate Correlation")
         calculate_error_button.setObjectName("calculateErrorButton")
-        calculate_error_button.setFixedWidth(130)
+        calculate_error_button.setFixedWidth(150)
         calculate_error_button.clicked.connect(lambda: self.calculate_error(window))
         button_layout.addWidget(calculate_error_button)
 
         button_layout.addStretch()
         layout.addWidget(button_frame)
 
-        self.overall_avg_label = QLabel("Overall Average Error: 0.00")
-        self.overall_avg_label.setStyleSheet("font: bold 14px 'Segoe UI'; color: #D32F2F;")
+        self.overall_avg_label = QLabel("Overall Average Correlation: 0.000")
+        self.overall_avg_label.setStyleSheet("font: bold 16px 'Segoe UI'; color: #D32F2F; padding: 10px; background-color: #FFEBEE; border-radius: 5px; border: 1px solid #EF9A9A;")
         layout.addWidget(self.overall_avg_label)
 
-        # ========================================
         # مرتب‌سازی ستون‌های عنصر + طول موج
-        # ========================================
         def sort_key(col):
             match = re.match(r"([A-Za-z]+)\s+(\d+\.\d+)", col)
             if not match:
@@ -719,14 +677,12 @@ class CompareTab(QWidget):
 
         sorted_numeric_columns = sorted(self.all_numeric_columns, key=sort_key)
 
-        # ========================================
         # ساخت هدرها
-        # ========================================
         headers = ["Type", "ID"]
         if self.has_esi_code:
             headers.append("ESI CODE")
         headers.append("Mismatched Elements")
-        headers.append("Similarity (%)")
+        headers.append("Correlation")  # تغییر از Similarity به Correlation
         headers.extend(sorted_numeric_columns)
 
         model = QStandardItemModel(0, len(headers))
@@ -738,18 +694,19 @@ class CompareTab(QWidget):
             base_elem = self.strip_wavelength(header)
             if base_elem in self.selected_elements:
                 item.setForeground(QBrush(QColor("#000000")))
+                item.setBackground(QBrush(QColor("#E3F2FD")))
             elif header in sorted_numeric_columns:
-                item.setForeground(QBrush(QColor("#A0A0A0")))
+                item.setForeground(QBrush(QColor("#666666")))
             model.setHorizontalHeaderItem(col_idx, item)
 
-        table = FreezeTableWidget(model, window)
+        table = FreezeTableWidget(model, frozen_columns=2, parent=window)
         table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         table.horizontalHeader().setStretchLastSection(True)
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         table.verticalHeader().setDefaultSectionSize(30)
 
-        # --- ادامه پر کردن جدول (همان کد قبلی، فقط با sorted_numeric_columns) ---
+        # پر کردن جدول
         for m_idx, match in enumerate(match_data):
             control_row = match["Control Row"]
             top_samples = match["Matching Samples"]
@@ -759,39 +716,67 @@ class CompareTab(QWidget):
             if self.has_esi_code:
                 esi_code = control_row.get("ESI CODE", "")
                 items.append(QStandardItem(str(esi_code)))
-            items.append(QStandardItem(""))
-            items.append(QStandardItem(""))
+            items.append(QStandardItem(""))  # Mismatched Elements
+            items.append(QStandardItem(""))  # Correlation
             for col in sorted_numeric_columns:
                 val = control_row.get(self.control_col_map.get(col, col), "")
-                val_str = f"{val:.2f}" if isinstance(val, (int, float)) and not pd.isna(val) else str(val) if not pd.isna(val) else ""
+                val_str = f"{val:.2f}" if isinstance(val, (int, float)) and not pd.isna(val) else ""
                 items.append(QStandardItem(val_str))
+            
             for item in items:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 item.setBackground(QBrush(QColor("#E8F5E9")))
             model.appendRow(items)
 
-            # Sample + Error rows
-            for _, sample_row, avg_diff, mismatched in top_samples:
-                # Sample
-                items = [QStandardItem("Sample"), QStandardItem(str(sample_row["SAMPLE ID"]))]
+            # Sample rows
+            for sample_id, sample_row, corr_coef, mismatched, common_count, valid_count, coverage in top_samples:
+                items = [QStandardItem("Sample"), QStandardItem(str(sample_id))]
                 if self.has_esi_code:
                     esi_code = sample_row.get("ESI CODE", "")
                     items.append(QStandardItem(str(esi_code)))
+                
                 mismatched_str = ", ".join(mismatched) if mismatched else "None"
                 items.append(QStandardItem(mismatched_str))
-                similarity = (1 - avg_diff) * 100 if avg_diff is not None else 0
-                items.append(QStandardItem(f"{similarity:.2f}%"))
+                
+                # نمایش Correlation coefficient
+                corr_display = f"{corr_coef:.3f}" if corr_coef is not None else "N/A"
+                corr_item = QStandardItem(corr_display)
+                
+                # رنگ‌آمیزی بر اساس مقدار correlation
+                if corr_coef is not None:
+                    if corr_coef >= 0.90:
+                        corr_item.setBackground(QBrush(QColor("#E8F5E9")))  # سبز تیره
+                        corr_item.setForeground(QBrush(QColor("#1B5E20")))
+                    elif corr_coef >= 0.80:
+                        corr_item.setBackground(QBrush(QColor("#F1F8E9")))  # سبز روشن
+                    elif corr_coef >= 0.70:
+                        corr_item.setBackground(QBrush(QColor("#FFF3E0")))  # نارنجی
+                    elif corr_coef >= 0.60:
+                        corr_item.setBackground(QBrush(QColor("#FFECB3")))  # زرد
+                    else:
+                        corr_item.setBackground(QBrush(QColor("#FFEBEE")))  # قرمز
+                        corr_item.setForeground(QBrush(QColor("#D32F2F")))
+                else:
+                    corr_item.setBackground(QBrush(QColor("#F5F5F5")))
+                
+                items.append(corr_item)
+                
                 for col in sorted_numeric_columns:
                     val = sample_row.get(self.sample_col_map.get(col, col), "")
-                    val_str = f"{val:.2f}" if isinstance(val, (int, float)) and not pd.isna(val) else str(val) if not pd.isna(val) else ""
+                    val_str = f"{val:.2f}" if isinstance(val, (int, float)) and not pd.isna(val) else ""
                     items.append(QStandardItem(val_str))
+                
                 for item in items:
+                    if not hasattr(item, 'setTextAlignment'):
+                        continue
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                    item.setBackground(QBrush(QColor("#E3F2FD")))
+                    if item != corr_item:  # برای sample rows عادی
+                        item.setBackground(QBrush(QColor("#E3F2FD")))
+                
                 model.appendRow(items)
 
-                # Error row
-                error_items = [QStandardItem("Error"), QStandardItem(str(sample_row["SAMPLE ID"]))]
+                # Error row (خالی برای نگهداری ساختار)
+                error_items = [QStandardItem("Error"), QStandardItem(str(sample_id))]
                 if self.has_esi_code:
                     error_items.append(QStandardItem(""))
                 error_items.append(QStandardItem(""))
@@ -808,94 +793,113 @@ class CompareTab(QWidget):
                 blank_items = [QStandardItem("") for _ in headers]
                 for item in blank_items:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                    item.setBackground(QBrush(QColor("#FFFFFF")))
                 model.appendRow(blank_items)
 
         table.resizeColumnsToContents()
         table.resizeRowsToContents()
         layout.addWidget(table)
+        
         logger.debug(f"Results table created with {model.rowCount()} rows")
         self.results_windows.append(window)
         window.show()
+        
+        # محاسبه اولیه correlation
         self.calculate_error(window)
 
     def calculate_error(self, dialog):
+        """محاسبه و نمایش آمار correlation ها"""
         table = dialog.findChild(QTableView)
         if not table:
             return
+            
         model = table.model()
         row_count = model.rowCount()
+        
+        if row_count == 0:
+            return
+            
+        # پیدا کردن اندیس ستون correlation
         esi_offset = 1 if self.has_esi_code else 0
-        start_col = 2 + esi_offset
-        mismatched_col = start_col
-        similarity_col = mismatched_col + 1
-        numeric_start_col = similarity_col + 1
-        column_sums = np.zeros(len(self.all_numeric_columns), dtype=float)
-        total_errors = []
-
+        correlation_col_idx = 2 + esi_offset + 1  # Type(0) + ID(1) + ESI(esi_offset) + Mismatched(1) + Correlation
+        
+        correlations = []
+        correlation_count = 0
+        
         i = 0
         while i < row_count:
-            if model.item(i, 0).text() == "Control":
-                control_row = i
-                sample_rows = []
-                error_rows = []
-                i += 1
-                while i < row_count and model.item(i, 0).text() in ["Sample", "Error"]:
-                    if model.item(i, 0).text() == "Sample":
-                        sample_rows.append(i)
-                    elif model.item(i, 0).text() == "Error":
-                        error_rows.append(i)
+            if model.item(i, 0) and model.item(i, 0).text() == "Control":
+                i += 1  # رد کردن control row
+                while i < row_count and model.item(i, 0) and model.item(i, 0).text() in ["Sample", "Error"]:
+                    if model.item(i, 0) and model.item(i, 0).text() == "Sample":
+                        # خواندن correlation از ستون مربوطه
+                        corr_item = model.item(i, correlation_col_idx)
+                        if corr_item:
+                            try:
+                                corr_val = float(corr_item.text())
+                                if 0 <= corr_val <= 1.0:  # فقط مقادیر معتبر
+                                    correlations.append(corr_val)
+                                    correlation_count += 1
+                            except (ValueError, AttributeError):
+                                pass
                     i += 1
-                control_vals = []
-                for col_idx in range(numeric_start_col, numeric_start_col + len(self.all_numeric_columns)):
-                    control_item = model.item(control_row, col_idx)
-                    try:
-                        control_val = float(control_item.text() or '0')
-                    except (ValueError, AttributeError):
-                        control_val = 0.0
-                    control_vals.append(control_val)
-
-                for s_row, e_row in zip(sample_rows, error_rows):
-                    sample_vals = []
-                    for col_idx in range(numeric_start_col, numeric_start_col + len(self.all_numeric_columns)):
-                        sample_item = model.item(s_row, col_idx)
-                        try:
-                            sample_val = float(sample_item.text() or '0')
-                        except (ValueError, AttributeError):
-                            sample_val = 0.0
-                        sample_vals.append(sample_val)
-
-                    control_vals_np = np.array(control_vals, dtype=float)
-                    sample_vals_np = np.array(sample_vals, dtype=float)
-                    sum_vals = control_vals_np + sample_vals_np
-                    try:
-                        min_value = float(self.min_value_input.text())
-                    except ValueError:
-                        min_value = 50.0
-                    valid_mask = (sum_vals != 0) & (control_vals_np >= min_value)
-                    differences = np.zeros_like(control_vals_np)
-                    differences[valid_mask] = np.abs(control_vals_np[valid_mask] - sample_vals_np[valid_mask]) / np.abs(sum_vals[valid_mask]) * 100
-
-                    for idx, (col_idx, diff) in enumerate(zip(range(numeric_start_col, numeric_start_col + len(self.all_numeric_columns)), differences)):
-                        if valid_mask[idx]:
-                            item = QStandardItem(f"{diff:.2f}")
-                            if diff > 20:
-                                item.setForeground(QBrush(QColor("red")))
-                            column_sums[idx] += diff
-                            total_errors.append(diff)
-                        else:
-                            item = QStandardItem("")
-                        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                        item.setBackground(QBrush(QColor("#FFEBEE")))
-                        model.setItem(e_row, col_idx, item)
-
             else:
                 i += 1
-
-        overall_avg = np.mean(total_errors) if total_errors else 0
-        self.overall_avg_label.setText(f"Overall Average Error: {overall_avg:.2f}")
+        
+        # محاسبه آمار
+        if correlations:
+            overall_avg = np.mean(correlations)
+            overall_std = np.std(correlations)
+            min_corr = np.min(correlations)
+            max_corr = np.max(correlations)
+            good_corr = sum(1 for c in correlations if c >= 0.8)
+            excellent_corr = sum(1 for c in correlations if c >= 0.9)
+            
+            # به‌روزرسانی لیبل اصلی
+            self.overall_avg_label.setText(
+                f"Overall Average Correlation: {overall_avg:.3f} "
+                f"(±{overall_std:.3f}) | "
+                f"Range: {min_corr:.3f} - {max_corr:.3f} | "
+                f"Excellent(≥0.9): {excellent_corr} | "
+                f"Good(≥0.8): {good_corr}"
+            )
+            
+            # تغییر رنگ بر اساس میانگین
+            if overall_avg >= 0.90:
+                self.overall_avg_label.setStyleSheet(
+                    "font: bold 16px 'Segoe UI'; color: #1B5E20; "
+                    "padding: 10px; background-color: #E8F5E9; "
+                    "border-radius: 5px; border: 1px solid #A5D6A7;"
+                )
+            elif overall_avg >= 0.80:
+                self.overall_avg_label.setStyleSheet(
+                    "font: bold 16px 'Segoe UI'; color: #2E7D32; "
+                    "padding: 10px; background-color: #F1F8E9; "
+                    "border-radius: 5px; border: 1px solid #C8E6C9;"
+                )
+            elif overall_avg >= 0.70:
+                self.overall_avg_label.setStyleSheet(
+                    "font: bold 16px 'Segoe UI'; color: #F57C00; "
+                    "padding: 10px; background-color: #FFF3E0; "
+                    "border-radius: 5px; border: 1px solid #FFE0B2;"
+                )
+            else:
+                self.overall_avg_label.setStyleSheet(
+                    "font: bold 16px 'Segoe UI'; color: #D32F2F; "
+                    "padding: 10px; background-color: #FFEBEE; "
+                    "border-radius: 5px; border: 1px solid #EF9A9A;"
+                )
+        else:
+            self.overall_avg_label.setText("No valid correlations found")
+            self.overall_avg_label.setStyleSheet(
+                "font: bold 16px 'Segoe UI'; color: #666666; "
+                "padding: 10px; background-color: #F5F5F5; "
+                "border-radius: 5px; border: 1px solid #E0E0E0;"
+            )
+        
+        # به‌روزرسانی نمایش جدول
         table.viewport().update()
-
+        logger.debug(f"Correlation statistics calculated: avg={overall_avg:.3f}, count={correlation_count}")
+        
     def correct_values(self, window, match_data):
         table = window.findChild(QTableView)
         if not table:
@@ -907,7 +911,10 @@ class CompareTab(QWidget):
 
         model = table.model()
         numeric_start_col = 4 + (1 if self.has_esi_code else 0)
-        min_value = float(self.min_value_input.text()) if self.min_value_input.text().strip() else 50.0
+        try:
+            min_value = float(self.min_value_input.text() or 50)
+        except ValueError:
+            min_value = 50.0
         correction_threshold = 0.05
         max_acceptable_error = 0.20
 
@@ -916,41 +923,54 @@ class CompareTab(QWidget):
 
         for sel_row in selected_rows:
             row_idx = sel_row.row()
-            row_type = model.item(row_idx, 0).text()
-            if row_type != "Sample":
+            row_type_item = model.item(row_idx, 0)
+            if not row_type_item or row_type_item.text() != "Sample":
                 continue
 
-            sample_id = model.item(row_idx, 1).text()  # OREAS ID
+            sample_id_item = model.item(row_idx, 1)
+            if not sample_id_item:
+                continue
+            sample_id = sample_id_item.text()
 
-            # پیدا کردن ردیف Control
+            # پیدا کردن ردیف Control مربوطه
             control_row_idx = row_idx
-            while control_row_idx >= 0 and model.item(control_row_idx, 0).text() != "Control":
+            while control_row_idx >= 0:
+                type_item = model.item(control_row_idx, 0)
+                if type_item and type_item.text() == "Control":
+                    break
                 control_row_idx -= 1
             if control_row_idx < 0:
                 continue
 
-            control_id = model.item(control_row_idx, 1).text()  # این ID اصلی است
+            control_id_item = model.item(control_row_idx, 1)
+            if not control_id_item:
+                continue
+            control_id = control_id_item.text()
+
             if control_id not in updates_to_send:
                 updates_to_send[control_id] = {}
 
-            # پیدا کردن match
+            # پیدا کردن match مربوطه در match_data
             current_match = None
             sample_index = -1
             for match in new_match_data:
                 if str(match["Control ID"]) == control_id:
-                    for i, (sid, _, _, _) in enumerate(match["Matching Samples"]):
-                        if str(sid) == sample_id:
-                            current_match = match
+                    current_match = match
+                    # جستجو در Matching Samples — سازگار با ساختار ۴ یا ۷ عضوی
+                    for i, sample_tuple in enumerate(match["Matching Samples"]):
+                        if str(sample_tuple[0]) == sample_id:  # sample_tuple[0] همیشه sample_id هست
                             sample_index = i
                             break
-                    if current_match:
+                    if sample_index != -1:
                         break
-            if not current_match:
+
+            if current_match is None or sample_index == -1:
                 continue
 
             control_row = current_match["Control Row"]
-            old_sample_row = current_match["Matching Samples"][sample_index][1]
-            new_sample_row = old_sample_row.copy()
+            old_sample_tuple = current_match["Matching Samples"][sample_index]
+            sample_row = old_sample_tuple[1]  # همیشه ایندکس ۱ sample_row هست
+            new_sample_row = sample_row.copy()
 
             valid_rel_diffs = []
             correction_rel_diffs = []
@@ -967,7 +987,7 @@ class CompareTab(QWidget):
 
                 try:
                     control_val = float(control_row.get(control_col, 0))
-                    sample_val = float(old_sample_row.get(sample_col, 0))
+                    sample_val = float(sample_row.get(sample_col, 0))
                 except (ValueError, TypeError):
                     continue
 
@@ -985,11 +1005,11 @@ class CompareTab(QWidget):
                     new_sample_val = control_val * correction_factor
                     new_sample_row[sample_col] = new_sample_val
 
-                    # به‌روزرسانی جدول Compare
+                    # به‌روزرسانی جدول
                     col_idx = numeric_start_col + self.all_numeric_columns.index(col)
                     model.setItem(row_idx, col_idx, QStandardItem(f"{new_sample_val:.2f}"))
 
-                    # ذخیره برای ارسال به ResultsFrame (با Control ID)
+                    # ذخیره برای ارسال به Results
                     updates_to_send[control_id][col] = new_sample_val
 
                     new_rel_error = abs(control_val - new_sample_val) / control_val
@@ -998,129 +1018,190 @@ class CompareTab(QWidget):
                 else:
                     correction_rel_diffs.append(rel_error)
 
-            # تشخیص عدم تطابق
+            # محاسبه امتیاز جدید (میانگین خطای نسبی بعد از تصحیح)
             if not has_any_match:
-                new_avg_diff = 1.0
-                similarity = 0.0
-                mismatched_str = "All"
+                new_score = 0.0
+                mismatched_list = ["All"]
             else:
-                new_avg_diff = sum(correction_rel_diffs) / len(correction_rel_diffs)
-                similarity = (1 - new_avg_diff) * 100
-                mismatched_str = ", ".join(new_mismatched) if new_mismatched else "None"
+                new_avg_diff = sum(correction_rel_diffs) / len(correction_rel_diffs) if correction_rel_diffs else 0.0
+                new_score = 1.0 - new_avg_diff  # تبدیل به امتیاز شبیه به correlation (0 تا 1)
+                mismatched_list = list(new_mismatched) if new_mismatched else []
 
+            # به‌روزرسانی ساختار تاپل — حفظ ۷ عضو (اگر قبلاً داشت)
+            old_tuple = old_sample_tuple
+            if len(old_tuple) >= 7:
+                # ساختار اصلی: ۷ عضو → حفظ ۳ تای آخر
+                new_tuple = (
+                    sample_id,
+                    new_sample_row,
+                    new_score,
+                    mismatched_list,
+                    old_tuple[4],  # common_count
+                    old_tuple[5],  # valid_count
+                    old_tuple[6]   # coverage_ratio
+                )
+            else:
+                # اگر قبلاً ۴ عضوی بود (بعد از تصحیح قبلی)
+                new_tuple = (sample_id, new_sample_row, new_score, mismatched_list)
+
+            current_match["Matching Samples"][sample_index] = new_tuple
+
+            # به‌روزرسانی جدول
             mismatched_col = 2 + (1 if self.has_esi_code else 0)
-            similarity_col = mismatched_col + 1
-            model.setItem(row_idx, mismatched_col, QStandardItem(mismatched_str))
-            model.setItem(row_idx, similarity_col, QStandardItem(f"{similarity:.2f}%" if has_any_match else "—"))
+            corr_col = mismatched_col + 1
+            model.setItem(row_idx, mismatched_col, QStandardItem(", ".join(mismatched_list) if mismatched_list else "None"))
+            model.setItem(row_idx, corr_col, QStandardItem(f"{new_score:.3f}"))
 
-            current_match["Matching Samples"][sample_index] = (
-                sample_id, new_sample_row, new_avg_diff, list(new_mismatched) if has_any_match else ["All"]
-            )
-
-        # مرتب‌سازی
-        for match in new_match_data:
-            match["Matching Samples"].sort(key=lambda x: (x[2], len(x[3])))
-        new_match_data.sort(key=lambda m: min(s[2] for s in m["Matching Samples"]) if m["Matching Samples"] else float('inf'))
-
+        # بستن پنجره قدیمی و باز کردن نتایج جدید
         window.close()
         self.show_results_window(new_match_data)
 
-        # ارسال به‌روزرسانی به ResultsFrame
+        # ارسال تغییرات به ResultsFrame
         if updates_to_send:
             self.update_results.emit(updates_to_send)
             updated_count = sum(len(v) for v in updates_to_send.values())
-            QMessageBox.information(window, "Success", f"Correction applied!\n{updated_count} cell(s) updated in Results (using Control ID).")
+            QMessageBox.information(window, "Success", f"Correction applied!\n{updated_count} cell(s) updated in Results.")
         else:
-            QMessageBox.information(window, "Info", "No changes to apply.")
+            QMessageBox.information(window, "Info", "No changes applied.")
 
     def export_report(self, match_data):
         file_path, _ = QFileDialog.getSaveFileName(self, "Save Report", "", "Excel files (*.xlsx)")
         if not file_path:
             return
+
         try:
             workbook = Workbook(file_path)
             worksheet = workbook.add_worksheet()
-            bold_format = workbook.add_format({'bold': True})
-            control_format = workbook.add_format({'bg_color': '#E8F5E9', 'align': 'center'})
-            sample_format = workbook.add_format({'bg_color': '#E3F2FD', 'align': 'center'})
-            error_format = workbook.add_format({'bg_color': '#FFEBEE', 'align': 'center'})
-            blank_format = workbook.add_format({'bg_color': '#FFFFFF'})
-            red_format = workbook.add_format({'font_color': 'red', 'bg_color': '#FFEBEE', 'align': 'center'})
 
+            # فرمت‌ها
+            bold_format      = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'})
+            control_format   = workbook.add_format({'bg_color': '#E8F5E9', 'align': 'center', 'valign': 'vcenter'})
+            sample_format    = workbook.add_format({'bg_color': '#E3F2FD', 'align': 'center', 'valign': 'vcenter'})
+            error_format     = workbook.add_format({'bg_color': '#FFEBEE', 'align': 'center', 'valign': 'vcenter'})
+            error_red_format = workbook.add_format({'bg_color': '#FFEBEE', 'font_color': 'red', 'align': 'center', 'valign': 'vcenter'})
+            blank_format     = workbook.add_format({'bg_color': '#FFFFFF'})
+
+            # مرتب‌سازی ستون‌های عددی (عنصر + طول موج)
+            def sort_key(col):
+                m = re.match(r"([A-Za-z]+)\s+(\d+\.\d+)", col)
+                return (m.group(1).upper(), float(m.group(2))) if m else (col, 0)
+            sorted_numeric_columns = sorted(self.all_numeric_columns, key=sort_key)
+
+            # هدرها
             headers = ["Type", "ID"]
             if self.has_esi_code:
                 headers.append("ESI CODE")
-            headers.append("Mismatched Elements")
-            headers.append("Similarity (%)")
-            headers.extend(self.all_numeric_columns)
-            for col, header in enumerate(headers):
-                worksheet.write(0, col, header, bold_format)
+            headers += ["Mismatched Elements", "Pearson Correlation"] + sorted_numeric_columns
+
+            # نوشتن هدرها
+            for c, h in enumerate(headers):
+                worksheet.write(0, c, h, bold_format)
 
             row_idx = 1
+            min_value = float(self.min_value_input.text() or 50)
+
             for match in match_data:
                 control_row = match["Control Row"]
+                control_id = match["Control ID"]
+
+                # ---------- ردیف Control ----------
                 worksheet.write(row_idx, 0, "Control", control_format)
-                worksheet.write(row_idx, 1, str(match["Control ID"]), control_format)
-                col_offset = 2
+                worksheet.write(row_idx, 1, str(control_id), control_format)
+                col = 2
                 if self.has_esi_code:
-                    esi_code = control_row.get("ESI CODE", "")
-                    worksheet.write(row_idx, col_offset, str(esi_code), control_format)
-                    col_offset += 1
-                worksheet.write(row_idx, col_offset, "", control_format)
-                worksheet.write(row_idx, col_offset + 1, "", control_format)
-                col_offset += 2
-                for col in self.all_numeric_columns:
-                    val = control_row.get(self.control_col_map.get(col, col), "")
-                    val_str = f"{val:.2f}" if isinstance(val, (int, float)) and not pd.isna(val) else str(val) if not pd.isna(val) else ""
-                    worksheet.write(row_idx, col_offset, val_str, control_format)
-                    col_offset += 1
+                    worksheet.write(row_idx, col, str(control_row.get("ESI CODE", "")), control_format)
+                    col += 1
+                worksheet.write(row_idx, col, "", control_format)          # Mismatched
+                worksheet.write(row_idx, col + 1, "", control_format)      # Pearson Correlation
+                col += 2
+                for wl_col in sorted_numeric_columns:
+                    val = control_row.get(self.control_col_map.get(wl_col, wl_col), "")
+                    val_str = f"{val:.2f}" if pd.notna(val) and isinstance(val, (float, int)) else ""
+                    worksheet.write(row_idx, col, val_str, control_format)
+                    col += 1
                 row_idx += 1
 
-                for _, sample_row, avg_diff, mismatched in match["Matching Samples"]:
+                # ---------- هر Sample + Error ----------
+                for sample_tuple in match["Matching Samples"]:
+                    # استفاده از ایندکس برای سازگاری با ساختار ۴ یا ۷ تایی
+                    sample_id   = sample_tuple[0]
+                    sample_row  = sample_tuple[1]
+                    score       = sample_tuple[2]   # این همون final_score (Pearson-based) یا مقدار بعد از تصحیح
+                    mismatched  = sample_tuple[3]
+
+                    # Sample row
                     worksheet.write(row_idx, 0, "Sample", sample_format)
-                    worksheet.write(row_idx, 1, str(sample_row["SAMPLE ID"]), sample_format)
-                    col_offset = 2
+                    worksheet.write(row_idx, 1, str(sample_id), sample_format)
+                    col = 2
                     if self.has_esi_code:
-                        esi_code = sample_row.get("ESI CODE", "")
-                        worksheet.write(row_idx, col_offset, str(esi_code), sample_format)
-                        col_offset += 1
+                        worksheet.write(row_idx, col, str(sample_row.get("ESI CODE", "")), sample_format)
+                        col += 1
                     mismatched_str = ", ".join(mismatched) if mismatched else "None"
-                    worksheet.write(row_idx, col_offset, mismatched_str, sample_format)
-                    similarity = (1 - avg_diff) * 100 if avg_diff is not None else 0
-                    worksheet.write(row_idx, col_offset + 1, f"{similarity:.2f}%", sample_format)
-                    col_offset += 2
-                    for col in self.all_numeric_columns:
-                        val = sample_row.get(self.sample_col_map.get(col, col), "")
-                        val_str = f"{val:.2f}" if isinstance(val, (int, float)) and not pd.isna(val) else str(val) if not pd.isna(val) else ""
-                        worksheet.write(row_idx, col_offset, val_str, sample_format)
-                        col_offset += 1
+                    worksheet.write(row_idx, col, mismatched_str, sample_format)
+
+                    # نمایش Pearson Correlation (دقیقاً همون عددی که در جدول نتایج هست)
+                    corr_display = f"{score:.3f}" if score is not None else "0.000"
+                    worksheet.write(row_idx, col + 1, corr_display, sample_format)
+
+                    col += 2
+                    for wl_col in sorted_numeric_columns:
+                        val = sample_row.get(self.sample_col_map.get(wl_col, wl_col), "")
+                        val_str = f"{val:.2f}" if pd.notna(val) and isinstance(val, (float, int)) else ""
+                        worksheet.write(row_idx, col, val_str, sample_format)
+                        col += 1
                     row_idx += 1
 
-                    worksheet.write(row_idx, 0, "Error", error_format)
-                    worksheet.write(row_idx, 1, str(sample_row["SAMPLE ID"]), error_format)
-                    col_offset = 2
+                    # ---------- ردیف Error (درصد خطای نسبی) ----------
+                    worksheet.write(row_idx, 0, "Error %", error_format)
+                    worksheet.write(row_idx, 1, str(sample_id), error_format)
+                    col = 2
                     if self.has_esi_code:
-                        worksheet.write(row_idx, col_offset, "", error_format)
-                        col_offset += 1
-                    worksheet.write(row_idx, col_offset, "", error_format)
-                    worksheet.write(row_idx, col_offset + 1, "", error_format)
-                    col_offset += 2
-                    for _ in self.all_numeric_columns:
-                        worksheet.write(row_idx, col_offset, "", error_format)
-                        col_offset += 1
+                        worksheet.write(row_idx, col, "", error_format)
+                        col += 1
+                    worksheet.write(row_idx, col, "", error_format)      # Mismatched
+                    worksheet.write(row_idx, col + 1, "", error_format)  # Pearson Correlation
+                    col += 2
+
+                    for wl_col in sorted_numeric_columns:
+                        c_col = self.control_col_map.get(wl_col, wl_col)
+                        s_col = self.sample_col_map.get(wl_col, wl_col)
+
+                        c_val = control_row.get(c_col)
+                        s_val = sample_row.get(s_col)
+
+                        try:
+                            c_val = float(c_val) if pd.notna(c_val) else 0.0
+                            s_val = float(s_val) if pd.notna(s_val) else 0.0
+                        except:
+                            c_val = s_val = 0.0
+
+                        if c_val < min_value or (c_val + s_val) == 0:
+                            worksheet.write(row_idx, col, "", error_format)
+                        else:
+                            err_percent = abs(c_val - s_val) / c_val * 100
+                            fmt = error_red_format if err_percent > 20 else error_format
+                            worksheet.write(row_idx, col, f"{err_percent:.2f}", fmt)
+                        col += 1
                     row_idx += 1
 
-                for col in range(len(headers)):
-                    worksheet.write(row_idx, col, "", blank_format)
+                # ردیف خالی بین کنترل‌های مختلف
+                for c in range(len(headers)):
+                    worksheet.write(row_idx, c, "", blank_format)
                 row_idx += 1
 
-            for col in range(len(headers)):
-                worksheet.set_column(col, col, 15)
+            # تنظیم عرض ستون‌ها
+            worksheet.set_column(0, 0, 12)   # Type
+            worksheet.set_column(1, 1, 20)   # ID
+            if self.has_esi_code:
+                worksheet.set_column(2, 2, 15)  # ESI CODE
+            worksheet.set_column(2 + (1 if self.has_esi_code else 0), len(headers)-1, 15)
+
             workbook.close()
-            QMessageBox.information(self, "Success", f"Report exported to {file_path}")
+            QMessageBox.information(self, "Success", f"Report exported successfully!\n{file_path}")
+
         except Exception as e:
-            logger.error(f"Error exporting report: {str(e)}")
-            QMessageBox.critical(self, "Error", f"Failed to export report:\n{str(e)}")
+            logger.error(f"Export error: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Export failed:\n{str(e)}")
 
     def set_control_from_results(self, df):
         self.control_loaded_from_results = True
