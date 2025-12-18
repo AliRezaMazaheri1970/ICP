@@ -165,7 +165,8 @@ public class DfCorrectionService : BaseCorrectionService, IDfCorrectionService
                             oldCorrCon = parsedCorrCon;
                     }
 
-                    var newCorrCon = (request.NewDf / oldDf) * oldCorrCon;
+                    // ✅ Python DF behavior: DO NOT scale Corr Con
+                    var newCorrCon = oldCorrCon;
 
                     var dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(row.ColumnData);
                     var newDict = new Dictionary<string, object>();
@@ -174,8 +175,7 @@ public class DfCorrectionService : BaseCorrectionService, IDfCorrectionService
                     {
                         if (kvp.Key == "DF")
                             newDict[kvp.Key] = request.NewDf;
-                        else if (kvp.Key == "Corr Con")
-                            newDict[kvp.Key] = newCorrCon;
+                        // ❌ do not modify Corr Con (keep existing JSON value)
                         else
                             newDict[kvp.Key] = GetJsonValue(kvp.Value);
                     }
@@ -194,7 +194,7 @@ public class DfCorrectionService : BaseCorrectionService, IDfCorrectionService
                         ));
 
                         changeLogEntries.Add((solutionLabel, "DF", oldDf.ToString(), request.NewDf.ToString()));
-                        changeLogEntries.Add((solutionLabel, "Corr Con", oldCorrCon.ToString(), newCorrCon.ToString()));
+                        // ❌ Do NOT log Corr Con change (python DF does not change it)
                     }
                 }
                 catch (JsonException)

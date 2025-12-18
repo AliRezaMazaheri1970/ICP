@@ -166,7 +166,8 @@ public class WeightCorrectionService : BaseCorrectionService, IWeightCorrectionS
                             decimal.TryParse(corrConElement.GetString(), out oldCorrCon);
                     }
 
-                    var newCorrCon = oldCorrCon * (oldWeight / request.NewWeight);
+                    // ✅ Python math: newCorrCon = oldCorrCon * (newWeight / oldWeight)
+                    var newCorrCon = oldCorrCon * (request.NewWeight / oldWeight);
 
                     var dict = JsonSerializer.Deserialize<Dictionary<string, object>>(row.ColumnData);
                     if (dict != null)
