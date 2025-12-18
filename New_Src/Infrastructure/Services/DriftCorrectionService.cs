@@ -633,7 +633,7 @@ public sealed class DriftCorrectionService : IDriftCorrectionService
 
     #endregion
 
-    #region Corrections (Math unchanged)
+    #region Corrections (Math - Fixed)
 
     private Dictionary<PivotRow, CorrectionResult> CalculateUniformCorrections(
         List<PivotRow> pivotData,
@@ -649,7 +649,6 @@ public sealed class DriftCorrectionService : IDriftCorrectionService
         {
             var pos = seg.Positions;
 
-            // find start index at ref rm
             int startIdx = 0;
             for (int i = 0; i < pos.Count; i++)
             {
@@ -677,8 +676,13 @@ public sealed class DriftCorrectionService : IDriftCorrectionService
                 if (!vFrom.HasValue || !vTo.HasValue || vFrom.Value == 0m)
                     continue;
 
-                var ratio = vTo.Value / vFrom.Value;
-                if (ratio <= 0m) continue;
+                // FIX: For Uniform, we use the average of Start and End to normalize
+                // Factor = StartStandard / AverageStandard
+                var avgStd = (vFrom.Value + vTo.Value) / 2m;
+
+                if (avgStd == 0) continue;
+
+                var correctionFactor = vFrom.Value / avgStd;
 
                 int rangeStart = from.Max;
                 int rangeEnd = to.Max;
@@ -695,12 +699,12 @@ public sealed class DriftCorrectionService : IDriftCorrectionService
                 foreach (var s in samples)
                 {
                     var original = s.Values[element]!.Value;
-                    var corrected = original * ratio;
+                    var corrected = original * correctionFactor;
 
                     corrections[s] = new CorrectionResult
                     {
                         OriginalValue = original,
-                        CorrectionFactor = ratio,
+                        CorrectionFactor = correctionFactor,
                         CorrectedValue = corrected
                     };
                 }
@@ -751,8 +755,9 @@ public sealed class DriftCorrectionService : IDriftCorrectionService
                 if (!vFrom.HasValue || !vTo.HasValue || vFrom.Value == 0m)
                     continue;
 
-                var ratio = vTo.Value / vFrom.Value;
-                if (ratio <= 0m) continue;
+                // FIX: Stepwise uses linear interpolation of the baseline
+                decimal startVal = vFrom.Value;
+                decimal endVal = vTo.Value;
 
                 int rangeStart = from.Max;
                 int rangeEnd = to.Max;
@@ -769,14 +774,28 @@ public sealed class DriftCorrectionService : IDriftCorrectionService
                 int n = samples.Count;
                 if (n == 0) continue;
 
-                var delta = ratio - 1m;
-                var stepDelta = delta / n;
+                // We interpolate the "Expected Standard Value" at each sample position
+                // Position 0 = Start RM
+                // Position n+1 = End RM
+                decimal totalSteps = n + 1;
 
                 for (int j = 0; j < n; j++)
                 {
                     var s = samples[j];
                     var original = s.Values[element]!.Value;
-                    var factor = 1m + stepDelta * (j + 1);
+
+                    // Interpolate baseline at current position (j + 1)
+                    decimal currentStep = j + 1;
+                    decimal interpolatedBaseline = startVal + (endVal - startVal) * (currentStep / totalSteps);
+
+                    // Correction Factor = StartStandard / InterpolatedBaseline
+                    // This corrects the measured value back to the scale of the Start Standard
+                    decimal factor = 1m;
+                    if (interpolatedBaseline != 0)
+                    {
+                        factor = startVal / interpolatedBaseline;
+                    }
+
                     var corrected = original * factor;
 
                     corrections[s] = new CorrectionResult
