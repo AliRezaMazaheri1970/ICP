@@ -21,10 +21,16 @@ public class RowCorrectionService : BaseCorrectionService, IRowCorrectionService
     }
 
     // ✅ Updated Method based on your request
+    // در فایل RowCorrectionService.cs
+    // متد FindEmptyRowsAsync را با کد زیر جایگزین کنید
+
     public async Task<Result<List<EmptyRowDto>>> FindEmptyRowsAsync(FindEmptyRowsRequest request)
     {
         try
         {
+            // =================================================================================
+            // گام ۱: دریافت داده‌های خام (مشابه pd.read_csv)
+            // =================================================================================
             var rawRows = await _db.RawDataRows
                 .AsNoTracking()
                 .Where(r => r.ProjectId == request.ProjectId)
@@ -33,13 +39,22 @@ public class RowCorrectionService : BaseCorrectionService, IRowCorrectionService
             if (!rawRows.Any())
                 return Result<List<EmptyRowDto>>.Fail("No data found for this project.");
 
-            var pivotedData = new Dictionary<string, Dictionary<string, decimal?>>();
-            var allElements = new HashSet<string>();
+            // =================================================================================
+            // گام ۲: پیش‌پردازش و تخت‌کردن داده‌ها (Flattening)
+            // برای شبیه‌سازی رفتار Pandas، به جای Dictionary از لیست تخت استفاده می‌کنیم
+            // تا اگر دیتای تکراری بود، از بین نرود.
+            // =================================================================================
 
-            // Default: Na, Ca, Al, Mg, K
-            var elementsToCheck = request.ElementsToCheck?.Any() == true
-                ? request.ElementsToCheck.ToHashSet(StringComparer.OrdinalIgnoreCase)
-                : new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Na", "Ca", "Al", "Mg", "K" };
+            var flatData = new List<ParsedDataPoint>();
+            var allDetectedElements = new HashSet<string>(StringComparer.Ordinal);
+            var rmPattern = new Regex(@"\b(RM|CRM|STD|BLANK|BLNK)\b", RegexOptions.IgnoreCase);
+
+            // اگر کاربر لیست خاصی داد، فیلتر می‌کنیم؛ وگرنه null (یعنی همه عناصر طبق پایتون)
+            HashSet<string>? userSelectedElements = null;
+            if (request.ElementsToCheck?.Any() == true)
+            {
+                userSelectedElements = request.ElementsToCheck.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            }
 
             foreach (var row in rawRows)
             {
@@ -48,148 +63,185 @@ public class RowCorrectionService : BaseCorrectionService, IRowCorrectionService
                     using var doc = JsonDocument.Parse(row.ColumnData);
                     var root = doc.RootElement;
 
-                    string sampleId = row.SampleId ?? "Unknown";
-                    if (root.TryGetProperty("Solution Label", out var labelElement))
+                    // [Python: df[df["Type"] == "Samp"]]
+                    if (!root.TryGetProperty("Type", out var typeEl) ||
+                        !string.Equals(typeEl.GetString(), "Samp", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    // استخراج نام نمونه
+                    var sampleId = row.SampleId ?? "Unknown";
+                    if (root.TryGetProperty("Solution Label", out var labelEl))
                     {
-                        var label = labelElement.GetString();
-                        if (!string.IsNullOrWhiteSpace(label))
-                            sampleId = label;
+                        var lbl = labelEl.GetString();
+                        if (!string.IsNullOrWhiteSpace(lbl)) sampleId = lbl;
                     }
 
-                    if (!root.TryGetProperty("Element", out var elementProp))
-                        continue;
-                    string? elementName = elementProp.GetString();
-                    if (string.IsNullOrWhiteSpace(elementName))
-                        continue;
+                    if (rmPattern.IsMatch(sampleId)) continue;
 
-                    string elementPrefix = elementName.Split(' ')[0];
-                    if (!elementsToCheck.Contains(elementPrefix))
-                        continue;
+                    // استخراج نام عنصر
+                    if (!root.TryGetProperty("Element", out var elementEl)) continue;
+                    var elementName = elementEl.GetString();
+                    if (string.IsNullOrWhiteSpace(elementName)) continue;
 
-                    // Extract Soln Conc
+                    // اعمال فیلتر اختیاری کاربر
+                    if (userSelectedElements != null)
+                    {
+                        var prefix = elementName.Split(' ')[0];
+                        if (!userSelectedElements.Contains(prefix)) continue;
+                    }
+
+                    // [Python: pd.to_numeric(..., errors='coerce')]
+                    // تبدیل مقدار به عدد یا null (NaN)
                     decimal? value = null;
-                    if (root.TryGetProperty("Soln Conc", out var solnConcElement))
+                    if (root.TryGetProperty("Corr Con", out var corrEl))
                     {
-                        if (solnConcElement.ValueKind == JsonValueKind.Number)
+                        if (corrEl.ValueKind == JsonValueKind.Number)
                         {
-                            value = solnConcElement.GetDecimal();
+                            value = corrEl.GetDecimal();
                         }
-                        else if (solnConcElement.ValueKind == JsonValueKind.String)
+                        else if (corrEl.ValueKind == JsonValueKind.String)
                         {
-                            var strVal = solnConcElement.GetString();
-                            // "-----" = null
-                            if (!string.IsNullOrWhiteSpace(strVal) &&
-                                strVal != "-----" &&
-                                decimal.TryParse(strVal, out var parsed))
-                            {
+                            var s = corrEl.GetString();
+                            // اگر عدد نبود (مثلاً "<0.01")، مقدار null می‌شود (معادل NaN پایتون)
+                            if (decimal.TryParse(s, out var parsed))
                                 value = parsed;
-                            }
                         }
-                        // If it was null in JSON, value remains null
                     }
 
-                    if (!pivotedData.ContainsKey(sampleId))
-                        pivotedData[sampleId] = new Dictionary<string, decimal?>();
+                    // ذخیره داده (حتی اگر تکراری باشد اضافه می‌شود)
+                    flatData.Add(new ParsedDataPoint(sampleId, elementName, value));
 
-                    pivotedData[sampleId][elementName] = value;
-                    allElements.Add(elementName);
+                    // [Python: elements = samples["Element"].unique()]
+                    // جمع‌آوری تمام عناصر موجود در فایل
+                    allDetectedElements.Add(elementName);
                 }
-                catch (JsonException ex)
-                {
-                    _logger.LogWarning("Error parsing row {SampleId}: {Message}", row.SampleId, ex.Message);
-                }
+                catch (JsonException) { /* Ignore parse errors */ }
             }
 
-            if (!pivotedData.Any())
+            if (!flatData.Any())
                 return Result<List<EmptyRowDto>>.Success(new List<EmptyRowDto>());
 
-            // Calculate mean (only non-null values)
-            var columnMeans = new Dictionary<string, decimal>();
-            foreach (var elem in allElements)
-            {
-                var validValues = new List<decimal>();
-                foreach (var sample in pivotedData.Values)
-                {
-                    if (sample.TryGetValue(elem, out var val) && val.HasValue)
-                    {
-                        validValues.Add(val.Value);
-                    }
-                }
-                columnMeans[elem] = validValues.Any() ? validValues.Average() : 0m;
-            }
+            // =================================================================================
+            // گام ۳: محاسبه میانگین ستون‌ها (Global Mean)
+            // [Python: mean_val = vals.mean()]
+            // *نکته*: در پایتون dropna() وجود دارد، پس nullها در میانگین نیستند.
+            // =================================================================================
 
-            var emptyRows = new List<EmptyRowDto>();
+            var columnMeans = flatData
+                .Where(x => x.Value.HasValue) // dropna
+                .GroupBy(x => x.ElementName, StringComparer.Ordinal)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Average(x => x.Value!.Value),
+                    StringComparer.Ordinal
+                );
 
-            // threshold = mean * (1 - percent/100)
+            // محاسبه حد آستانه (Threshold Factor)
             decimal effectivePercent = request.ThresholdPercent > 0 ? request.ThresholdPercent : 70m;
             decimal thresholdFactor = 1m - (effectivePercent / 100m);
 
-            foreach (var sampleEntry in pivotedData)
+            var emptyRows = new List<EmptyRowDto>();
+
+            // =================================================================================
+            // گام ۴: گروه‌بندی بر اساس نمونه و بررسی شرط (Main Logic)
+            // [Python: for label, g in samples.groupby("Solution Label")]
+            // =================================================================================
+
+            var groupedBySample = flatData.GroupBy(x => x.SampleId, StringComparer.Ordinal);
+
+            foreach (var sampleGroup in groupedBySample)
             {
-                var sampleId = sampleEntry.Key;
-                var values = sampleEntry.Value;
+                var sampleId = sampleGroup.Key;
+
+                // برای نمایش در خروجی (DTO) نیاز به دیکشنری داریم (آخرین مقدار را نگه می‌داریم برای نمایش)
+                var rowValuesNullable = new Dictionary<string, decimal?>(StringComparer.Ordinal);
+                var percentOfAverage = new Dictionary<string, decimal>(StringComparer.Ordinal);
+
+                // ساخت Lookup سریع برای جستجوی مقادیر این نمونه
+                // این اجازه می‌دهد اگر یک عنصر ۲ بار تکرار شده، هر ۲ مقدار را داشته باشیم
+                var sampleValuesLookup = sampleGroup.ToLookup(x => x.ElementName, x => x.Value, StringComparer.Ordinal);
 
                 int totalElementsChecked = 0;
                 int belowThresholdCount = 0;
-                var details = new Dictionary<string, decimal>();
-                var rowValuesNullable = new Dictionary<string, decimal?>();
 
-                foreach (var elem in allElements)
+                // [Python: for el in elements] 
+                // حتماً باید روی تمام عناصر کشف شده (allDetectedElements) گردش کنیم
+                foreach (var elem in allDetectedElements)
                 {
-                    if (!values.TryGetValue(elem, out var valNullable))
-                        continue;
-                    if (!columnMeans.TryGetValue(elem, out var mean))
-                        continue;
+                    // [Python: vals = g[g["Element"] == el]...dropna()]
+                    // دریافت تمام مقادیر این عنصر برای این نمونه (حذف nullها)
+                    var validValues = sampleValuesLookup[elem]
+                        .Where(v => v.HasValue)
+                        .Select(v => v!.Value)
+                        .ToList();
 
-                    decimal threshold = mean * thresholdFactor;
-                    rowValuesNullable[elem] = valNullable;
-
-                    // Count all elements
-                    totalElementsChecked++;
-
-                    // ✅ Only null = missing
-                    // 0 is a real value (like Blank)
-                    if (!valNullable.HasValue)
+                    // اگر مقداری وجود نداشت (یا همه NaN بودند)
+                    if (!validValues.Any())
                     {
-                        details[elem] = 0;
-                        continue;  // null = NOT below threshold
+                        // [Python: if vals.empty: continue]
+                        // فقط برای نمایش، مقدار null ثبت می‌کنیم
+                        rowValuesNullable[elem] = null;
+                        continue;
                     }
 
-                    decimal val = valNullable.Value;
-                    details[elem] = mean != 0 ? (val / mean) * 100m : 0m;
+                    // ثبت مقدار برای نمایش (اولی را می‌گیریم یا null)
+                    rowValuesNullable[elem] = validValues.First();
 
-                    // val < threshold
-                    if (val < threshold)
+                    // اگر میانگین کل نداشتیم، نمی‌توان مقایسه کرد
+                    if (!columnMeans.TryGetValue(elem, out var mean))
+                    {
+                        percentOfAverage[elem] = 0m;
+                        // چون در داده‌ها وجود داشته (validValues پر است)، شمارش می‌شود اما شرط را پاس نمی‌کند
+                        totalElementsChecked++;
+                        continue;
+                    }
+
+                    var threshold = mean * thresholdFactor;
+
+                    // محاسبه درصد برای نمایش
+                    var firstVal = validValues.First();
+                    percentOfAverage[elem] = mean != 0m ? (firstVal / mean) * 100m : 0m;
+
+                    totalElementsChecked++;
+
+                    // [Python: below.append((sample_vals < threshold).all())]
+                    // شرط پایتون: *تمام* مقادیر (تکراری‌ها) باید زیر آستانه باشند.
+                    bool allBelow = validValues.All(v => v < threshold);
+
+                    if (allBelow)
                     {
                         belowThresholdCount++;
                     }
                 }
 
-                if (totalElementsChecked > 0)
+                if (totalElementsChecked == 0) continue;
+
+                // محاسبه امتیاز نهایی
+                decimal overallScore = ((decimal)belowThresholdCount / totalElementsChecked) * 100m;
+
+                // [Python: if REQUIRE_ALL: if all(below)...]
+                bool isEmpty = request.RequireAllElements
+                    ? belowThresholdCount == totalElementsChecked
+                    : overallScore >= 80m;
+
+                if (isEmpty)
                 {
-                    decimal emptyScore = ((decimal)belowThresholdCount / totalElementsChecked) * 100m;
+                    // تبدیل میانگین‌ها برای DTO (جایگزینی null با 0 برای نمایش)
+                    var meansForDto = columnMeans.ToDictionary(k => k.Key, v => v.Value, StringComparer.Ordinal);
 
-                    bool isEmpty = request.RequireAllElements
-                        ? belowThresholdCount == totalElementsChecked
-                        : emptyScore >= 80;
-
-                    if (isEmpty)
-                    {
-                        emptyRows.Add(new EmptyRowDto(
-                            sampleId,
-                            rowValuesNullable,
-                            columnMeans,
-                            details,
-                            belowThresholdCount,
-                            totalElementsChecked,
-                            emptyScore
-                        ));
-                    }
+                    emptyRows.Add(new EmptyRowDto(
+                        sampleId,
+                        rowValuesNullable,
+                        meansForDto,
+                        percentOfAverage,
+                        belowThresholdCount,
+                        totalElementsChecked,
+                        overallScore
+                    ));
                 }
             }
 
             _logger.LogInformation("Found {Count} empty rows", emptyRows.Count);
-
             return Result<List<EmptyRowDto>>.Success(emptyRows.OrderByDescending(x => x.OverallScore).ToList());
         }
         catch (Exception ex)
@@ -198,6 +250,9 @@ public class RowCorrectionService : BaseCorrectionService, IRowCorrectionService
             return Result<List<EmptyRowDto>>.Fail($"Error: {ex.Message}");
         }
     }
+
+    // کلاس کمکی برای نگهداری داده‌های تخت (خارج از متد تعریف کنید یا داخل کلاس سرویس)
+    private record ParsedDataPoint(string SampleId, string ElementName, decimal? Value);
 
     public async Task<Result<int>> DeleteRowsAsync(DeleteRowsRequest request)
     {
