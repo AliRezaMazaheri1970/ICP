@@ -19,7 +19,7 @@ namespace Infrastructure.Services;
 /// - RM/CRM detection uses basePattern REGEX directly (no keyword extraction)
 /// - RM exclusion in correction uses the same basePattern
 /// - Segment boundaries and correction ranges use PivotIndex consistently
-/// - Element drift is computed as lastRM/firstRM (finalRatio) like Python
+/// - Element drift in ANALYZE is computed per-segment refRM (Python-like), fallback to last/first
 /// - Apply updates Corr Con per (SolutionLabel, GroupId, Element) in DB + snapshot undo
 /// </summary>
 public sealed class DriftCorrectionService : IDriftCorrectionService
@@ -218,11 +218,11 @@ public sealed class DriftCorrectionService : IDriftCorrectionService
                 ? GetAllElements(processed.PivotRows)
                 : request.SelectedElements;
 
-            // drift info (Python-like): finalRatio = lastRM/firstRM
+            // drift info (ANALYZE): per-segment refRM like Python, fallback to last/first
             var elementDrifts = new Dictionary<string, ElementDriftInfo>(StringComparer.OrdinalIgnoreCase);
             foreach (var element in elements)
             {
-                var info = CalculateElementDrift(rmData, element);
+                var info = CalculateElementDrift(rmData, segments, element);
                 if (info != null)
                     elementDrifts[element] = info;
             }
@@ -300,7 +300,6 @@ public sealed class DriftCorrectionService : IDriftCorrectionService
                     corrValues,
                     factors
                 ));
-
             }
 
             var driftSegments = segments.Select(s => new DriftSegment(
@@ -502,22 +501,31 @@ public sealed class DriftCorrectionService : IDriftCorrectionService
         return list;
     }
 
-    // Parses: "RM 1", "RM1", "CRM 252 R", "CRM252", "RM2 CHECK", "RM 1 cone"
+    // Python-like parsing:
+    // - Type: Cone if contains "cone"; Check if contains "check/chek"; else Base
+    // - Number: find digits anywhere after stripping leading RM/CRM token
     private static (int RmNum, string RmType) ExtractRmInfo(string label)
     {
         if (string.IsNullOrWhiteSpace(label))
             return (0, "Base");
 
-        var lower = label.ToLowerInvariant();
+        var raw = label.Trim();
+        var lower = raw.ToLowerInvariant();
 
         var type = "Base";
-        if (lower.Contains("check") || lower.Contains("chek")) type = "Check";
-        if (lower.Contains("cone")) type = "Cone";
+        if (Regex.IsMatch(lower, @"\bcone\b", RegexOptions.IgnoreCase))
+            type = "Cone";
+        else if (Regex.IsMatch(lower, @"\b(chek|check)\b", RegexOptions.IgnoreCase))
+            type = "Check";
 
-        var m = Regex.Match(label, @"^\s*(RM|CRM)\s*[-_ ]*\s*(\d+)", RegexOptions.IgnoreCase);
+        // strip leading RM/CRM token (if present)
+        var cleaned = Regex.Replace(raw, @"^\s*(RM|CRM)\s*[-_ ]*\s*", "", RegexOptions.IgnoreCase).Trim();
+
+        // find first number anywhere
+        var mNum = Regex.Match(cleaned, @"(\d+)");
         int num = 0;
-        if (m.Success)
-            int.TryParse(m.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out num);
+        if (mNum.Success)
+            int.TryParse(mNum.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out num);
 
         return (num, type);
     }
@@ -606,11 +614,92 @@ public sealed class DriftCorrectionService : IDriftCorrectionService
 
     #region Drift Info (Python-like)
 
-    private static ElementDriftInfo? CalculateElementDrift(List<PivotRow> rmData, string element)
+    private static ElementDriftInfo? CalculateElementDrift(
+    List<PivotRow> rmData,
+    List<SegmentInfo> segments,
+    string element)
     {
-        // Python-like: finalRatio = lastRM / firstRM (using first/last valid values)
+        if (rmData == null || rmData.Count == 0)
+            return null;
+
+        // === Python-like behavior ===
+        // Drift is calculated ONLY on reference RM (ref_rm_num) of the segment
+        // using: last(refRM) / first(refRM)
+
+        foreach (var seg in segments)
+        {
+            if (seg.RefRmNum <= 0)
+                continue;
+
+            var refRmNum = seg.RefRmNum;
+
+            var refRmRows = rmData
+                .Where(r =>
+                    r.RmNum == refRmNum &&
+                    (r.RmType.Equals("Base", StringComparison.OrdinalIgnoreCase) ||
+                     r.RmType.Equals("Check", StringComparison.OrdinalIgnoreCase)) &&
+                    r.Values.TryGetValue(element, out var v) &&
+                    v.HasValue && v.Value != 0m)
+                .OrderBy(r => r.PivotIndex)
+                .ToList();
+
+            if (refRmRows.Count < 2)
+                continue;
+
+            var firstVal = refRmRows.First().Values[element]!.Value;
+            var lastVal = refRmRows.Last().Values[element]!.Value;
+
+            if (firstVal == 0m)
+                continue;
+
+            var finalRatio = lastVal / firstVal;
+            var driftPercent = (finalRatio - 1m) * 100m;
+
+            return new ElementDriftInfo(
+                element,
+                1m,
+                finalRatio,
+                driftPercent,
+                0m,
+                0m
+            );
+        }
+
+        // === fallback (if no valid segment refRM found) ===
+        var fallback = rmData
+            .Where(r =>
+                r.Values.TryGetValue(element, out var v) &&
+                v.HasValue && v.Value != 0m)
+            .OrderBy(r => r.PivotIndex)
+            .ToList();
+
+        if (fallback.Count < 2)
+            return null;
+
+        var f0 = fallback.First().Values[element]!.Value;
+        var f1 = fallback.Last().Values[element]!.Value;
+
+        if (f0 == 0m)
+            return null;
+
+        var ratio = f1 / f0;
+        var percent = (ratio - 1m) * 100m;
+
+        return new ElementDriftInfo(
+            element,
+            1m,
+            ratio,
+            percent,
+            0m,
+            0m
+        );
+    }
+
+
+    private static ElementDriftInfo? CalculateElementDriftFallback(List<PivotRow> rmData, string element)
+    {
         var first = rmData.FirstOrDefault(r => r.Values.TryGetValue(element, out var v) && v.HasValue && v.Value != 0m);
-        var last = rmData.LastOrDefault(r => r.Values.TryGetValue(element, out var v) && v.HasValue);
+        var last = rmData.LastOrDefault(r => r.Values.TryGetValue(element, out var v) && v.HasValue && v.Value != 0m);
 
         if (first == null || last == null)
             return null;
@@ -676,10 +765,9 @@ public sealed class DriftCorrectionService : IDriftCorrectionService
                 if (!vFrom.HasValue || !vTo.HasValue || vFrom.Value == 0m)
                     continue;
 
-                // FIX: For Uniform, we use the average of Start and End to normalize
-                // Factor = StartStandard / AverageStandard
+                // NOTE: This is your current "Uniform" implementation.
+                // We keep structure unchanged as requested.
                 var avgStd = (vFrom.Value + vTo.Value) / 2m;
-
                 if (avgStd == 0) continue;
 
                 var correctionFactor = vFrom.Value / avgStd;
@@ -755,7 +843,8 @@ public sealed class DriftCorrectionService : IDriftCorrectionService
                 if (!vFrom.HasValue || !vTo.HasValue || vFrom.Value == 0m)
                     continue;
 
-                // FIX: Stepwise uses linear interpolation of the baseline
+                // NOTE: This is your current Stepwise implementation.
+                // We keep structure unchanged as requested.
                 decimal startVal = vFrom.Value;
                 decimal endVal = vTo.Value;
 
@@ -774,9 +863,6 @@ public sealed class DriftCorrectionService : IDriftCorrectionService
                 int n = samples.Count;
                 if (n == 0) continue;
 
-                // We interpolate the "Expected Standard Value" at each sample position
-                // Position 0 = Start RM
-                // Position n+1 = End RM
                 decimal totalSteps = n + 1;
 
                 for (int j = 0; j < n; j++)
@@ -784,17 +870,12 @@ public sealed class DriftCorrectionService : IDriftCorrectionService
                     var s = samples[j];
                     var original = s.Values[element]!.Value;
 
-                    // Interpolate baseline at current position (j + 1)
                     decimal currentStep = j + 1;
                     decimal interpolatedBaseline = startVal + (endVal - startVal) * (currentStep / totalSteps);
 
-                    // Correction Factor = StartStandard / InterpolatedBaseline
-                    // This corrects the measured value back to the scale of the Start Standard
                     decimal factor = 1m;
                     if (interpolatedBaseline != 0)
-                    {
                         factor = startVal / interpolatedBaseline;
-                    }
 
                     var corrected = original * factor;
 
@@ -817,7 +898,6 @@ public sealed class DriftCorrectionService : IDriftCorrectionService
 
     private async Task SaveUndoStateAsync(Guid projectId, string operation)
     {
-        // snapshot only raw rows for this project (DataId + SampleId + ColumnData)
         var rows = await _db.RawDataRows
             .AsNoTracking()
             .Where(r => r.ProjectId == projectId)
@@ -850,7 +930,6 @@ public sealed class DriftCorrectionService : IDriftCorrectionService
     {
         if (corrections.Count == 0) return 0;
 
-        // Parse minimal info from each raw row, then compute GroupId per label in the same order (DataId)
         var infos = new List<RowInfo>(trackedRawRows.Count);
 
         foreach (var row in trackedRawRows)
@@ -865,7 +944,6 @@ public sealed class DriftCorrectionService : IDriftCorrectionService
 
                 var type = root.TryGetProperty("Type", out var typeEl) ? typeEl.GetString() : null;
 
-                // only sample rows
                 if (!string.IsNullOrWhiteSpace(type) &&
                     !string.Equals(type, "Samp", StringComparison.OrdinalIgnoreCase) &&
                     !string.Equals(type, "Sample", StringComparison.OrdinalIgnoreCase))
@@ -886,7 +964,6 @@ public sealed class DriftCorrectionService : IDriftCorrectionService
             }
         }
 
-        // setSizes per label based on counts of element rows (same logic as pivot)
         var setSizes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var g in infos.GroupBy(x => x.Label, StringComparer.OrdinalIgnoreCase))
         {
@@ -901,7 +978,6 @@ public sealed class DriftCorrectionService : IDriftCorrectionService
             setSizes[g.Key] = (gcd > 0 && total % gcd == 0) ? total / gcd : total;
         }
 
-        // assign groupId in DataId order per label
         var labelCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         int updated = 0;
@@ -924,7 +1000,6 @@ public sealed class DriftCorrectionService : IDriftCorrectionService
             if (!corrections.TryGetValue(key, out var correctedValue))
                 continue;
 
-            // Update Corr Con in JSON while preserving other props
             info.Row.ColumnData = UpdateCorrConJson(info.Row.ColumnData, correctedValue);
             updated++;
         }
@@ -1114,7 +1189,6 @@ public sealed class DriftCorrectionService : IDriftCorrectionService
                 StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Element ?? ""));
     }
 
-    // Reference comparer for dictionary keys (PivotRow)
     private sealed class ReferenceEqualityComparer<T> : IEqualityComparer<T> where T : class
     {
         public static readonly ReferenceEqualityComparer<T> Instance = new();
