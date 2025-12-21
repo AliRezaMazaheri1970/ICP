@@ -40,7 +40,7 @@ else
                 @* <MudMenuItem Icon="@Icons.Material.Filled.Settings" OnClick="@(() => NavManager.NavigateTo("/settings"))">Settings</MudMenuItem> *@
                 @if (user?.Position?.Equals("Admin", StringComparison.OrdinalIgnoreCase) ?? false)
                 {
-                    <MudDivider Class="my-2" />
+                   
                     <MudNavLink Href="/manage-users" Icon="@Icons.Material.Filled.ManageAccounts" Match="NavLinkMatch.All">
                         User Managment
                     </MudNavLink>

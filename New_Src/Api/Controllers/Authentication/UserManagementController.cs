@@ -38,7 +38,7 @@ public class UserManagementController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving users");
-            return StatusCode(500, new { message = "خطا در بارگذاری لیست کاربران" });
+            return StatusCode(500, new { message = "Error loading user list" });
         }
     }
 
@@ -53,14 +53,14 @@ public class UserManagementController : ControllerBase
         {
             var user = await _userManagementService.GetUserByIdAsync(userId);
             if (user == null)
-                return NotFound(new { message = "کاربر یافت نشد" });
+                return NotFound(new { message = "User not found" });
 
             return Ok(user);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving user {UserId}", userId);
-            return StatusCode(500, new { message = "خطا در بارگذاری اطلاعات کاربر" });
+            return StatusCode(500, new { message = "Error loading user information" });
         }
     }
 
@@ -74,10 +74,10 @@ public class UserManagementController : ControllerBase
         try
         {
             if (string.IsNullOrWhiteSpace(createUserDto.Username))
-                return BadRequest(new { success = false, message = "نام کاربری الزامی است" });
+                return BadRequest(new { success = false, message = "Username is required" });
 
             if (string.IsNullOrWhiteSpace(createUserDto.Password))
-                return BadRequest(new { success = false, message = "رمز عبور الزامی است" });
+                return BadRequest(new { success = false, message = "Password is required" });
 
             var (success, message, user) = await _userManagementService.CreateUserAsync(createUserDto);
 
@@ -90,7 +90,7 @@ public class UserManagementController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating user");
-            return StatusCode(500, new { success = false, message = "خطا در ایجاد کاربر" });
+            return StatusCode(500, new { success = false, message = "Error creating user" });
         }
     }
 
@@ -104,10 +104,10 @@ public class UserManagementController : ControllerBase
         try
         {
             if (updateDto.UserId == Guid.Empty)
-                return BadRequest(new { success = false, message = "شناسه کاربر الزامی است" });
+                return BadRequest(new { success = false, message = "User ID is required" });
 
             if (string.IsNullOrWhiteSpace(updateDto.NewPassword))
-                return BadRequest(new { success = false, message = "رمز عبور جدید الزامی است" });
+                return BadRequest(new { success = false, message = "New password is required" });
 
             var (success, message) = await _userManagementService.UpdateUserPasswordAsync(updateDto.UserId, updateDto.NewPassword);
 
@@ -120,7 +120,7 @@ public class UserManagementController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating password for user {UserId}", updateDto.UserId);
-            return StatusCode(500, new { success = false, message = "خطا در تغییر رمز عبور" });
+            return StatusCode(500, new { success = false, message = "Error changing password" });
         }
     }
 
@@ -144,7 +144,7 @@ public class UserManagementController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting user {UserId}", userId);
-            return StatusCode(500, new { success = false, message = "خطا در حذف کاربر" });
+            return StatusCode(500, new { success = false, message = "Error deleting user" });
         }
     }
 }

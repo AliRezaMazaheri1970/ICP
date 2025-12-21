@@ -39,7 +39,7 @@ public class UserManagementService
                 
                 if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
                 {
-                    throw new UnauthorizedAccessException("شما مجاز به مشاهده لیست کاربران نیستید. لطفاً دوباره وارد شوید.");
+                    throw new UnauthorizedAccessException("You are not authorized to view the user list. Please log in again.");
                 }
                 
                 response.EnsureSuccessStatusCode();
@@ -111,13 +111,13 @@ public class UserManagementService
             {
                 var error = JsonSerializer.Deserialize<dynamic>(content,
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                return (false, error?.message?.ToString() ?? "خطا در ایجاد کاربر", null);
+                return (false, error?.message?.ToString() ?? "Error creating user", null);
             }
 
             var result = JsonSerializer.Deserialize<CreateUserResponseDto>(content,
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
-            return (result?.Success ?? false, result?.Message ?? "کاربر ایجاد شد", result?.User);
+            return (result?.Success ?? false, result?.Message ?? "User created", result?.User);
         }
         catch (Exception ex)
         {
@@ -147,13 +147,13 @@ public class UserManagementService
             {
                 var error = JsonSerializer.Deserialize<dynamic>(content,
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                return (false, error?.message?.ToString() ?? "خطا در تغییر رمز عبور");
+                return (false, error?.message?.ToString() ?? "Error changing password");
             }
 
             var result = JsonSerializer.Deserialize<OperationResultDto>(content,
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
-            return (result?.Success ?? false, result?.Message ?? "رمز عبور تغییر کرد");
+            return (result?.Success ?? false, result?.Message ?? "Password changed.");
         }
         catch (Exception ex)
         {
