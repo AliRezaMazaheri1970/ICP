@@ -1,4 +1,4 @@
-﻿@inherits LayoutComponentBase
+@inherits LayoutComponentBase
 @using WebUI.Services
 @inject AuthService AuthService
 @inject NavigationManager NavManager
@@ -26,18 +26,26 @@ else
         <!-- Top AppBar -->
         <MudAppBar Elevation="1" Class="header-color" Fixed="true">
             <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="ToggleDrawer" />
-           
-            <img src="./Images/logo-RASF1.png" width="30" class="mr-2"/>
+
+            <img src="./Images/logo-RASF1.png" width="30" class="mr-2" />
             <MudText Typo="Typo.h6" Class="fw-bold" id="h6-rasf">RASF ICP Processing</MudText>
             <MudSpacer />
-            <MudIconButton Icon="@(_isDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)" 
-                           Color="Color.Inherit" 
+            <MudIconButton Icon="@(_isDarkMode? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
+                           Color="Color.Inherit"
                            OnClick="ToggleDarkMode" />
             <MudMenu Icon="@Icons.Material.Filled.Person" Color="Color.Inherit">
                 <MudMenuItem Icon="@Icons.Material.Filled.Person">@(user?.Name ?? "User")</MudMenuItem>
                 <MudMenuItem Icon="@Icons.Material.Filled.Badge">@(user?.Position ?? "User")</MudMenuItem>
                 <MudDivider />
                 @* <MudMenuItem Icon="@Icons.Material.Filled.Settings" OnClick="@(() => NavManager.NavigateTo("/settings"))">Settings</MudMenuItem> *@
+                @if (user?.Position?.Equals("Admin", StringComparison.OrdinalIgnoreCase) ?? false)
+                {
+                    <MudDivider Class="my-2" />
+                    <MudNavLink Href="/manage-users" Icon="@Icons.Material.Filled.ManageAccounts" Match="NavLinkMatch.All">
+                        User Managment
+                    </MudNavLink>
+                }
+
                 <MudMenuItem Icon="@Icons.Material.Filled.Logout" OnClick="HandleLogout">Sign Out</MudMenuItem>
             </MudMenu>
         </MudAppBar>
@@ -54,9 +62,9 @@ else
                 <MudNavLink Href="/projects" Icon="@Icons.Material.Filled.Folder" Match="NavLinkMatch.All">
                     Projects
                 </MudNavLink>
-                
+
                 <MudDivider Class="my-2" />
-                
+
                 <MudNavGroup Title="Data" Icon="@Icons.Material.Filled.TableChart" Expanded="false">
                     <MudNavLink Href="/pivot" Icon="@Icons.Material.Filled.GridOn" Match="NavLinkMatch.All">
                         Pivot Table
@@ -65,7 +73,7 @@ else
                         Elements
                     </MudNavLink>
                 </MudNavGroup>
-                
+
                 <MudNavGroup Title="Process" Icon="@Icons.Material.Filled.Engineering" Expanded="false">
                     <MudNavLink Href="/process/weight" Icon="@Icons.Material.Filled.Scale" Match="NavLinkMatch.All">
                         Weight Check
@@ -89,13 +97,22 @@ else
                         Result
                     </MudNavLink>
                 </MudNavGroup>
-                
+
                 <MudNavLink Href="/crm" Icon="@Icons.Material.Filled.VerifiedUser" Match="NavLinkMatch.All">
                     CRM Database
                 </MudNavLink>
                 <MudNavLink Href="/report" Icon="@Icons.Material.Filled.Assessment" Match="NavLinkMatch.All">
                     Reports
                 </MudNavLink>
+
+                @* @if (user?.Position?.Equals("Admin", StringComparison.OrdinalIgnoreCase) ?? false)
+                {
+                    <MudDivider Class="my-2" />
+                    <MudNavLink Href="/manage-users" Icon="@Icons.Material.Filled.ManageAccounts" Match="NavLinkMatch.All">
+                        User Managment
+                    </MudNavLink>
+                } *@
+
                 <MudNavLink Href="/changelog" Icon="@Icons.Material.Filled.History" Match="NavLinkMatch.All">
                     Change Log
                 </MudNavLink>
@@ -126,17 +143,17 @@ else
 @code {
     private bool _drawerOpen = true;
     private bool _isDarkMode = false;
-    
+
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
     private void ToggleDarkMode() => _isDarkMode = !_isDarkMode;
-  
+
     private async Task HandleLogout()
     {
         await AuthService.LogoutAsync();
         NavManager.NavigateTo("/login");
     }
 
- 
+
     private MudTheme _customTheme = new MudTheme()
     {
         PaletteLight = new PaletteLight()
@@ -166,7 +183,7 @@ else
                 let idleTimeout;
                 function resetTimer() {
                     clearTimeout(idleTimeout);
-                    idleTimeout = setTimeout(() => location.href = '/logout', 600000); 
+                    idleTimeout = setTimeout(() => location.href = '/logout', 600000);
                 }
                 ['mousemove','keydown','scroll','click','touchstart'].forEach(evt =>
                     document.addEventListener(evt, resetTimer, { passive: true })

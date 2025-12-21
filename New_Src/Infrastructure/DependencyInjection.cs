@@ -1,4 +1,5 @@
-﻿using Application.Services;
+﻿using Application.Interface;
+using Application.Services;
 using Infrastructure.Persistence;
 using Infrastructure.Services;
 using Infrastructure.Services.Processors;
@@ -52,6 +53,9 @@ public static class DependencyInjection
         services.AddScoped<IReportService, ReportService>();
         services.AddScoped<IDriftCorrectionService, DriftCorrectionService>();
         services.AddScoped<IOptimizationService, OptimizationService>();
+
+        // User Management Services
+        services.AddScoped<IUserManagementService, UserManagementService>();
 
         // ✅ REPLACED: Old CorrectionService removed, new segregated services added
         services.AddScoped<IWeightCorrectionService, WeightCorrectionService>();

@@ -22,14 +22,14 @@
     color: #e5e7eb;
 }
 
-.nav-menu ::deep .mud-nav-link:hover,
-.nav-menu ::deep .mud-nav-link.mud-nav-link-active {
-    background: rgba(255, 255, 255, 0.08);
-    color: #ffffff;
-}
+    .nav-menu ::deep .mud-nav-link:hover,
+    .nav-menu ::deep .mud-nav-link.mud-nav-link-active {
+        background: rgba(255, 255, 255, 0.08);
+        color: #ffffff;
+    }
 
 .main-content {
-/*    background: #f6f8fb;*/
+    /*    background: #f6f8fb;*/
     min-height: 100vh;
 }
 
