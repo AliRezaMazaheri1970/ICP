@@ -1,4 +1,4 @@
-@inherits LayoutComponentBase
+﻿@inherits LayoutComponentBase
 @using WebUI.Services
 @inject AuthService AuthService
 @inject NavigationManager NavManager
@@ -33,19 +33,26 @@ else
             <MudIconButton Icon="@(_isDarkMode? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
                            Color="Color.Inherit"
                            OnClick="ToggleDarkMode" />
+        
             <MudMenu Icon="@Icons.Material.Filled.Person" Color="Color.Inherit">
+                @* نمایش نام کاربر - برای اینکه با کلیک بسته شود از MenuItem استفاده کنید *@
                 <MudMenuItem Icon="@Icons.Material.Filled.Person">@(user?.Name ?? "User")</MudMenuItem>
+
+                @* نمایش سمت کاربر *@
                 <MudMenuItem Icon="@Icons.Material.Filled.Badge">@(user?.Position ?? "User")</MudMenuItem>
+
                 <MudDivider />
-                @* <MudMenuItem Icon="@Icons.Material.Filled.Settings" OnClick="@(() => NavManager.NavigateTo("/settings"))">Settings</MudMenuItem> *@
+
                 @if (user?.Position?.Equals("Admin", StringComparison.OrdinalIgnoreCase) ?? false)
                 {
-                   
-                    <MudNavLink Href="/manage-users" Icon="@Icons.Material.Filled.ManageAccounts" Match="NavLinkMatch.All">
-                        User Managment
-                    </MudNavLink>
+                    @* تغییر NavLink به MenuItem برای بسته شدن خودکار *@
+                    <MudMenuItem Icon="@Icons.Material.Filled.ManageAccounts"
+                                 OnClick="@(() => NavManager.NavigateTo("/manage-users"))">
+                        User Management
+                    </MudMenuItem>
                 }
 
+                @* دکمه خروج *@
                 <MudMenuItem Icon="@Icons.Material.Filled.Logout" OnClick="HandleLogout">Sign Out</MudMenuItem>
             </MudMenu>
         </MudAppBar>

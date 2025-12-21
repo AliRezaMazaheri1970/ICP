@@ -109,9 +109,23 @@ public class UserManagementService
 
             if (!response.IsSuccessStatusCode)
             {
-                var error = JsonSerializer.Deserialize<dynamic>(content,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                return (false, error?.message?.ToString() ?? "Error creating user", null);
+                var content1 = await response.Content.ReadAsStringAsync();
+
+                try
+                {
+                    using var jsonDoc = JsonDocument.Parse(content1);
+                    if (jsonDoc.RootElement.TryGetProperty("message", out var messageElement))
+                    {
+                        return (false, messageElement.GetString() ?? "An error has occurred.", null);
+                    }
+
+                    // اگر سرور خطاها را در قالب دیگری می‌فرستد (مثل مدل پیش‌فرض ASP.NET Core)
+                    return (false, "این نام کاربری قبلاً انتخاب شده است یا داده‌ها معتبر نیستند", null);
+                }
+                catch
+                {
+                    return (false, "An unexpected error occurred on the server.", null);
+                }
             }
 
             var result = JsonSerializer.Deserialize<CreateUserResponseDto>(content,
