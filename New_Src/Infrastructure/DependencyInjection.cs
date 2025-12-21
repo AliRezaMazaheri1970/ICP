@@ -54,6 +54,9 @@ public static class DependencyInjection
         services.AddScoped<IDriftCorrectionService, DriftCorrectionService>();
         services.AddScoped<IOptimizationService, OptimizationService>();
 
+        // User Management Services
+        services.AddScoped<IUserManagementService, UserManagementService>();
+
         // ✅ REPLACED: Old CorrectionService removed, new segregated services added
         services.AddScoped<IWeightCorrectionService, WeightCorrectionService>();
         services.AddScoped<IVolumeCorrectionService, VolumeCorrectionService>();

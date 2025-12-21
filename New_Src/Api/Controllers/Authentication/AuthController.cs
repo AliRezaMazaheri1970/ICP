@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using Application.Interface;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
@@ -16,23 +17,19 @@ public class AuthController : ControllerBase
 {
     private readonly IConfiguration _configuration;
     private readonly ILogger<AuthController> _logger;
-
-    private static readonly List<UserRecord> _users = new()
-    {
-        new UserRecord("admin", "admin123", "Administrator", "Admin"),
-        new UserRecord("analyst", "analyst123", "Lab Analyst", "Analyst"),
-        new UserRecord("guest", "guest", "Guest User", "Viewer")
-    };
+    private readonly IUserManagementService _userManagementService;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AuthController"/> class.
     /// </summary>
     /// <param name="configuration">The configuration settings.</param>
     /// <param name="logger">The logger instance.</param>
-    public AuthController(IConfiguration configuration, ILogger<AuthController> logger)
+    /// <param name="userManagementService">The user management service.</param>
+    public AuthController(IConfiguration configuration, ILogger<AuthController> logger, IUserManagementService userManagementService)
     {
         _configuration = configuration;
         _logger = logger;
+        _userManagementService = userManagementService;
     }
 
     /// <summary>
@@ -42,13 +39,12 @@ public class AuthController : ControllerBase
     /// <returns>A login response with the JWT token if successful.</returns>
     [HttpPost("login")]
     [AllowAnonymous]
-    public ActionResult<LoginResponse> Login([FromBody] LoginRequest request)
+    public async Task<ActionResult<LoginResponse>> LoginAsync([FromBody] LoginRequest request)
     {
         _logger.LogInformation("Login attempt for user: {Username}", request.Username);
 
-        var user = _users.FirstOrDefault(u =>
-            u.Username.Equals(request.Username, StringComparison.OrdinalIgnoreCase) &&
-            u.Password == request.Password);
+        // Authenticate user from database
+        var user = await _userManagementService.AuthenticateAsync(request.Username, request.Password);
 
         if (user == null)
         {
@@ -56,7 +52,7 @@ public class AuthController : ControllerBase
             return Unauthorized(new LoginResponse(false, "Invalid username or password"));
         }
 
-        var token = GenerateJwtToken(user);
+        var token = GenerateJwtToken(user.Username, user.FullName, user.Position);
 
         _logger.LogInformation("Successful login for user: {Username}", request.Username);
 
@@ -75,21 +71,26 @@ public class AuthController : ControllerBase
     /// <param name="request">The registration details.</param>
     /// <returns>A response indicating the result of the registration.</returns>
     [HttpPost("register")]
-    [AllowAnonymous]
-    public ActionResult<RegisterResponse> Register([FromBody] RegisterRequest request)
+    [Authorize(Roles = "Admin")]
+    public async Task<ActionResult<RegisterResponse>> RegisterAsync([FromBody] RegisterRequest request)
     {
-        if (_users.Any(u => u.Username.Equals(request.Username, StringComparison.OrdinalIgnoreCase)))
+        if (await _userManagementService.UsernameExistsAsync(request.Username))
         {
             return Conflict(new RegisterResponse(false, "Username already exists"));
         }
 
-        var newUser = new UserRecord(
-            request.Username,
-            request.Password,
-            request.FullName ?? request.Username,
-            request.Position ?? "Analyst"
-        );
-        _users.Add(newUser);
+        var (success, message, userDto) = await _userManagementService.CreateUserAsync(new Application.DTOs.CreateUserDto
+        {
+            Username = request.Username,
+            Password = request.Password,
+            FullName = request.FullName ?? request.Username,
+            Position = request.Position ?? "User"
+        });
+
+        if (!success)
+        {
+            return BadRequest(new RegisterResponse(false, message));
+        }
 
         _logger.LogInformation("New user registered: {Username}", request.Username);
 
@@ -102,18 +103,16 @@ public class AuthController : ControllerBase
     /// <returns>The user information details.</returns>
     [HttpGet("me")]
     [Authorize]
-    public ActionResult<UserInfo> GetCurrentUser()
+    public async Task<ActionResult<UserInfo>> GetCurrentUserAsync()
     {
         var username = User.FindFirst(ClaimTypes.Name)?.Value;
+        var fullName = User.FindFirst(ClaimTypes.GivenName)?.Value;
+        var position = User.FindFirst(ClaimTypes.Role)?.Value;
 
         if (string.IsNullOrEmpty(username))
             return Unauthorized();
 
-        var user = _users.FirstOrDefault(u => u.Username == username);
-        if (user == null)
-            return NotFound();
-
-        return Ok(new UserInfo(user.Username, user.FullName, user.Position));
+        return Ok(new UserInfo(username, fullName ?? username, position ?? "User"));
     }
 
     /// <summary>
@@ -141,12 +140,10 @@ public class AuthController : ControllerBase
     /// <summary>
     /// Generates a JWT token for the specified user.
     /// </summary>
-    /// <param name="user">The user to generate the token for.</param>
-    /// <returns>The generated JWT token string.</returns>
-    private string GenerateJwtToken(UserRecord user)
+    private string GenerateJwtToken(string username, string fullName, string position)
     {
         var jwtSettings = _configuration.GetSection("Jwt");
-        var secret = jwtSettings["Secret"] ?? "IsatisICP-SuperSecret-Key-2024-Must-Be-At-Least-32-Characters! ";
+        var secret = jwtSettings["Secret"] ?? "IsatisICP-SuperSecret-Key-2024-Must-Be-At-Least-32-Characters!";
         var issuer = jwtSettings["Issuer"] ?? "IsatisICP";
         var audience = jwtSettings["Audience"] ?? "IsatisICP-Users";
         var expiryMinutes = int.Parse(jwtSettings["AccessTokenExpiryMinutes"] ?? "60");
@@ -156,9 +153,9 @@ public class AuthController : ControllerBase
 
         var claims = new[]
         {
-            new Claim(ClaimTypes.Name, user.Username),
-            new Claim(ClaimTypes.GivenName, user.FullName),
-            new Claim(ClaimTypes.Role, user.Position),
+            new Claim(ClaimTypes.Name, username),
+            new Claim(ClaimTypes.GivenName, fullName),
+            new Claim(ClaimTypes.Role, position),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
 

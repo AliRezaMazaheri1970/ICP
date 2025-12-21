@@ -40,6 +40,7 @@ builder.Services.AddHttpClient("Api", client =>
 // 4. Application Services
 // ============================================
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<UserManagementService>();
 builder.Services.AddScoped<ImportService>();
 builder.Services.AddScoped<ProjectService>();
 builder.Services.AddScoped<PivotService>();

@@ -1,0 +1,166 @@
+﻿@using Application.DTOs
+@using WebUI.Services
+@using MudBlazor
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudTextField @bind-Value="newUser.Username"
+            Label="Username"
+            Variant="Variant.Outlined"
+                          Immediate="true"
+                          RequiredError="UserName is required"
+                          Validation="@(new Func<string, string?>(ValidateUsername))"
+                          Placeholder="Please Enter Your Username" />
+
+            <MudTextField @bind-Value="newUser.Password"
+            Label="Password" 
+            Variant="Variant.Outlined"
+                          Required="true"
+                          Immediate="true"
+                          RequiredError="Password is required"
+                          InputType="@passwordInput" 
+                          Placeholder="Please Enter The Password"
+                          Validation="@(new Func<string, string?>(ValidatePassword))"
+                          Adornment="Adornment.End" AdornmentIcon="@passwordInputIcon" OnAdornmentClick="TogglePasswordVisibility" />
+
+            @* <MudStack Spacing="3">
+               
+                <MudTextField @bind-Value="newUser.Password" Label="New Password" Variant="Variant.Outlined"
+                              InputType="@passwordInput" Placeholder="Please Enter A New Password"
+                              Validation="@(new Func<string, string?>(ValidatePassword))"
+                              Adornment="Adornment.End" AdornmentIcon="@passwordInputIcon" OnAdornmentClick="TogglePasswordVisibility" />
+
+                <MudTextField @bind-Value="newUser.Password" Label="Password Accept" Variant="Variant.Outlined"
+                              InputType="@passwordInput" Placeholder="Please Enter The Password Again"
+                              Validation="@(new Func<string, string?>(ValidatePassword))"
+                              Adornment="Adornment.End" AdornmentIcon="@passwordInputIcon" OnAdornmentClick="TogglePasswordVisibility" />
+            </MudStack> *@
+
+            <MudTextField @bind-Value="newUser.FullName" Label="Full Name" Variant="Variant.Outlined"
+                          Placeholder="Please Enter The Full Name" />
+
+            <MudSelect @bind-Value="newUser.Position" Label="Position" Variant="Variant.Outlined">
+                <MudSelectItem Value="@("User")">User</MudSelectItem>
+                <MudSelectItem Value="@("Analyst")">Analyst</MudSelectItem>
+                <MudSelectItem Value="@("Admin")">Admin</MudSelectItem>
+            </MudSelect>
+        </MudStack>
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit" Disabled="@isSubmitting">
+            @if (isSubmitting)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="ms-2" />
+            }
+            Create User
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+   
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Inject] UserManagementService UserManagementService { get; set; } = null!;
+    [Inject] ISnackbar Snackbar { get; set; } = null!;
+
+    private CreateUserDto newUser = new();
+    private bool isSubmitting = false;
+    private InputType passwordInput = InputType.Password;
+    private string passwordInputIcon = Icons.Material.Filled.VisibilityOff;
+
+    private void TogglePasswordVisibility()
+    {
+        if (passwordInput == InputType.Password)
+        {
+            passwordInput = InputType.Text;
+            passwordInputIcon = Icons.Material.Filled.Visibility;
+        }
+        else
+        {
+            passwordInput = InputType.Password;
+            passwordInputIcon = Icons.Material.Filled.VisibilityOff;
+        }
+    }
+
+    private async Task Submit()
+    {
+        try
+        {
+            isSubmitting = true;
+
+            // if (string.IsNullOrWhiteSpace(newUser.Username))
+            // {
+            //     Snackbar.Add("Username Is Required", Severity.Warning);
+            //     return;
+            // }
+
+            // if (string.IsNullOrWhiteSpace(newUser.Password))
+            // {
+            //     Snackbar.Add("Password Is Required", Severity.Warning);
+            //     return;
+            // }
+
+            if (string.IsNullOrWhiteSpace(newUser.FullName))
+            {
+                newUser.FullName = newUser.Username;
+            }
+
+            var (success, message, user) = await UserManagementService.CreateUserAsync(newUser);
+
+            if (success)
+            {
+                Snackbar.Add(message, Severity.Success);
+                MudDialog.Close(DialogResult.Ok(user));
+            }
+            else
+            {
+                Snackbar.Add(message, Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add("Error: " + ex.Message, Severity.Error);
+        }
+        finally
+        {
+            isSubmitting = false;
+        }
+    }
+
+    private void Cancel()
+    {
+        MudDialog.Cancel();
+    }
+
+    private string? ValidateUsername(string value)
+    {
+        if (ContainsPersian(value))
+            return "Please use English characters only";
+        if (!string.IsNullOrEmpty(value) && value.Length < 4)
+        {
+            return "Username must be at least 4 characters";
+        }
+        return null;
+    }
+
+    // Validation برای Password
+    private string? ValidatePassword(string value)
+    {
+        if (ContainsPersian(value))
+            return "Please use English characters only";
+        if (!string.IsNullOrEmpty(value) && value.Length < 6)
+            return "Password must be at least 6 characters";
+        return null;
+    }
+
+    private bool ContainsPersian(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        // رنج کاراکترهای فارسی/عربی
+        return text.Any(c => c >= 0x0600 && c <= 0x06FF);
+    }
+}
