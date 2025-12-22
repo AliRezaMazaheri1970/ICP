@@ -220,6 +220,41 @@ public class UserManagementService
             _logger.LogWarning("No access token available for request to {Uri}", request.RequestUri);
         }
     }
+
+    public async Task<(bool Success, string Message)> ChangePasswordAsync(string currentPassword, string newPassword)
+    {
+        try
+        {
+            var model = new
+            {
+                CurrentPassword = currentPassword,
+                NewPassword = newPassword
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "usermanagement/change-my-password")
+            {
+                Content = JsonContent.Create(model)
+            };
+
+            SetAuthHeader(request); // 👈 اضافه کردن هدر Authorization
+
+            var response = await _httpClient.SendAsync(request);
+
+            if (response.IsSuccessStatusCode)
+            {
+                return (true, "Password changed successfully");
+            }
+
+            var errorContent = await response.Content.ReadAsStringAsync();
+            return (false, errorContent);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error changing password");
+            return (false, "Server connection error");
+        }
+    }
+
 }
 
 /// <summary>
