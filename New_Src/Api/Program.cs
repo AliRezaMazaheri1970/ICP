@@ -70,4 +70,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
+app.Urls.Add("http://0.0.0.0:5001"); 
+
+
 app.Run();
