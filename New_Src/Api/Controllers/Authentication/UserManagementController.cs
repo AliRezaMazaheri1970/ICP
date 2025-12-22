@@ -1,4 +1,4 @@
-using Application.DTOs;
+﻿using Application.DTOs;
 using Application.Interface;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -107,7 +107,7 @@ public class UserManagementController : ControllerBase
                 return BadRequest(new { success = false, message = "User ID is required" });
 
             if (string.IsNullOrWhiteSpace(updateDto.NewPassword))
-                return BadRequest(new { success = false, message = "New password is required" });
+                return BadRequest(new { success = false, message = "New password required" });
 
             var (success, message) = await _userManagementService.UpdateUserPasswordAsync(updateDto.UserId, updateDto.NewPassword);
 
@@ -147,4 +147,26 @@ public class UserManagementController : ControllerBase
             return StatusCode(500, new { success = false, message = "Error deleting user" });
         }
     }
+
+ 
+    [HttpPost("change-my-password")]
+    [Authorize]
+    public async Task<IActionResult> ChangeMyPassword([FromBody] ChangeMyPasswordDto dto)
+    {
+        var username = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+        if (string.IsNullOrEmpty(username))
+            return Unauthorized(new { message = "The token is invalid." });
+
+        var user = await _userManagementService.AuthenticateAsync(username, dto.CurrentPassword);
+        if (user == null)
+            return BadRequest(new { message = "The current password is incorrect." });
+
+        var (success, message) = await _userManagementService.UpdateUserPasswordAsync(user.Id, dto.NewPassword);
+
+        if (!success)
+            return BadRequest(new { message });
+
+        return Ok(new { message = "Password changed successfully" });
+    }
+
 }
