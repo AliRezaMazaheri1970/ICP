@@ -59,11 +59,11 @@ public class ProjectsController : ControllerBase
     /// <param name="projectId">The unique identifier of the project.</param>
     /// <returns>The project details.</returns>
     [HttpGet("{projectId:guid}")]
-    public async Task<IActionResult> GetProject([FromRoute] Guid projectId)
+    public async Task<IActionResult> GetProject([FromRoute] Guid projectId, [FromQuery] bool includeRaw = false, [FromQuery] bool includeState = false)
     {
         try
         {
-            var result = await _persistence.LoadProjectAsync(projectId);
+            var result = await _persistence.LoadProjectAsync(projectId, includeRaw, includeState);
             if (result.Succeeded)
             {
                 return Ok(new ApiResponse<object>(true, result.Data, Array.Empty<string>()));
@@ -73,6 +73,76 @@ public class ProjectsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get project {ProjectId}", projectId);
+            return StatusCode(StatusCodes.Status500InternalServerError, new ApiResponse<object>(false, null, new[] { ex.Message }));
+        }
+    }
+
+    /// <summary>
+    /// Retrieves a page of raw rows for the project.
+    /// </summary>
+    [HttpGet("{projectId:guid}/raw")]
+    public async Task<IActionResult> GetProjectRawRows([FromRoute] Guid projectId, [FromQuery] int skip = 0, [FromQuery] int take = 1000)
+    {
+        try
+        {
+            var result = await _persistence.GetRawDataRowsAsync(projectId, skip, take);
+            if (result.Succeeded)
+            {
+                return Ok(new ApiResponse<List<RawDataDto>>(true, result.Data, Array.Empty<string>()));
+            }
+
+            return StatusCode(StatusCodes.Status500InternalServerError, new ApiResponse<List<RawDataDto>>(false, null, result.Messages?.ToArray() ?? new[] { "Failed to load raw rows" }));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load raw rows for project {ProjectId}", projectId);
+            return StatusCode(StatusCodes.Status500InternalServerError, new ApiResponse<List<RawDataDto>>(false, null, new[] { ex.Message }));
+        }
+    }
+
+    /// <summary>
+    /// Retrieves the latest serialized state for the project.
+    /// </summary>
+    [HttpGet("{projectId:guid}/state/latest")]
+    public async Task<IActionResult> GetLatestProjectState([FromRoute] Guid projectId)
+    {
+        try
+        {
+            var result = await _persistence.GetLatestProjectStateJsonAsync(projectId);
+            if (result.Succeeded)
+            {
+                return Ok(new ApiResponse<string?>(true, result.Data, Array.Empty<string>()));
+            }
+
+            return StatusCode(StatusCodes.Status500InternalServerError, new ApiResponse<string?>(false, null, result.Messages?.ToArray() ?? new[] { "Failed to load project state" }));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load latest state for project {ProjectId}", projectId);
+            return StatusCode(StatusCodes.Status500InternalServerError, new ApiResponse<string?>(false, null, new[] { ex.Message }));
+        }
+    }
+
+    /// <summary>
+    /// Retrieves the latest serialized state for the project in compressed form.
+    /// </summary>
+    [HttpGet("{projectId:guid}/state/latest/compressed")]
+    public async Task<IActionResult> GetLatestProjectStateCompressed([FromRoute] Guid projectId)
+    {
+        try
+        {
+            var result = await _persistence.GetLatestProjectStateCompressedAsync(projectId);
+            if (!result.Succeeded)
+                return StatusCode(StatusCodes.Status500InternalServerError, new ApiResponse<object>(false, null, result.Messages?.ToArray() ?? new[] { "Failed to load project state (compressed)" }));
+
+            if (result.Data == null || result.Data.Length == 0)
+                return NoContent();
+
+            return File(result.Data, "application/gzip", $"project-{projectId}-state.json.gz");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load compressed state for project {ProjectId}", projectId);
             return StatusCode(StatusCodes.Status500InternalServerError, new ApiResponse<object>(false, null, new[] { ex.Message }));
         }
     }
@@ -115,7 +185,7 @@ public class ProjectsController : ControllerBase
 
         try
         {
-            var result = await _persistence.LoadProjectAsync(projectId);
+            var result = await _persistence.LoadProjectAsync(projectId, includeRawRows: false, includeLatestState: false);
             if (!result.Succeeded)
                 return NotFound(new ApiResponse<object>(false, null, result.Messages?.ToArray() ?? new[] { "Project not found." }));
 

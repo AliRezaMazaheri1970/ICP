@@ -1,3 +1,5 @@
+using System.IO;
+using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -46,6 +48,9 @@ public class ProjectInfoDto
     
     [JsonPropertyName("owner")]
     public string? Owner { get; set; }
+
+    [JsonPropertyName("latestStateJson")]
+    public string? LatestStateJson { get; set; }
 }
 
 public class ProjectDto
@@ -228,7 +233,7 @@ public class ProjectService
     /// <summary>
     /// Get a single project by ID
     /// </summary>
-    public async Task<ServiceResult<ProjectInfoDto>> GetProjectAsync(Guid projectId)
+    public async Task<ServiceResult<ProjectInfoDto>> GetProjectAsync(Guid projectId, bool includeLatestState = false)
     {
         try
         {
@@ -244,6 +249,18 @@ public class ProjectService
 
                 if (result?.Succeeded == true && result.Data != null)
                 {
+                    if (includeLatestState)
+                    {
+                        var stateResult = await GetLatestProjectStateCompressedAsync(projectId);
+                        if (stateResult.Succeeded)
+                        {
+                            result.Data.LatestStateJson = stateResult.Data;
+                        }
+                        else
+                        {
+                            _logger.LogWarning("Failed to load latest state for project {ProjectId}: {Message}", projectId, stateResult.Message);
+                        }
+                    }
                     return ServiceResult<ProjectInfoDto>.Success(result.Data);
                 }
 
@@ -256,6 +273,39 @@ public class ProjectService
         {
             _logger.LogError(ex, "Error loading project {ProjectId}", projectId);
             return ServiceResult<ProjectInfoDto>.Fail($"Error: {ex.Message}");
+        }
+    }
+
+    public async Task<ServiceResult<string?>> GetLatestProjectStateCompressedAsync(Guid projectId)
+    {
+        try
+        {
+            SetAuthHeader();
+
+            var response = await _httpClient.GetAsync($"projects/{projectId}/state/latest/compressed");
+            if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+            {
+                return ServiceResult<string?>.Success(null);
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return ServiceResult<string?>.Fail($"Server error: {response.StatusCode}");
+            }
+
+            var bytes = await response.Content.ReadAsByteArrayAsync();
+            if (bytes.Length == 0)
+            {
+                return ServiceResult<string?>.Success(null);
+            }
+
+            var json = DecompressGzipToString(bytes);
+            return ServiceResult<string?>.Success(json);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error loading compressed state for project {ProjectId}", projectId);
+            return ServiceResult<string?>.Fail($"Error: {ex.Message}");
         }
     }
 
@@ -301,5 +351,13 @@ public class ProjectService
             _httpClient.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
         }
+    }
+
+    private static string DecompressGzipToString(byte[] compressed)
+    {
+        using var input = new MemoryStream(compressed);
+        using var gzip = new GZipStream(input, CompressionMode.Decompress);
+        using var reader = new StreamReader(gzip);
+        return reader.ReadToEnd();
     }
 }
