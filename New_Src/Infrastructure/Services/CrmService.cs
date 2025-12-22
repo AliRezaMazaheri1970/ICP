@@ -34,7 +34,7 @@ public class CrmService : ICrmService
         string? searchText = null,
         bool? ourOreasOnly = null,
         int page = 1,
-        int pageSize = 50)
+        int pageSize = 0)
     {
         try
         {
@@ -60,17 +60,30 @@ public class CrmService : ICrmService
             }
 
             var totalCount = await query.CountAsync();
+            var pageIndex = page < 1 ? 1 : page;
 
-            var items = await query
-                .OrderBy(c => c.CrmId)
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .ToListAsync();
+            List<CrmData> items;
+            if (pageSize > 0)
+            {
+                items = await query
+                    .OrderBy(c => c.CrmId)
+                    .Skip((pageIndex - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToListAsync();
+            }
+            else
+            {
+                items = await query
+                    .OrderBy(c => c.CrmId)
+                    .ToListAsync();
+                pageSize = totalCount == 0 ? 1 : totalCount;
+                pageIndex = 1;
+            }
 
             var dtos = items.Select(MapToDto).ToList();
 
             return Result<PaginatedResult<CrmListItemDto>>.Success(
-                new PaginatedResult<CrmListItemDto>(dtos, totalCount, page, pageSize));
+                new PaginatedResult<CrmListItemDto>(dtos, totalCount, pageIndex, pageSize));
         }
         catch (Exception ex)
         {
