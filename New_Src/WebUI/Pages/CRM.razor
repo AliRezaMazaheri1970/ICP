@@ -1,11 +1,16 @@
 ﻿@page "/crm"
 @using WebUI.Services
 @inject CrmService CrmService
+@inject AuthService AuthService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 
 <PageTitle>ICP - CRM Database</PageTitle>
-
+@{
+    var user = AuthService.GetCurrentUser();
+    var isAuthenticated = user?.IsAuthenticated ?? false;
+    
+}
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
     <MudPaper Elevation="0" Class="pa-4 mb-4 custom-card-all">
         <div class="d-flex justify-space-between align-center">
@@ -126,16 +131,28 @@
                                        Class="color-light-blue"
                                        OnClick="@(() => ViewCrm(context))"
                                        aria-label="View Details" />
-                        <MudIconButton Icon="@Icons.Material.Filled.Edit"
-                                       Size="Size.Small"
-                                       Class="color-dark-blue"
-                                       OnClick="@(() => EditCrm(context))"
-                                       aria-label="Edit" />
-                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                       Size="Size.Small"
-                                       Color="Color.Error"
-                                       OnClick="@(() => DeleteCrm(context))"
-                                       aria-label="Delete" />
+                        @if(user?.Position?.Equals("Admin", StringComparison.OrdinalIgnoreCase) ?? false)
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                           Size="Size.Small"
+                                           Class="color-dark-blue"
+                                           OnClick="@(() => EditCrm(context))"
+                                           aria-label="Edit" />
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                           Size="Size.Small"
+                                           Color="Color.Error"
+                                           OnClick="@(() => DeleteCrm(context))"
+                                           aria-label="Delete" />
+                        }
+                        else if (user?.Position?.Equals("Analyst",StringComparison.OrdinalIgnoreCase)?? false)
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                           Size="Size.Small"
+                                           Class="color-dark-blue"
+                                           OnClick="@(() => EditCrm(context))"
+                                           aria-label="Edit" />
+                        }
+
                     </MudTd>
                 </RowTemplate>
                 @* ❌ حذف PagerContent قدیمی *@
