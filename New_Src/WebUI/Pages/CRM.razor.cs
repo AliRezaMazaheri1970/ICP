@@ -54,7 +54,9 @@ namespace WebUI.Pages
             {
                 var result = await CrmService.GetCrmListAsync(
                     analysisMethod: _selectedMethod,
-                    search: _searchText);
+                    search: _searchText,
+                    page: 1,
+                    pageSize: 0);
 
                 if (result.Succeeded && result.Data != null)
                 {
