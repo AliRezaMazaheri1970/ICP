@@ -4,6 +4,7 @@
 @inject OptimizationService OptimizationService
 @inject CrmService CrmService
 @inject PivotService PivotService
+@inject CorrectionService CorrectionService
 @inject ISnackbar Snackbar
 
 <PageTitle>ICP - CRM Calibration</PageTitle>
@@ -53,6 +54,23 @@
                         Optimization Settings
                     </MudText>
 
+                    <MudSelect T="string"
+                               Label="Focus Element"
+                               Value="_focusElement"
+                               ValueChanged="@(e => SetFocusElement(e))"
+                               Variant="Variant.Outlined"
+                               Class="mb-3">
+                        @foreach (var el in _allElements)
+                        {
+                            <MudSelectItem Value="@el">@el</MudSelectItem>
+                        }
+                    </MudSelect>
+
+                    <MudStack Row="true" Spacing="2" Class="mb-4">
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="PrevElement">Previous</MudButton>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="NextElement">Next</MudButton>
+                    </MudStack>
+
                     <MudNumericField @bind-Value="_minDiff"
                                      Label="Min Diff %"
                                      Variant="Variant.Outlined"
@@ -95,6 +113,53 @@
                             <MudSelectItem Value="@el">@el</MudSelectItem>
                         }
                     </MudSelect>
+
+                    <MudDivider Class="my-2" />
+                    <MudText Typo="Typo.subtitle2" Class="mb-2">Manual Preview</MudText>
+
+                    <MudNumericField @bind-Value="_previewBlank"
+                                     Label="Blank"
+                                     Variant="Variant.Outlined"
+                                     Step="0.01M"
+                                     Class="mb-3" />
+
+                    <MudText Typo="Typo.caption">Preview Scale: @_previewScale.ToString("F2")</MudText>
+                    <MudSlider T="double" @bind-Value="_previewScale"
+                               Min="0"
+                               Max="2"
+                               Step="0.01"
+                               Color="Color.Primary"
+                               Class="mb-3" />
+
+                    <MudStack Spacing="1" Class="mb-4">
+                        <MudButton Variant="Variant.Outlined"
+                                   Color="Color.Info"
+                                   FullWidth="true"
+                                   OnClick="PreviewManualAsync"
+                                   Disabled="_isLoading">
+                            Preview
+                        </MudButton>
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Success"
+                                   FullWidth="true"
+                                   OnClick="ApplyManualAsync"
+                                   Disabled="_isLoading">
+                            Apply Manual
+                        </MudButton>
+                        <MudButton Variant="Variant.Outlined"
+                                   Color="Color.Warning"
+                                   FullWidth="true"
+                                   OnClick="ResetPreview">
+                            Reset Blank/Scale
+                        </MudButton>
+                        <MudButton Variant="Variant.Outlined"
+                                   Color="Color.Error"
+                                   FullWidth="true"
+                                   OnClick="UndoManualAsync"
+                                   Disabled="_isLoading">
+                            Undo Last
+                        </MudButton>
+                    </MudStack>
 
                     <MudButton Variant="Variant.Outlined"
                                Color="Color.Info"
@@ -235,12 +300,16 @@
                         </MudTable>
 
                         @* Optimized Data *@
-                        @if (_result.OptimizedData.Any())
+                        @if (_optimizedRows.Any())
                         {
                             <MudDivider Class="my-4" />
                             <MudExpansionPanels>
                                 <MudExpansionPanel Text="Optimized Sample Details" @bind-Expanded="_detailsExpanded">
-                                    <MudTable Items="@_result.OptimizedData.Take(50)"
+                                    <MudTextField @bind-Value="_sampleFilter"
+                                                  Label="Filter by Sample Label"
+                                                  Variant="Variant.Outlined"
+                                                  Class="mb-3" />
+                                    <MudTable Items="@FilterRows(_optimizedRows)"
                                               Hover="true"
                                               Dense="true"
                                               FixedHeader="true"
@@ -261,12 +330,69 @@
                                             <MudTd>@context.SolutionLabel</MudTd>
                                             <MudTd>@context.CrmId</MudTd>
                                             <MudTd>@context.Element</MudTd>
-                                            <MudTd>@context.OriginalValue.ToString("F4")</MudTd>
-                                            <MudTd>@context.OptimizedValue.ToString("F4")</MudTd>
-                                            <MudTd>@context.CrmValue.ToString("F4")</MudTd>
+                                            <MudTd>@(context.OriginalValue?.ToString("F4") ?? "-")</MudTd>
+                                            <MudTd>@(context.OptimizedValue?.ToString("F4") ?? "-")</MudTd>
+                                            <MudTd>@(context.CrmValue?.ToString("F4") ?? "-")</MudTd>
                                             <MudTd>
                                                 <MudText Color="@(context.IsPassed ? Color.Success : Color.Error)">
-                                                    @context.OptimizedDiff.ToString("F2")%
+                                                    @context.DiffAfter.ToString("F2")%
+                                                </MudText>
+                                            </MudTd>
+                                            <MudTd>
+                                                @if (context.IsPassed)
+                                                {
+                                                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                                                }
+                                                else
+                                                {
+                                                    <MudIcon Icon="@Icons.Material.Filled.Cancel" Color="Color.Error" Size="Size.Small" />
+                                                }
+                                            </MudTd>
+                                        </RowTemplate>
+                                    </MudTable>
+                                </MudExpansionPanel>
+                            </MudExpansionPanels>
+                        }
+
+                        @if (_manualRows.Any())
+                        {
+                            <MudDivider Class="my-4" />
+                            <MudExpansionPanels>
+                                <MudExpansionPanel Text="Manual Preview Details" @bind-Expanded="_detailsExpanded">
+                                    <MudText Typo="Typo.caption" Class="mb-2">
+                                        Passed: @_manualResult?.PassedBefore -> @_manualResult?.PassedAfter
+                                    </MudText>
+                                    <MudTextField @bind-Value="_sampleFilter"
+                                                  Label="Filter by Sample Label"
+                                                  Variant="Variant.Outlined"
+                                                  Class="mb-3" />
+                                    <MudTable Items="@FilterRows(_manualRows)"
+                                              Hover="true"
+                                              Dense="true"
+                                              FixedHeader="true"
+                                              Height="165px"
+                                              Breakpoint="Breakpoint.None"
+                                              HorizontalScrollbar="true">
+                                        <HeaderContent>
+                                            <MudTh>Sample</MudTh>
+                                            <MudTh>CRM</MudTh>
+                                            <MudTh>Element</MudTh>
+                                            <MudTh>Original</MudTh>
+                                            <MudTh>Optimized</MudTh>
+                                            <MudTh>CRM Value</MudTh>
+                                            <MudTh>Diff After</MudTh>
+                                            <MudTh>Status</MudTh>
+                                        </HeaderContent>
+                                        <RowTemplate>
+                                            <MudTd>@context.SolutionLabel</MudTd>
+                                            <MudTd>@context.CrmId</MudTd>
+                                            <MudTd>@context.Element</MudTd>
+                                            <MudTd>@(context.OriginalValue?.ToString("F4") ?? "-")</MudTd>
+                                            <MudTd>@(context.OptimizedValue?.ToString("F4") ?? "-")</MudTd>
+                                            <MudTd>@(context.CrmValue?.ToString("F4") ?? "-")</MudTd>
+                                            <MudTd>
+                                                <MudText Color="@(context.IsPassed ? Color.Success : Color.Error)">
+                                                    @context.DiffAfter.ToString("F2")%
                                                 </MudText>
                                             </MudTd>
                                             <MudTd>

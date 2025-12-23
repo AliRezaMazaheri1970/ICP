@@ -30,13 +30,16 @@ public class BlankScaleOptimizationRequest
     [JsonPropertyName("useMultiModel")]
     public bool UseMultiModel { get; set; } = true;
 
+    [JsonPropertyName("previewOnly")]
+    public bool PreviewOnly { get; set; } = false;
+
     [JsonPropertyName("seed")]
     public int? Seed { get; set; }
 }
 
 public class BlankScaleOptimizationResult
 {
-    [JsonPropertyName("totalRmSamples")]
+    [JsonPropertyName("totalSamples")]
     public int TotalRmSamples { get; set; }
 
     [JsonPropertyName("passedBefore")]
@@ -63,10 +66,10 @@ public class ElementOptimization
     [JsonPropertyName("element")]
     public string Element { get; set; } = "";
 
-    [JsonPropertyName("blank")]
+    [JsonPropertyName("optimalBlank")]
     public decimal Blank { get; set; }
 
-    [JsonPropertyName("scale")]
+    [JsonPropertyName("optimalScale")]
     public decimal Scale { get; set; }
 
     [JsonPropertyName("passedBefore")]
@@ -93,37 +96,37 @@ public class OptimizedSampleDto
     [JsonPropertyName("crmId")]
     public string CrmId { get; set; } = "";
 
-    [JsonPropertyName("element")]
-    public string Element { get; set; } = "";
+    [JsonPropertyName("originalValues")]
+    public Dictionary<string, decimal?> OriginalValues { get; set; } = new();
 
-    [JsonPropertyName("originalValue")]
-    public decimal OriginalValue { get; set; }
+    [JsonPropertyName("crmValues")]
+    public Dictionary<string, decimal?> CrmValues { get; set; } = new();
 
-    [JsonPropertyName("optimizedValue")]
-    public decimal OptimizedValue { get; set; }
+    [JsonPropertyName("optimizedValues")]
+    public Dictionary<string, decimal?> OptimizedValues { get; set; } = new();
 
-    [JsonPropertyName("crmValue")]
-    public decimal CrmValue { get; set; }
+    [JsonPropertyName("diffPercentBefore")]
+    public Dictionary<string, decimal> DiffPercentBefore { get; set; } = new();
 
-    [JsonPropertyName("originalDiff")]
-    public decimal OriginalDiff { get; set; }
+    [JsonPropertyName("diffPercentAfter")]
+    public Dictionary<string, decimal> DiffPercentAfter { get; set; } = new();
 
-    [JsonPropertyName("optimizedDiff")]
-    public decimal OptimizedDiff { get; set; }
+    [JsonPropertyName("passStatusBefore")]
+    public Dictionary<string, bool> PassStatusBefore { get; set; } = new();
 
-    [JsonPropertyName("isPassed")]
-    public bool IsPassed { get; set; }
+    [JsonPropertyName("passStatusAfter")]
+    public Dictionary<string, bool> PassStatusAfter { get; set; } = new();
 }
 
 public class MultiModelSummary
 {
-    [JsonPropertyName("modelACounts")]
+    [JsonPropertyName("elementsOptimizedWithModelA")]
     public int ModelACounts { get; set; }
 
-    [JsonPropertyName("modelBCounts")]
+    [JsonPropertyName("elementsOptimizedWithModelB")]
     public int ModelBCounts { get; set; }
 
-    [JsonPropertyName("modelCCounts")]
+    [JsonPropertyName("elementsOptimizedWithModelC")]
     public int ModelCCounts { get; set; }
 
     [JsonPropertyName("mostUsedModel")]
@@ -131,6 +134,27 @@ public class MultiModelSummary
 
     [JsonPropertyName("summary")]
     public string Summary { get; set; } = "";
+}
+
+public class ManualBlankScaleResult
+{
+    [JsonPropertyName("element")]
+    public string Element { get; set; } = "";
+
+    [JsonPropertyName("blank")]
+    public decimal Blank { get; set; }
+
+    [JsonPropertyName("scale")]
+    public decimal Scale { get; set; }
+
+    [JsonPropertyName("passedBefore")]
+    public int PassedBefore { get; set; }
+
+    [JsonPropertyName("passedAfter")]
+    public int PassedAfter { get; set; }
+
+    [JsonPropertyName("optimizedData")]
+    public List<OptimizedSampleDto> OptimizedData { get; set; } = new();
 }
 
 // ============================================
@@ -250,6 +274,74 @@ public class OptimizationService
         {
             _logger.LogError(ex, "Error previewing optimization");
             return ServiceResult<BlankScaleOptimizationResult>.Fail($"Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Preview manual Blank & Scale values (ManualBlankScaleResult)
+    /// </summary>
+    public async Task<ServiceResult<ManualBlankScaleResult>> PreviewManualDetailsAsync(
+        Guid projectId, string element, decimal blank, decimal scale)
+    {
+        try
+        {
+            SetAuthHeader();
+
+            var request = new { projectId, element, blank, scale };
+            var response = await _httpClient.PostAsJsonAsync("optimization/preview", request);
+            var content = await response.Content.ReadAsStringAsync();
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = JsonSerializer.Deserialize<ApiResult<ManualBlankScaleResult>>(content,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                if (result?.Succeeded == true && result.Data != null)
+                    return ServiceResult<ManualBlankScaleResult>.Success(result.Data);
+
+                return ServiceResult<ManualBlankScaleResult>.Fail(result?.Message ?? "Failed");
+            }
+
+            return ServiceResult<ManualBlankScaleResult>.Fail($"Server error: {response.StatusCode}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error previewing manual optimization");
+            return ServiceResult<ManualBlankScaleResult>.Fail($"Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Apply manual Blank & Scale values
+    /// </summary>
+    public async Task<ServiceResult<ManualBlankScaleResult>> ApplyManualAsync(
+        Guid projectId, string element, decimal blank, decimal scale)
+    {
+        try
+        {
+            SetAuthHeader();
+
+            var request = new { projectId, element, blank, scale };
+            var response = await _httpClient.PostAsJsonAsync("optimization/apply", request);
+            var content = await response.Content.ReadAsStringAsync();
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = JsonSerializer.Deserialize<ApiResult<ManualBlankScaleResult>>(content,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                if (result?.Succeeded == true && result.Data != null)
+                    return ServiceResult<ManualBlankScaleResult>.Success(result.Data);
+
+                return ServiceResult<ManualBlankScaleResult>.Fail(result?.Message ?? "Failed");
+            }
+
+            return ServiceResult<ManualBlankScaleResult>.Fail($"Server error: {response.StatusCode}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error applying manual optimization");
+            return ServiceResult<ManualBlankScaleResult>.Fail($"Error: {ex.Message}");
         }
     }
 

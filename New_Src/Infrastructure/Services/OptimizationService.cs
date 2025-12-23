@@ -13,7 +13,8 @@ namespace Infrastructure.Services;
 
 /// <summary>
 /// Blank & Scale optimization service (Python-aligned).
-/// Python formula: corrected = (original - blank) * scale
+/// Optimization uses blank rows to compute blank adjustment, but exposed Blank values are the
+/// effective blanks to subtract: corrected = (original - effectiveBlank) * scale.
 ///
 /// Key fixes:
 /// - CRM duplicate-safe (CrmId duplicates won't crash)
@@ -104,10 +105,12 @@ public class OptimizationService : IOptimizationService
                 var passedBefore = before?.Passed ?? 0;
                 var meanBefore = before?.MeanDiff ?? 0m;
                 var meanAfter = CalculateMeanDiff(matchedData, element, optimalBlank, optimalScale);
+                var baseBlank = GetBaseBlankValue(matchedData, element);
+                var effectiveBlank = baseBlank - optimalBlank;
 
                 elementOptimizations[element] = new ElementOptimization(
                     element,
-                    optimalBlank,
+                    effectiveBlank,
                     optimalScale,
                     passedBefore,
                     passedAfter,
@@ -126,42 +129,49 @@ public class OptimizationService : IOptimizationService
             // =================================================================================
 
             // الف) ایجاد اسنپ‌شات برای Undo (فقط یک بار برای کل عملیات)
-            await SaveUndoStateAsync(request.ProjectId, "Optimization: Auto Blank/Scale (All Elements)");
-
-            // ب) لود کردن ردیف‌های دیتابیس برای اعمال تغییرات (Tracking فعال است)
-            var rowsToUpdate = await _db.RawDataRows
-                .Where(r => r.ProjectId == request.ProjectId)
-                .ToListAsync();
-
-            var projectToUpdate = await _db.Projects
-                .FirstOrDefaultAsync(p => p.ProjectId == request.ProjectId);
-
-            int totalDbUpdates = 0;
-
-            // ج) اعمال تغییرات روی JSON هر ردیف بر اساس مقادیر بهینه شده
-            foreach (var element in elements)
+            if (!request.PreviewOnly)
             {
-                if (bestBlanks.TryGetValue(element, out var b) && bestScales.TryGetValue(element, out var s))
+                await SaveUndoStateAsync(request.ProjectId, "Optimization: Auto Blank/Scale (All Elements)");
+
+                // ?) ??? ???? ???????? ??????? ???? ????? ??????? (Tracking ???? ???)
+                var rowsToUpdate = await _db.RawDataRows
+                    .Where(r => r.ProjectId == request.ProjectId)
+                    .ToListAsync();
+
+                var projectToUpdate = await _db.Projects
+                    .FirstOrDefaultAsync(p => p.ProjectId == request.ProjectId);
+
+                int totalDbUpdates = 0;
+
+                // ?) ????? ??????? ??? JSON ?? ???? ?? ???? ?????? ????? ???
+                foreach (var element in elements)
                 {
-                    // این متد محتوای ColumnData را در rowsToUpdate تغییر می‌دهد
-                    totalDbUpdates += ApplyBlankScaleToDatabase(rowsToUpdate, element, b, s);
+                    if (bestBlanks.TryGetValue(element, out var b) && bestScales.TryGetValue(element, out var s))
+                    {
+                        // ??? ??? ?????? ColumnData ?? ?? rowsToUpdate ????? ??????
+                        totalDbUpdates += ApplyBlankScaleToDatabase(rowsToUpdate, element, b, s);
+                    }
                 }
-            }
 
-            // د) ثبت زمان تغییرات و ذخیره نهایی در دیتابیس
-            if (projectToUpdate != null)
-            {
-                projectToUpdate.LastModifiedAt = DateTime.UtcNow;
-            }
+                // ?) ??? ???? ??????? ? ????? ????? ?? ???????
+                if (projectToUpdate != null)
+                {
+                    projectToUpdate.LastModifiedAt = DateTime.UtcNow;
+                }
 
-            if (totalDbUpdates > 0)
-            {
-                await _db.SaveChangesAsync();
-                _logger.LogInformation("Auto-optimization applied to DB. Project: {Id}, Updated Rows: {Count}", request.ProjectId, totalDbUpdates);
+                if (totalDbUpdates > 0)
+                {
+                    await _db.SaveChangesAsync();
+                    _logger.LogInformation("Auto-optimization applied to DB. Project: {Id}, Updated Rows: {Count}", request.ProjectId, totalDbUpdates);
+                }
+                else
+                {
+                    _logger.LogWarning("Auto-optimization calculated but no rows were updated in DB. Project: {Id}", request.ProjectId);
+                }
             }
             else
             {
-                _logger.LogWarning("Auto-optimization calculated but no rows were updated in DB. Project: {Id}", request.ProjectId);
+                _logger.LogInformation("PreviewOnly optimization requested. Skipping DB updates. Project: {Id}", request.ProjectId);
             }
 
             // =================================================================================
@@ -240,7 +250,10 @@ public class OptimizationService : IOptimizationService
                 .OrderBy(r => r.DataId)
                 .ToListAsync();
 
-            var updated = ApplyBlankScaleToDatabase(trackedRows, request.Element, request.Blank, request.Scale);
+            var projectData = await GetProjectRmDataAsync(request.ProjectId);
+            var blankAdjust = GetBaseBlankValue(projectData, request.Element) - request.Blank;
+
+            var updated = ApplyBlankScaleToDatabase(trackedRows, request.Element, blankAdjust, request.Scale);
 
             project.LastModifiedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync();
@@ -271,11 +284,12 @@ public class OptimizationService : IOptimizationService
                 return Result<ManualBlankScaleResult>.Fail("No matching CRM data found");
 
             var elements = new List<string> { request.Element };
-            var blanks = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase) { [request.Element] = request.Blank };
+            var blankAdjust = GetBaseBlankValue(matchedData, request.Element) - request.Blank;
+            var blanks = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase) { [request.Element] = blankAdjust };
             var scales = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase) { [request.Element] = request.Scale };
 
             var beforeStats = CalculateStatistics(matchedData, elements, 0m, 1m, -10m, 10m);
-            var afterStats = CalculateStatistics(matchedData, elements, request.Blank, request.Scale, -10m, 10m);
+            var afterStats = CalculateStatistics(matchedData, elements, blankAdjust, request.Scale, -10m, 10m);
 
             var optimizedData = BuildOptimizedData(matchedData, elements, blanks, scales, -10m, 10m);
 
@@ -311,7 +325,8 @@ public class OptimizationService : IOptimizationService
                 e =>
                 {
                     stats.ElementStats.TryGetValue(e, out var s);
-                    return new ElementOptimization(e, 0m, 1m, s?.Passed ?? 0, s?.Passed ?? 0, s?.MeanDiff ?? 0m, s?.MeanDiff ?? 0m);
+                    var baseBlank = GetBaseBlankValue(matchedData, e);
+                    return new ElementOptimization(e, baseBlank, 1m, s?.Passed ?? 0, s?.Passed ?? 0, s?.MeanDiff ?? 0m, s?.MeanDiff ?? 0m);
                 },
                 StringComparer.OrdinalIgnoreCase);
 
@@ -835,7 +850,7 @@ public class OptimizationService : IOptimizationService
 
                 diffs.Add(diff);
 
-                if (diff >= minDiff && diff <= maxDiff)
+                if (IsInDynamicRange(corrected, cv.Value))
                     passed++;
             }
 
@@ -866,6 +881,30 @@ public class OptimizationService : IOptimizationService
         }
 
         return diffs.Count > 0 ? diffs.Average() : 0m;
+    }
+
+    private static bool IsInDynamicRange(decimal corrected, decimal crmValue)
+    {
+        var range = CalculateDynamicRange(crmValue);
+        return corrected >= crmValue - range && corrected <= crmValue + range;
+    }
+
+    private static decimal CalculateDynamicRange(decimal value)
+    {
+        var absValue = Math.Abs(value);
+
+        if (absValue < 10m)
+            return 2m;
+        if (absValue < 100m)
+            return absValue * 0.20m;
+        if (absValue < 1000m)
+            return absValue * 0.10m;
+        if (absValue < 10000m)
+            return absValue * 0.08m;
+        if (absValue < 100000m)
+            return absValue * 0.05m;
+
+        return absValue * 0.03m;
     }
 
     private static List<OptimizedSampleDto> BuildOptimizedData(
@@ -910,8 +949,9 @@ public class OptimizationService : IOptimizationService
                 diffBefore[element] = db;
                 diffAfter[element] = da;
 
-                passBefore[element] = db >= minDiff && db <= maxDiff;
-                passAfter[element] = da >= minDiff && da <= maxDiff;
+                var correctedBefore = original - blankVal;
+                passBefore[element] = IsInDynamicRange(correctedBefore, cv.Value);
+                passAfter[element] = IsInDynamicRange(optimized, cv.Value);
             }
 
             result.Add(new OptimizedSampleDto(
@@ -942,18 +982,287 @@ public class OptimizationService : IOptimizationService
         int maxIterations,
         int populationSize)
     {
-        var blankBounds = (-100.0, 100.0);
-        var scaleBounds = (0.5, 2.0);
+        var samples = BuildElementSamples(data, element);
+        if (samples.Count == 0)
+            return (0m, 1m, 0);
 
-        var population = new List<(double Blank, double Scale)>(populationSize);
-        for (int i = 0; i < populationSize; i++)
+        var outcome = OptimizeModelA(samples, maxIterations, populationSize);
+        return (outcome.Blank, outcome.Scale, outcome.Passed);
+    }
+
+    private (decimal Blank, decimal Scale, int Passed, string SelectedModel) OptimizeElementMultiModel(
+        List<MatchedSample> data,
+        string element,
+        decimal minDiff,
+        decimal maxDiff,
+        int maxIterations,
+        int populationSize)
+    {
+        var samples = BuildElementSamples(data, element);
+        if (samples.Count == 0)
+            return (0m, 1m, 0, "A");
+
+        var modelA = OptimizeModelA(samples, maxIterations, populationSize);
+        var modelB = OptimizeModelB(samples, maxIterations, populationSize);
+        var modelC = OptimizeModelC(samples, maxIterations, populationSize);
+
+        var modelADistance = modelA.Scale == 1m ? (double?)null : modelB.AvgDistance;
+
+        var candidates = new List<ModelCandidate>
         {
-            population.Add((
-                _random.NextDouble() * (blankBounds.Item2 - blankBounds.Item1) + blankBounds.Item1,
-                _random.NextDouble() * (scaleBounds.Item2 - scaleBounds.Item1) + scaleBounds.Item1));
+            new("A", modelA.Blank, modelA.Scale, modelA.Passed, modelADistance),
+            new("B", modelB.Blank, modelB.Scale, modelB.Passed, modelB.AvgDistance),
+            new("C", modelC.Blank, modelC.Scale, modelC.Passed, modelC.AvgDistance)
+        };
+
+        var best = candidates
+            .OrderByDescending(c => c.Passed)
+            .ThenByDescending(c => c.Distance.HasValue ? -c.Distance.Value : double.PositiveInfinity)
+            .First();
+
+        return (best.Blank, best.Scale, best.Passed, best.Model);
+    }
+
+    private static List<ElementSample> BuildElementSamples(List<MatchedSample> data, string element)
+    {
+        var samples = new List<ElementSample>();
+
+        foreach (var s in data)
+        {
+            if (!s.SampleValues.TryGetValue(element, out var sv) || !sv.HasValue) continue;
+            if (!s.CrmValues.TryGetValue(element, out var cv) || !cv.HasValue || cv.Value == 0m) continue;
+
+            var blankVal = s.BlankValues.TryGetValue(element, out var bv) && bv.HasValue ? bv.Value : 0m;
+            samples.Add(new ElementSample((double)sv.Value, (double)cv.Value, (double)blankVal));
         }
 
-        var fitness = population.Select(p => EvaluateFitness(data, element, (decimal)p.Blank, (decimal)p.Scale, minDiff, maxDiff)).ToList();
+        return samples;
+    }
+
+    private static decimal GetBaseBlankValue(List<MatchedSample> data, string element)
+    {
+        foreach (var sample in data)
+        {
+            if (sample.BlankValues.TryGetValue(element, out var bv) && bv.HasValue)
+                return bv.Value;
+        }
+
+        return 0m;
+    }
+
+    private static decimal GetBaseBlankValue(List<RmSampleData> data, string element)
+    {
+        foreach (var sample in data)
+        {
+            if (sample.BlankValues.TryGetValue(element, out var bv) && bv.HasValue)
+                return bv.Value;
+        }
+
+        return 0m;
+    }
+
+    private ModelOutcome OptimizeModelA(List<ElementSample> samples, int maxIterations, int populationSize)
+    {
+        var total = samples.Count;
+        var (blankMin, blankMax) = GetBlankBounds(samples);
+        var (scaleMin, scaleMax) = GetScaleBounds();
+
+        double Objective(double blankAdjust, double scale)
+        {
+            var inRange = CountInRange(samples, blankAdjust, scale);
+            var reg = 10.0 * Math.Abs(scale - 1.0);
+            return -inRange + (reg / total);
+        }
+
+        var result = RunDifferentialEvolution(Objective, (blankMin, blankMax), (scaleMin, scaleMax), maxIterations, populationSize);
+        var blank = result.Blank;
+        var scale = result.Scale;
+        var inRangeAfter = CountInRange(samples, blank, scale);
+
+        var blankOnly = RunDifferentialEvolution((b, _) => Objective(b, 1.0), (blankMin, blankMax), (1.0, 1.0), maxIterations, populationSize);
+        var inRangeBlank = CountInRange(samples, blankOnly.Blank, 1.0);
+
+        if (inRangeBlank > inRangeAfter || (inRangeBlank == inRangeAfter && (double)inRangeBlank / total >= 0.75))
+        {
+            blank = blankOnly.Blank;
+            scale = 1.0;
+            inRangeAfter = inRangeBlank;
+        }
+
+        var avgDistance = AverageDistance(samples, blank, scale);
+        return new ModelOutcome("A", (decimal)blank, (decimal)scale, inRangeAfter, avgDistance);
+    }
+
+    private ModelOutcome OptimizeModelB(List<ElementSample> samples, int maxIterations, int populationSize)
+    {
+        var total = samples.Count;
+        var meanAbsSample = AverageAbsSample(samples);
+        var (blankMin, blankMax) = GetBlankBounds(samples);
+        var (scaleMin, scaleMax) = GetScaleBounds();
+
+        double Objective(double blankAdjust, double scale)
+        {
+            var totalDistance = TotalHuberDistance(samples, blankAdjust, scale);
+            var reg = 0.1 * (Math.Abs(scale - 1.0) * meanAbsSample);
+            return (totalDistance / total) + reg;
+        }
+
+        var result = RunDifferentialEvolution(Objective, (blankMin, blankMax), (scaleMin, scaleMax), maxIterations, populationSize);
+        var blank = result.Blank;
+        var scale = result.Scale;
+        var inRangeAfter = CountInRange(samples, blank, scale);
+        var avgDistance = AverageDistance(samples, blank, scale);
+
+        var blankOnly = RunDifferentialEvolution((b, _) => Objective(b, 1.0), (blankMin, blankMax), (1.0, 1.0), maxIterations, populationSize);
+        var inRangeBlank = CountInRange(samples, blankOnly.Blank, 1.0);
+        var avgDistanceBlank = AverageDistance(samples, blankOnly.Blank, 1.0);
+
+        if (inRangeBlank > inRangeAfter || (inRangeBlank == inRangeAfter && (double)inRangeBlank / total >= 0.75))
+        {
+            blank = blankOnly.Blank;
+            scale = 1.0;
+            inRangeAfter = inRangeBlank;
+            avgDistance = avgDistanceBlank;
+        }
+
+        return new ModelOutcome("B", (decimal)blank, (decimal)scale, inRangeAfter, avgDistance);
+    }
+
+    private ModelOutcome OptimizeModelC(List<ElementSample> samples, int maxIterations, int populationSize)
+    {
+        var total = samples.Count;
+        var meanAbsSample = AverageAbsSample(samples);
+        var (blankMin, blankMax) = GetBlankBounds(samples);
+        var (scaleMin, scaleMax) = GetScaleBounds();
+
+        double Objective(double blankAdjust, double scale)
+        {
+            var totalSse = TotalSse(samples, blankAdjust, scale);
+            var reg = 0.1 * (Math.Abs(scale - 1.0) * meanAbsSample);
+            return (totalSse / total) + reg;
+        }
+
+        var result = RunDifferentialEvolution(Objective, (blankMin, blankMax), (scaleMin, scaleMax), maxIterations, populationSize);
+        var blank = result.Blank;
+        var scale = result.Scale;
+        var inRangeAfter = CountInRange(samples, blank, scale);
+        var avgDistance = AverageDistance(samples, blank, scale);
+
+        var blankOnly = RunDifferentialEvolution((b, _) => Objective(b, 1.0), (blankMin, blankMax), (1.0, 1.0), maxIterations, populationSize);
+        var inRangeBlank = CountInRange(samples, blankOnly.Blank, 1.0);
+        var avgDistanceBlank = AverageDistance(samples, blankOnly.Blank, 1.0);
+
+        if (inRangeBlank > inRangeAfter || (inRangeBlank == inRangeAfter && (double)inRangeBlank / total >= 0.75))
+        {
+            blank = blankOnly.Blank;
+            scale = 1.0;
+            inRangeAfter = inRangeBlank;
+            avgDistance = avgDistanceBlank;
+        }
+
+        return new ModelOutcome("C", (decimal)blank, (decimal)scale, inRangeAfter, avgDistance);
+    }
+
+    private static (double Min, double Max) GetBlankBounds(List<ElementSample> samples)
+    {
+        var avgCert = samples.Average(s => s.CrmValue);
+        var maxVal = samples
+            .Select(s => Math.Abs(s.SampleValue))
+            .Concat(samples.Select(s => Math.Abs(s.BlankValue)))
+            .Append(Math.Abs(avgCert))
+            .Append(1.0)
+            .Max();
+
+        var bound = maxVal * 10.0;
+        return (-bound, bound);
+    }
+
+    private static (double Min, double Max) GetScaleBounds()
+        => (1.0 - 0.3, 1.0 + 0.3);
+
+    private static int CountInRange(List<ElementSample> samples, double blankAdjust, double scale)
+    {
+        int passed = 0;
+
+        foreach (var sample in samples)
+        {
+            var corrected = (sample.SampleValue - sample.BlankValue + blankAdjust) * scale;
+            var range = CalculateDynamicRange(sample.CrmValue);
+            var lower = sample.CrmValue - range;
+            var upper = sample.CrmValue + range;
+
+            if (corrected >= lower && corrected <= upper)
+                passed++;
+        }
+
+        return passed;
+    }
+
+    private static double AverageAbsSample(List<ElementSample> samples)
+    {
+        if (samples.Count == 0)
+            return 0.0;
+
+        return samples.Average(s => Math.Abs(s.SampleValue));
+    }
+
+    private static double AverageDistance(List<ElementSample> samples, double blankAdjust, double scale)
+    {
+        if (samples.Count == 0)
+            return 0.0;
+
+        var distances = samples.Select(s => DistanceToRange((s.SampleValue - s.BlankValue + blankAdjust) * scale, s.CrmValue));
+        return distances.Average();
+    }
+
+    private static double TotalHuberDistance(List<ElementSample> samples, double blankAdjust, double scale)
+    {
+        double total = 0.0;
+
+        foreach (var sample in samples)
+        {
+            var corrected = (sample.SampleValue - sample.BlankValue + blankAdjust) * scale;
+            var dist = DistanceToRange(corrected, sample.CrmValue);
+            total += Huber(1.0, dist);
+        }
+
+        return total;
+    }
+
+    private static double TotalSse(List<ElementSample> samples, double blankAdjust, double scale)
+    {
+        double total = 0.0;
+
+        foreach (var sample in samples)
+        {
+            var corrected = (sample.SampleValue - sample.BlankValue + blankAdjust) * scale;
+            var diff = corrected - sample.CrmValue;
+            total += diff * diff;
+        }
+
+        return total;
+    }
+
+    private (double Blank, double Scale, double Objective) RunDifferentialEvolution(
+        Func<double, double, double> objective,
+        (double Min, double Max) blankBounds,
+        (double Min, double Max) scaleBounds,
+        int maxIterations,
+        int populationSize)
+    {
+        var size = Math.Max(populationSize, 6);
+        var population = new List<(double Blank, double Scale)>(size);
+
+        for (int i = 0; i < size; i++)
+        {
+            population.Add((
+                _random.NextDouble() * (blankBounds.Max - blankBounds.Min) + blankBounds.Min,
+                _random.NextDouble() * (scaleBounds.Max - scaleBounds.Min) + scaleBounds.Min));
+        }
+
+        var fitness = population
+            .Select(p => -objective(p.Blank, p.Scale))
+            .ToList();
 
         double previousBest = fitness.Max();
         int stagnant = 0;
@@ -963,12 +1272,12 @@ public class OptimizationService : IOptimizationService
             int bestIdx = fitness.IndexOf(fitness.Max());
             var best = population[bestIdx];
 
-            for (int i = 0; i < populationSize; i++)
+            for (int i = 0; i < size; i++)
             {
-                double F = 0.5 + _random.NextDouble() * 0.5; // dithering
+                double F = 0.5 + _random.NextDouble() * 0.5;
                 double CR = DefaultCR;
 
-                var candidates = Enumerable.Range(0, populationSize)
+                var candidates = Enumerable.Range(0, size)
                     .Where(j => j != i && j != bestIdx)
                     .OrderBy(_ => _random.Next())
                     .Take(2)
@@ -977,8 +1286,8 @@ public class OptimizationService : IOptimizationService
                 var r1 = population[candidates[0]];
                 var r2 = population[candidates[1]];
 
-                var mutantBlank = BounceBack(best.Blank + F * (r1.Blank - r2.Blank), blankBounds.Item1, blankBounds.Item2);
-                var mutantScale = BounceBack(best.Scale + F * (r1.Scale - r2.Scale), scaleBounds.Item1, scaleBounds.Item2);
+                var mutantBlank = BounceBack(best.Blank + F * (r1.Blank - r2.Blank), blankBounds.Min, blankBounds.Max);
+                var mutantScale = BounceBack(best.Scale + F * (r1.Scale - r2.Scale), scaleBounds.Min, scaleBounds.Max);
 
                 var current = population[i];
                 int jRand = _random.Next(2);
@@ -986,7 +1295,7 @@ public class OptimizationService : IOptimizationService
                 var trialBlank = (jRand == 0 || _random.NextDouble() < CR) ? mutantBlank : current.Blank;
                 var trialScale = (jRand == 1 || _random.NextDouble() < CR) ? mutantScale : current.Scale;
 
-                var trialFitness = EvaluateFitness(data, element, (decimal)trialBlank, (decimal)trialScale, minDiff, maxDiff);
+                var trialFitness = -objective(trialBlank, trialScale);
                 if (trialFitness > fitness[i])
                 {
                     population[i] = (trialBlank, trialScale);
@@ -1008,49 +1317,50 @@ public class OptimizationService : IOptimizationService
 
         int finalBestIdx = fitness.IndexOf(fitness.Max());
         var finalBest = population[finalBestIdx];
+        var finalObjective = -fitness[finalBestIdx];
 
-        var passed = CountPassed(data, element, (decimal)finalBest.Blank, (decimal)finalBest.Scale, minDiff, maxDiff);
-        return ((decimal)finalBest.Blank, (decimal)finalBest.Scale, passed);
+        return (finalBest.Blank, finalBest.Scale, finalObjective);
     }
 
-    private (decimal Blank, decimal Scale, int Passed, string SelectedModel) OptimizeElementMultiModel(
-        List<MatchedSample> data,
-        string element,
-        decimal minDiff,
-        decimal maxDiff,
-        int maxIterations,
-        int populationSize)
+    private static double CalculateDynamicRange(double value)
     {
-        // اگر multi-model دقیق‌تری داشتی، همینجا جایگزین کن.
-        // فعلاً برای پایداری: Model A
-        var (b, s, p) = OptimizeElementImproved(data, element, minDiff, maxDiff, maxIterations, populationSize);
-        return (b, s, p, "A");
+        var absValue = Math.Abs(value);
+
+        if (absValue < 10.0)
+            return 2.0;
+        if (absValue < 100.0)
+            return absValue * 0.20;
+        if (absValue < 1000.0)
+            return absValue * 0.10;
+        if (absValue < 10000.0)
+            return absValue * 0.08;
+        if (absValue < 100000.0)
+            return absValue * 0.05;
+
+        return absValue * 0.03;
     }
 
-    private static double EvaluateFitness(List<MatchedSample> data, string element, decimal blankAdjust, decimal scale, decimal minDiff, decimal maxDiff)
-        => CountPassed(data, element, blankAdjust, scale, minDiff, maxDiff);
-
-    private static int CountPassed(List<MatchedSample> data, string element, decimal blankAdjust, decimal scale, decimal minDiff, decimal maxDiff)
+    private static double DistanceToRange(double corrected, double crmValue)
     {
-        int passed = 0;
+        var range = CalculateDynamicRange(crmValue);
+        var lower = crmValue - range;
+        var upper = crmValue + range;
 
-        foreach (var s in data)
-        {
-            if (!s.SampleValues.TryGetValue(element, out var sv) || !sv.HasValue) continue;
-            if (!s.CrmValues.TryGetValue(element, out var cv) || !cv.HasValue || cv.Value == 0m) continue;
+        if (corrected < lower)
+            return lower - corrected;
+        if (corrected > upper)
+            return corrected - upper;
 
-            // Get blank_val for this element
-            var blankVal = s.BlankValues.TryGetValue(element, out var bv) && bv.HasValue ? bv.Value : 0m;
+        return 0.0;
+    }
 
-            // Python formula: (sample_val - blank_val + blank_adjust) * scale
-            var corrected = (sv.Value - blankVal + blankAdjust) * scale;
-            var diff = ((corrected - cv.Value) / cv.Value) * 100m;
+    private static double Huber(double delta, double x)
+    {
+        var abs = Math.Abs(x);
+        if (abs <= delta)
+            return 0.5 * abs * abs;
 
-            if (diff >= minDiff && diff <= maxDiff)
-                passed++;
-        }
-
-        return passed;
+        return delta * (abs - 0.5 * delta);
     }
 
     private static double BounceBack(double value, double min, double max)
@@ -1059,7 +1369,6 @@ public class OptimizationService : IOptimizationService
         if (value > max) return max - (value - max);
         return value;
     }
-
     // ---------------------------
     // Internal types
     // ---------------------------
@@ -1072,6 +1381,12 @@ public class OptimizationService : IOptimizationService
         Dictionary<string, decimal?> SampleValues,
         Dictionary<string, decimal?> CrmValues,
         Dictionary<string, decimal?> BlankValues);
+
+    private sealed record ElementSample(double SampleValue, double CrmValue, double BlankValue);
+
+    private sealed record ModelOutcome(string Model, decimal Blank, decimal Scale, int Passed, double AvgDistance);
+
+    private sealed record ModelCandidate(string Model, decimal Blank, decimal Scale, int Passed, double? Distance);
 
     private sealed record ElementStats(int Passed, decimal MeanDiff);
 }

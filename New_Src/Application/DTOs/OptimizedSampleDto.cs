@@ -1,4 +1,4 @@
-﻿namespace Application.DTOs;
+namespace Application.DTOs;
 
 /// <summary>
 /// Represents a request to perform blank and scale optimization on project data.
@@ -10,6 +10,7 @@
 /// <param name="MaxIterations">The maximum number of iterations the optimization algorithm should perform.</param>
 /// <param name="PopulationSize">The size of the candidate population for the evolutionary algorithm.</param>
 /// <param name="UseMultiModel">Indicates whether to evaluate multiple models (e.g., A, B, C) and select the best one.</param>
+/// <param name="PreviewOnly">When true, calculates results without persisting changes.</param>
 /// <param name="Seed">An optional integer seed to ensure reproducible random number generation.</param>
 public record BlankScaleOptimizationRequest(
     Guid ProjectId,
@@ -19,6 +20,7 @@ public record BlankScaleOptimizationRequest(
     int MaxIterations = 100,
     int PopulationSize = 20,
     bool UseMultiModel = true,
+    bool PreviewOnly = false,
     int? Seed = null
 );
 
@@ -46,7 +48,7 @@ public record BlankScaleOptimizationResult(
 /// Details the optimization parameters and results for a single chemical element.
 /// </summary>
 /// <param name="Element">The chemical symbol of the element.</param>
-/// <param name="OptimalBlank">The calculated blank value that yields the best results.</param>
+/// <param name="OptimalBlank">The effective blank value to subtract (base blank minus optimized adjustment).</param>
 /// <param name="OptimalScale">The calculated scale factor that yields the best results.</param>
 /// <param name="PassedBefore">The number of samples passing for this element before optimization.</param>
 /// <param name="PassedAfter">The number of samples passing for this element after optimization.</param>
@@ -93,7 +95,7 @@ public record OptimizedSampleDto(
 /// </summary>
 /// <param name="ProjectId">The unique identifier of the project.</param>
 /// <param name="Element">The chemical symbol of the element to adjust.</param>
-/// <param name="Blank">The specific blank value to apply.</param>
+/// <param name="Blank">The effective blank value to subtract.</param>
 /// <param name="Scale">The specific scale factor to apply.</param>
 public record ManualBlankScaleRequest(
     Guid ProjectId,
@@ -106,7 +108,7 @@ public record ManualBlankScaleRequest(
 /// Contains the result of a manual blank and scale adjustment operation.
 /// </summary>
 /// <param name="Element">The chemical symbol of the element corrected.</param>
-/// <param name="Blank">The blank value that was applied.</param>
+/// <param name="Blank">The effective blank value that was applied.</param>
 /// <param name="Scale">The scale factor that was applied.</param>
 /// <param name="PassedBefore">Pass count derived from the previous state.</param>
 /// <param name="PassedAfter">Pass count resulting from the new manual settings.</param>
@@ -175,7 +177,7 @@ public record ModelResult(
 );
 
 /// <summary>
-/// details the comparison between different models for a specific single element.
+/// Details the comparison between different models for a specific single element.
 /// </summary>
 /// <param name="Element">The chemical symbol of the element.</param>
 /// <param name="ModelA">The performance metrics for Model A.</param>
