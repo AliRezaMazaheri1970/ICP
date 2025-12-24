@@ -976,20 +976,8 @@ public class OptimizationService : IOptimizationService
 
     private static decimal CalculateDynamicRange(decimal value)
     {
-        var absValue = Math.Abs(value);
-
-        if (absValue < 10m)
-            return 2m;
-        if (absValue < 100m)
-            return absValue * 0.20m;
-        if (absValue < 1000m)
-            return absValue * 0.10m;
-        if (absValue < 10000m)
-            return absValue * 0.08m;
-        if (absValue < 100000m)
-            return absValue * 0.05m;
-
-        return absValue * 0.03m;
+        // Match Python: range = crm_val * 0.1
+        return Math.Abs(value) * 0.10m;
     }
 
     private static List<OptimizedSampleDto> BuildOptimizedData(
@@ -1427,20 +1415,8 @@ public class OptimizationService : IOptimizationService
 
     private static double CalculateDynamicRange(double value)
     {
-        var absValue = Math.Abs(value);
-
-        if (absValue < 10.0)
-            return 2.0;
-        if (absValue < 100.0)
-            return absValue * 0.20;
-        if (absValue < 1000.0)
-            return absValue * 0.10;
-        if (absValue < 10000.0)
-            return absValue * 0.08;
-        if (absValue < 100000.0)
-            return absValue * 0.05;
-
-        return absValue * 0.03;
+        // Match Python: range = crm_val * 0.1
+        return Math.Abs(value) * 0.1;
     }
 
     private static double DistanceToRange(double corrected, double crmValue)
