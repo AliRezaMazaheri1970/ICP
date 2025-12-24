@@ -623,13 +623,13 @@ public class OptimizationService : IOptimizationService
                 if (!candidate.HasValue)
                     continue;
 
-                if (!blankCandidates.TryGetValue(row.Element, out var list))
+                if (!blankCandidates.TryGetValue(row.Element, out var blankList))
                 {
-                    list = new List<decimal>();
-                    blankCandidates[row.Element] = list;
+                    blankList = new List<decimal>();
+                    blankCandidates[row.Element] = blankList;
                 }
 
-                list.Add(candidate.Value);
+                blankList.Add(candidate.Value);
                 continue;
             }
 
@@ -647,13 +647,13 @@ public class OptimizationService : IOptimizationService
             if (!sampleValue.HasValue)
                 continue;
 
-            if (!crmSamples.TryGetValue(row.Element, out var list))
+            if (!crmSamples.TryGetValue(row.Element, out var crmList))
             {
-                list = new List<(decimal SampleValue, decimal CrmValue)>();
-                crmSamples[row.Element] = list;
+                crmList = new List<(decimal SampleValue, decimal CrmValue)>();
+                crmSamples[row.Element] = crmList;
             }
 
-            list.Add((sampleValue.Value, crmValue));
+            crmList.Add((sampleValue.Value, crmValue));
         }
 
         var best = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
