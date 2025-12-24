@@ -2,14 +2,15 @@
 @using MudBlazor
 @using WebUI.Services
 @using Microsoft.AspNetCore.Components.Forms
-
 @inject AuthService AuthService
 @inject ImportService ImportService
 @inject NavigationManager NavManager
 @inject ISnackbar Snackbar
 
 <PageTitle>ICP - Import Data</PageTitle>
+
 <NavigationLock OnBeforeInternalNavigation="OnBeforeNavigation" ConfirmExternalNavigation="isLoading" />
+
 @* Loading Overlay *@
 @if (isLoading)
 {
@@ -17,14 +18,20 @@
         <MudPaper Elevation="4" Class="pa-6 d-flex flex-column align-center">
             <MudProgressCircular Color="Color.Primary" Size="Size.Large" Indeterminate="true" />
             <MudText Typo="Typo.h6" Class="mt-4">Processing...</MudText>
-
         </MudPaper>
     </div>
 }
+
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-6">
 
-    <MudPaper Elevation="0" Class="pa-4 mb-4 d-flex justify-space-between align-center custom-card-all ">
+    <MudPaper Elevation="0" Class="pa-4 mb-4 d-flex justify-space-between align-center custom-card-all max-600">
         <div>
+            @if (isViewer)
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mb-4">
+                    You are in <strong>Viewer</strong> mode. You cannot upload or import new data.
+                </MudAlert>
+            }
             <MudText Typo="Typo.h4" Class="fw-bold h4-import-data">Import Data</MudText>
             <MudText Typo="Typo.body2" Class="mud-text-secondary p-import-data">Upload CSV or Excel files to create a new project</MudText>
         </div>
@@ -46,62 +53,75 @@
                               Placeholder="Enter project name..."
                               Required="true"
                               RequiredError="Project name is required"
-                              Class="mb-4" />
+                              Class="mb-4"
+                              Disabled="@isViewer" />
 
-                    <div style="position: relative; width: 100%; height: 200px;" class="mb-4">
+                @* --- ناحیه آپلود فایل (اصلاح شده) --- *@
+                <div style="position: relative; width: 100%; height: 200px;" class="mb-4">
+                    <MudPaper Height="100%"
+                              Outlined="true"
+                              Class="@GetDropZoneClass()"
+                              Style="width: 100%; height: 100%;">
 
-                        <MudPaper Height="100%"
-                                  Outlined="true"
-                                  Class="@GetDropZoneClass()"
-                                  Style="width: 100%; height: 100%;">
-
-                            <div class="d-flex flex-column align-center justify-center drop-file" style="height: 100%;">
-                                @if (fileContent == null)
-                                {
-                                    <MudIcon Icon="@Icons.Material.Filled.CloudUpload"
-                                             Size="Size.Large"
-                                             Class="mb-2 color-light-blue" />
-                                    <MudText Typo="Typo.h6">Drop file here or click to browse</MudText>
-                                    <MudText Typo="Typo.body2" Class="mud-text-secondary mt-1">
-                                        Supported formats: CSV, Excel (.xlsx, .xls), TXT
-                                    </MudText>
-                                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                                        Maximum file size: 200MB
-                                    </MudText>
-                                }
-                                else
-                                {
-                                    <div class="d-flex align-center gap-3" style="position: relative; z-index: 20;">
-                                        <MudIcon Icon="@fileIcon" Size="Size.Large" Color="Color.Success" />
-                                        <div>
-                                            <MudText Typo="Typo.subtitle1" Class="fw-bold">@fileName</MudText>
-                                            <MudText Typo="Typo.body2" Class="mud-text-secondary">@fileSize</MudText>
-                                        </div>
-                                        <MudIconButton Icon="@Icons.Material.Filled.Close"
-                                                       Size="Size.Small"
-                                                       OnClick="ClearFile"
-                                                       Color="Color.Error" />
+                        <div class="d-flex flex-column align-center justify-center drop-file" style="height: 100%;">
+                            @if (isViewer)
+                            {
+                                @* نمایش برای Viewer *@
+                                <MudIcon Icon="@Icons.Material.Filled.Block" Size="Size.Large" Color="Color.Error" Class="mb-2" />
+                                <MudText Typo="Typo.h6">Import Disabled</MudText>
+                                <MudText Typo="Typo.body2" Class="mud-text-secondary">Viewers cannot upload files.</MudText>
+                            }
+                            else if (fileContent == null)
+                            {
+                                @* نمایش برای آپلود عادی *@
+                                <MudIcon Icon="@Icons.Material.Filled.CloudUpload"
+                                         Size="Size.Large"
+                                         Class="mb-2 color-light-blue" />
+                                <MudText Typo="Typo.h6">Drop file here or click to browse</MudText>
+                                <MudText Typo="Typo.body2" Class="mud-text-secondary mt-1">
+                                    Supported formats: CSV, Excel (.xlsx, .xls), TXT
+                                </MudText>
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                    Maximum file size: 200MB
+                                </MudText>
+                            }
+                            else
+                            {
+                                @* نمایش فایل انتخاب شده *@
+                                <div class="d-flex align-center gap-3" style="position: relative; z-index: 20;">
+                                    <MudIcon Icon="@fileIcon" Size="Size.Large" Color="Color.Success" />
+                                    <div>
+                                        <MudText Typo="Typo.subtitle1" Class="fw-bold">@fileName</MudText>
+                                        <MudText Typo="Typo.body2" Class="mud-text-secondary">@fileSize</MudText>
                                     </div>
-                                }
-                            </div>
-                        </MudPaper>
+                                    <MudIconButton Icon="@Icons.Material.Filled.Close"
+                                                   Size="Size.Small"
+                                                   OnClick="ClearFile"
+                                                   Color="Color.Error" />
+                                </div>
+                            }
+                        </div>
+                    </MudPaper>
 
-                        @if (fileContent == null)
-                        {
-                            <InputFile OnChange="OnInputFileChangeStandard"
-                                       accept=".csv, .xlsx, .xls, .txt"
-                                       style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; z-index: 10;" />
-                        }
-                    </div>
+                    @* تگ انتخاب فایل: فقط اگر Viewer نباشد رندر می‌شود *@
+                    @if (fileContent == null && !isViewer)
+                    {
+                        <InputFile OnChange="OnInputFileChangeStandard"
+                                   accept=".csv, .xlsx, .xls, .txt"
+                                   style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; z-index: 10;" />
+                    }
+                </div>
+                @* ---------------------------------------- *@
 
                 <MudExpansionPanels Class="mt-4" Elevation="0">
-                    <MudExpansionPanel Text="Advanced Options" Expanded="false">
+                    <MudExpansionPanel Text="Advanced Options" Expanded="false" Disabled="@isViewer">
                         <MudGrid>
                             <MudItem xs="12" sm="6">
                                 <MudSelect @bind-Value="delimiter"
                                            Label="Delimiter"
                                            Variant="Variant.Outlined"
-                                           Margin="Margin.Dense">
+                                           Margin="Margin.Dense"
+                                           Disabled="@isViewer">
                                     <MudSelectItem Value="@(",")">Comma (,)</MudSelectItem>
                                     <MudSelectItem Value="@(";")">Semicolon (;)</MudSelectItem>
                                     <MudSelectItem Value="@("\t")">Tab</MudSelectItem>
@@ -114,17 +134,20 @@
                                                  Variant="Variant.Outlined"
                                                  Min="1"
                                                  Max="100"
-                                                 Margin="Margin.Dense" />
+                                                 Margin="Margin.Dense"
+                                                 Disabled="@isViewer" />
                             </MudItem>
                             <MudItem xs="12" sm="6">
                                 <MudCheckBox @bind-Value="skipLastRow"
                                              Label="Skip last row"
-                                             Color="Color.Primary" />
+                                             Color="Color.Primary"
+                                             Disabled="@isViewer" />
                             </MudItem>
                             <MudItem xs="12" sm="6">
                                 <MudCheckBox @bind-Value="autoDetectType"
                                              Label="Auto-detect sample types"
-                                             Color="Color.Primary" />
+                                             Color="Color.Primary"
+                                             Disabled="@isViewer" />
                             </MudItem>
                         </MudGrid>
                     </MudExpansionPanel>
@@ -135,14 +158,14 @@
                                Class="color-dark-blue btn-preview"
                                StartIcon="@Icons.Material.Filled.Preview"
                                OnClick="PreviewFile"
-                               Disabled="@(fileContent == null || isLoading)">
+                               Disabled="@(fileContent == null || isLoading || isViewer)">
                         Preview
                     </MudButton>
 
                     <MudButton Variant="Variant.Filled"
                                StartIcon="@Icons.Material.Filled.Upload"
                                OnClick="ImportFile"
-                               Disabled="@(! CanImport)"
+                               Disabled="@(!CanImport)"
                                Class="flex-grow-1 color-bg-dark-blue ">
                         @if (isLoading)
                         {
@@ -268,6 +291,9 @@
     private string fileContentType = "";
     private long fileSizeBytes;
 
+    // تشخیص نقش کاربر
+    private bool isViewer = false;
+
     private string projectName = "";
     private string delimiter = ",";
     private int headerRow = 1;
@@ -279,7 +305,9 @@
 
     private string fileIcon => GetFileIcon();
     private string fileSize => fileSizeBytes > 0 ? FormatFileSize(fileSizeBytes) : "";
-    private bool CanImport => fileContent != null && !string.IsNullOrWhiteSpace(projectName) && !isLoading;
+
+    // اگر کاربر Viewer باشد، دکمه ایمپورت هرگز فعال نمی‌شود
+    private bool CanImport => fileContent != null && !string.IsNullOrWhiteSpace(projectName) && !isLoading && !isViewer;
 
     protected override void OnInitialized()
     {
@@ -287,6 +315,13 @@
         if (user == null || !user.IsAuthenticated)
         {
             NavManager.NavigateTo("/login");
+            return;
+        }
+
+        // بررسی اینکه آیا کاربر Viewer است یا خیر
+        if (string.Equals(user.Position, "Viewer", StringComparison.OrdinalIgnoreCase))
+        {
+            isViewer = true;
         }
     }
 
@@ -299,14 +334,12 @@
             : "d-flex flex-column align-center justify-center";
     }
 
-    private async Task OnInputFileChange(InputFileChangeEventArgs e)
+    private async Task OnInputFileChangeStandard(InputFileChangeEventArgs e)
     {
+        // لایه امنیتی اضافی: اگر مشاهده‌گر باشد، هیچ فایلی پردازش نشود
+        if (isViewer) return;
+
         var file = e.File;
-        if (file == null) return;
-        await ProcessFile(file);
-    }
-    private async Task OnFileSelected(IBrowserFile file)
-    {
         if (file == null) return;
         await ProcessFile(file);
     }
@@ -318,13 +351,11 @@
 
         try
         {
-            // Store file info
             selectedFile = file;
             fileName = file.Name;
             fileContentType = file.ContentType ?? "application/octet-stream";
             fileSizeBytes = file.Size;
 
-            // Read and store file content (max 200MB)
             using var ms = new MemoryStream();
             await file.OpenReadStream(maxAllowedSize: 200 * 1024 * 1024).CopyToAsync(ms);
             fileContent = ms.ToArray();
@@ -389,6 +420,13 @@
 
     private async Task ImportFile()
     {
+        // لایه امنیتی اضافی برای جلوگیری از فراخوانی توسط Viewer
+        if (isViewer)
+        {
+            Snackbar.Add("Viewers cannot import data.", Severity.Error);
+            return;
+        }
+
         if (fileContent == null || string.IsNullOrWhiteSpace(projectName)) return;
 
         isLoading = true;
@@ -455,19 +493,12 @@
         public string Name { get; set; } = "";
         public string Status { get; set; } = "";
     }
+
     private async Task OnBeforeNavigation(LocationChangingContext context)
     {
         if (isLoading)
         {
             context.PreventNavigation();
         }
-    }
-
-    // این متد برای InputFile استاندارد استفاده می‌شود
-    private async Task OnInputFileChangeStandard(InputFileChangeEventArgs e)
-    {
-        var file = e.File;
-        if (file == null) return;
-        await ProcessFile(file);
     }
 }
