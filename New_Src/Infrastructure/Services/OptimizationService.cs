@@ -26,6 +26,13 @@ public class OptimizationService : IOptimizationService
     private readonly IsatisDbContext _db;
     private readonly ILogger<OptimizationService> _logger;
     private Random _random;
+    private static readonly string[] CrmIds = { "258", "252", "906", "506", "233", "255", "263", "260" };
+    private static readonly Regex CrmPattern = new Regex(
+        $@"(?i)(?:(?:^|(?<=\s))(?:CRM|OREAS)?\s*({string.Join("|", CrmIds)})(?:[a-zA-Z0-9]{{0,2}})?\b)",
+        RegexOptions.Compiled);
+    private static readonly Regex BlankPattern = new Regex(
+        @"(?i)(?:CRM\s*)?(?:BLANK|BLNK|Blank|blnk|blank)(?:\s+.*)?",
+        RegexOptions.Compiled);
 
     private const double DefaultCR = 0.7;     // scipy-like default crossover
     private const double Tolerance = 0.01;    // convergence tolerance
@@ -51,14 +58,14 @@ public class OptimizationService : IOptimizationService
                 _random = new Random(request.Seed.Value);
 
             // 2. دریافت داده‌های پروژه (Read-Only برای محاسبات)
-            var projectData = await GetProjectRmDataAsync(request.ProjectId);
-            if (projectData.Count == 0)
-                return Result<BlankScaleOptimizationResult>.Fail("No RM samples found in project");
-
-            // 3. دریافت داده‌های CRM
             var crmData = await GetCrmDataAsync();
             if (crmData.Count == 0)
                 return Result<BlankScaleOptimizationResult>.Fail("No CRM data found");
+
+            var projectData = await GetProjectRmDataAsync(request.ProjectId, crmData);
+            if (projectData.Count == 0)
+                return Result<BlankScaleOptimizationResult>.Fail("No RM samples found in project");
+            var baseBlanks = GetBaseBlankValues(projectData);
 
             // 4. تطبیق داده‌های پروژه با CRM
             var matchedData = MatchWithCrm(projectData, crmData);
@@ -149,7 +156,7 @@ public class OptimizationService : IOptimizationService
                     if (bestBlanks.TryGetValue(element, out var b) && bestScales.TryGetValue(element, out var s))
                     {
                         // ??? ??? ?????? ColumnData ?? ?? rowsToUpdate ????? ??????
-                        totalDbUpdates += ApplyBlankScaleToDatabase(rowsToUpdate, element, b, s);
+                        totalDbUpdates += ApplyBlankScaleToDatabase(rowsToUpdate, element, b, s, baseBlanks);
                     }
                 }
 
@@ -250,10 +257,12 @@ public class OptimizationService : IOptimizationService
                 .OrderBy(r => r.DataId)
                 .ToListAsync();
 
-            var projectData = await GetProjectRmDataAsync(request.ProjectId);
+            var crmData = await GetCrmDataAsync();
+            var projectData = await GetProjectRmDataAsync(request.ProjectId, crmData);
             var blankAdjust = GetBaseBlankValue(projectData, request.Element) - request.Blank;
+            var baseBlanks = GetBaseBlankValues(projectData);
 
-            var updated = ApplyBlankScaleToDatabase(trackedRows, request.Element, blankAdjust, request.Scale);
+            var updated = ApplyBlankScaleToDatabase(trackedRows, request.Element, blankAdjust, request.Scale, baseBlanks);
 
             project.LastModifiedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync();
@@ -276,8 +285,8 @@ public class OptimizationService : IOptimizationService
     {
         try
         {
-            var projectData = await GetProjectRmDataAsync(request.ProjectId);
             var crmData = await GetCrmDataAsync();
+            var projectData = await GetProjectRmDataAsync(request.ProjectId, crmData);
             var matchedData = MatchWithCrm(projectData, crmData);
 
             if (matchedData.Count == 0)
@@ -310,8 +319,8 @@ public class OptimizationService : IOptimizationService
     {
         try
         {
-            var projectData = await GetProjectRmDataAsync(projectId);
             var crmData = await GetCrmDataAsync();
+            var projectData = await GetProjectRmDataAsync(projectId, crmData);
             var matchedData = MatchWithCrm(projectData, crmData);
 
             if (matchedData.Count == 0)
@@ -406,8 +415,7 @@ public class OptimizationService : IOptimizationService
     }
 
     /// <summary>
-    /// Apply Python formula: corrected = (original - blank_val + blank_adjust) * scale
-    /// blank_val is loaded from Blank rows (Type=Blk) for each element
+    /// Apply Python formula: corrected = (original - blank_val + blank_adjust) * scale.
     /// </summary>
     private int ApplyBlankScaleToDatabase(
         List<Domain.Entities.RawDataRow> trackedRows,
@@ -418,54 +426,8 @@ public class OptimizationService : IOptimizationService
     {
         if (trackedRows.Count == 0) return 0;
 
-        // First, find blank_val for this element if not provided
-        if (blankValues == null)
-        {
-            blankValues = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
-            var elementPattern = new Regex(@"([A-Za-z]+)", RegexOptions.IgnoreCase);
-
-            foreach (var row in trackedRows)
-            {
-                if (string.IsNullOrWhiteSpace(row.ColumnData)) continue;
-
-                try
-                {
-                    using var doc = JsonDocument.Parse(row.ColumnData);
-                    var root = doc.RootElement;
-
-                    // Check if this is a Blank row
-                    if (root.TryGetProperty("Type", out var typeProp))
-                    {
-                        var typeVal = typeProp.ValueKind == JsonValueKind.String ? typeProp.GetString() : typeProp.ToString();
-                        if (string.Equals(typeVal, "Blk", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(typeVal, "Blank", StringComparison.OrdinalIgnoreCase))
-                        {
-                            if (root.TryGetProperty("Element", out var eProp))
-                            {
-                                var rawElement = eProp.ValueKind == JsonValueKind.String ? eProp.GetString() : eProp.ToString();
-                                var m = elementPattern.Match(rawElement ?? "");
-                                if (m.Success)
-                                {
-                                    var element = m.Groups[1].Value;
-                                    if (TryGetDecimal(root, "Soln Conc", out var blankConc))
-                                    {
-                                        if (!blankValues.ContainsKey(element))
-                                            blankValues[element] = blankConc;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                catch { }
-            }
-        }
-
         // Get blank_val for target element
-        var blankVal = blankValues.TryGetValue(targetElement, out var bv) ? bv : 0m;
-
-        // "Ag 328.068" -> "Ag"
-        var elemPattern = new Regex(@"([A-Za-z]+)", RegexOptions.IgnoreCase);
+        var blankVal = blankValues != null && blankValues.TryGetValue(targetElement, out var bv) ? bv : 0m;
 
         int updated = 0;
 
@@ -487,11 +449,9 @@ public class OptimizationService : IOptimizationService
                 if (string.IsNullOrWhiteSpace(rawElement))
                     continue;
 
-                var match = elemPattern.Match(rawElement);
-                if (!match.Success)
+                var cleanElement = ExtractElementKey(rawElement);
+                if (string.IsNullOrWhiteSpace(cleanElement))
                     continue;
-
-                var cleanElement = match.Groups[1].Value;
                 if (!string.Equals(cleanElement, targetElement, StringComparison.OrdinalIgnoreCase))
                     continue;
 
@@ -576,19 +536,193 @@ public class OptimizationService : IOptimizationService
         public string ColumnData { get; set; } = "";
     }
 
+    private sealed record ParsedRow(
+        string SolutionLabel,
+        string Type,
+        string Element,
+        decimal? CorrCon,
+        decimal? SolnConc);
+
+    private static string? TryGetString(JsonElement root, string propName)
+    {
+        if (!root.TryGetProperty(propName, out var p))
+            return null;
+
+        if (p.ValueKind == JsonValueKind.String)
+            return p.GetString();
+
+        return p.ToString();
+    }
+
+    private static string ExtractElementKey(string rawElement)
+    {
+        if (string.IsNullOrWhiteSpace(rawElement))
+            return "";
+
+        var noUnderscore = rawElement.Split('_', StringSplitOptions.RemoveEmptyEntries)[0];
+        var parts = noUnderscore.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length > 0 ? parts[0] : noUnderscore.Trim();
+    }
+
+    private static bool IsSampleType(string type)
+    {
+        return string.Equals(type, "Samp", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(type, "Sample", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static Dictionary<string, string> BuildCrmIdLookup(Dictionary<string, Dictionary<string, decimal>> crmData)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var numberPattern = new Regex(@"(\d+)", RegexOptions.IgnoreCase);
+
+        foreach (var key in crmData.Keys)
+        {
+            var m = numberPattern.Match(key);
+            if (!m.Success)
+                continue;
+
+            var num = m.Groups[1].Value;
+            if (!CrmIds.Contains(num))
+                continue;
+
+            if (!map.ContainsKey(num))
+                map[num] = key;
+        }
+
+        return map;
+    }
+
+    private static string? ExtractCrmId(string label)
+    {
+        if (string.IsNullOrWhiteSpace(label))
+            return null;
+
+        var match = CrmPattern.Match(label);
+        return match.Success ? match.Groups[1].Value : null;
+    }
+
+    private Dictionary<string, decimal> ComputeBestBlankValues(
+        List<ParsedRow> rows,
+        Dictionary<string, Dictionary<string, decimal>> crmData)
+    {
+        var blankCandidates = new Dictionary<string, List<decimal>>(StringComparer.OrdinalIgnoreCase);
+        var crmSamples = new Dictionary<string, List<(decimal SampleValue, decimal CrmValue)>>(StringComparer.OrdinalIgnoreCase);
+        var crmIdLookup = BuildCrmIdLookup(crmData);
+
+        foreach (var row in rows)
+        {
+            if (string.IsNullOrWhiteSpace(row.SolutionLabel) || string.IsNullOrWhiteSpace(row.Element))
+                continue;
+
+            if (!IsSampleType(row.Type))
+                continue;
+
+            if (BlankPattern.IsMatch(row.SolutionLabel))
+            {
+                var candidate = row.CorrCon ?? row.SolnConc;
+                if (!candidate.HasValue)
+                    continue;
+
+                if (!blankCandidates.TryGetValue(row.Element, out var list))
+                {
+                    list = new List<decimal>();
+                    blankCandidates[row.Element] = list;
+                }
+
+                list.Add(candidate.Value);
+                continue;
+            }
+
+            var crmId = ExtractCrmId(row.SolutionLabel);
+            if (crmId == null || !crmIdLookup.TryGetValue(crmId, out var crmKey))
+                continue;
+
+            if (!crmData.TryGetValue(crmKey, out var crmValues))
+                continue;
+
+            if (!crmValues.TryGetValue(row.Element, out var crmValue))
+                continue;
+
+            var sampleValue = row.CorrCon ?? row.SolnConc;
+            if (!sampleValue.HasValue)
+                continue;
+
+            if (!crmSamples.TryGetValue(row.Element, out var list))
+            {
+                list = new List<(decimal SampleValue, decimal CrmValue)>();
+                crmSamples[row.Element] = list;
+            }
+
+            list.Add((sampleValue.Value, crmValue));
+        }
+
+        var best = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var kvp in blankCandidates)
+        {
+            var element = kvp.Key;
+            var candidates = kvp.Value;
+            if (candidates.Count == 0)
+                continue;
+
+            if (!crmSamples.TryGetValue(element, out var samples) || samples.Count == 0)
+            {
+                best[element] = 0m;
+                continue;
+            }
+
+            var bestBlank = 0m;
+            var minDistance = decimal.MaxValue;
+            var inRangeFound = false;
+
+            foreach (var candidate in candidates)
+            {
+                foreach (var (sampleValue, crmValue) in samples)
+                {
+                    var corrected = sampleValue - candidate;
+                    var range = CalculateDynamicRange(crmValue);
+                    var lower = crmValue - range;
+                    var upper = crmValue + range;
+
+                    if (corrected >= lower && corrected <= upper)
+                    {
+                        bestBlank = candidate;
+                        inRangeFound = true;
+                        break;
+                    }
+
+                    var distance = Math.Abs(corrected - crmValue);
+                    if (distance < minDistance)
+                    {
+                        minDistance = distance;
+                        bestBlank = candidate;
+                    }
+                }
+
+                if (inRangeFound)
+                    break;
+            }
+
+            best[element] = bestBlank;
+        }
+
+        return best;
+    }
+
     // ---------------------------
     // Data Loading / Matching
     // ---------------------------
 
-    private async Task<List<RmSampleData>> GetProjectRmDataAsync(Guid projectId)
+    private async Task<List<RmSampleData>> GetProjectRmDataAsync(
+        Guid projectId,
+        Dictionary<string, Dictionary<string, decimal>> crmData)
     {
         var rawRows = await _db.RawDataRows.AsNoTracking()
             .Where(r => r.ProjectId == projectId)
+            .OrderBy(r => r.DataId)
             .ToListAsync();
 
-        // First pass: collect Blank values per element
-        var blankValues = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
-        var elementPattern = new Regex(@"([A-Za-z]+)", RegexOptions.IgnoreCase);
+        var parsedRows = new List<ParsedRow>();
 
         foreach (var row in rawRows)
         {
@@ -600,100 +734,15 @@ public class OptimizationService : IOptimizationService
                 using var doc = JsonDocument.Parse(row.ColumnData);
                 var root = doc.RootElement;
 
-                // Check if this is a Blank row (Type = "Blk" or "Blank")
-                if (root.TryGetProperty("Type", out var typeProp))
-                {
-                    var typeVal = typeProp.ValueKind == JsonValueKind.String ? typeProp.GetString() : typeProp.ToString();
-                    if (string.Equals(typeVal, "Blk", StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(typeVal, "Blank", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Get element
-                        if (root.TryGetProperty("Element", out var eProp))
-                        {
-                            var rawElement = eProp.ValueKind == JsonValueKind.String ? eProp.GetString() : eProp.ToString();
-                            var m = elementPattern.Match(rawElement ?? "");
-                            if (m.Success)
-                            {
-                                var element = m.Groups[1].Value;
+                var solutionLabel = TryGetString(root, "Solution Label") ?? row.SampleId ?? "";
+                var type = TryGetString(root, "Type") ?? "";
+                var elementRaw = TryGetString(root, "Element") ?? "";
+                var element = ExtractElementKey(elementRaw);
 
-                                // Get Soln Conc as blank value
-                                if (TryGetDecimal(root, "Soln Conc", out var blankConc))
-                                {
-                                    // Keep first blank value per element (or could average them)
-                                    if (!blankValues.ContainsKey(element))
-                                        blankValues[element] = blankConc;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            catch { }
-        }
+                decimal? corrCon = TryGetDecimal(root, "Corr Con", out var cc) ? cc : null;
+                decimal? solnConc = TryGetDecimal(root, "Soln Conc", out var sc) ? sc : null;
 
-        _logger.LogDebug("Found {Count} blank values for elements", blankValues.Count);
-
-        // Second pass: collect RM sample data with their blank values
-        var result = new List<RmSampleData>();
-        var rmPattern = new Regex(@"^(OREAS|SRM|CRM|NIST|BCR|TILL|GBW|RM|PAR)\b", RegexOptions.IgnoreCase);
-
-        foreach (var row in rawRows)
-        {
-            if (string.IsNullOrWhiteSpace(row.SampleId))
-                continue;
-
-            // only RM-like rows
-            if (!rmPattern.IsMatch(row.SampleId) &&
-                !row.SampleId.Contains("par", StringComparison.OrdinalIgnoreCase) &&
-                !row.SampleId.Contains("rm", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            if (string.IsNullOrWhiteSpace(row.ColumnData))
-                continue;
-
-            try
-            {
-                using var doc = JsonDocument.Parse(row.ColumnData);
-                var root = doc.RootElement;
-
-                // element
-                string element = "";
-                if (root.TryGetProperty("Element", out var eProp))
-                {
-                    var rawElement = eProp.ValueKind == JsonValueKind.String ? eProp.GetString() : eProp.ToString();
-                    var m = elementPattern.Match(rawElement ?? "");
-                    if (m.Success)
-                        element = m.Groups[1].Value;
-                }
-
-                if (string.IsNullOrWhiteSpace(element))
-                    continue;
-
-                // concentration
-                decimal? conc = null;
-                if (TryGetDecimal(root, "Corr Con", out var cc))
-                    conc = cc;
-                else if (TryGetDecimal(root, "Soln Conc", out var sc))
-                    conc = sc;
-
-                if (!conc.HasValue)
-                    continue;
-
-                var values = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase)
-                {
-                    [element] = conc.Value
-                };
-
-                // Get blank value for this element
-                var blanks = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase);
-                if (blankValues.TryGetValue(element, out var bv))
-                    blanks[element] = bv;
-                else
-                    blanks[element] = 0m; // Default to 0 if no blank found
-
-                result.Add(new RmSampleData(row.SampleId!, values, blanks));
+                parsedRows.Add(new ParsedRow(solutionLabel, type, element, corrCon, solnConc));
             }
             catch
             {
@@ -701,10 +750,46 @@ public class OptimizationService : IOptimizationService
             }
         }
 
+        var blankValues = ComputeBestBlankValues(parsedRows, crmData);
+        var result = new List<RmSampleData>();
+        var rmPattern = new Regex(@"^(OREAS|SRM|CRM|NIST|BCR|TILL|GBW|RM|PAR)", RegexOptions.IgnoreCase);
+
+        foreach (var row in parsedRows)
+        {
+            if (string.IsNullOrWhiteSpace(row.SolutionLabel))
+                continue;
+
+            if (!rmPattern.IsMatch(row.SolutionLabel) &&
+                !row.SolutionLabel.Contains("par", StringComparison.OrdinalIgnoreCase) &&
+                !row.SolutionLabel.Contains("rm", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(row.Element))
+                continue;
+
+            var conc = row.CorrCon ?? row.SolnConc;
+            if (!conc.HasValue)
+                continue;
+
+            var values = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase)
+            {
+                [row.Element] = conc.Value
+            };
+
+            var blanks = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase)
+            {
+                [row.Element] = blankValues.TryGetValue(row.Element, out var bv) ? bv : 0m
+            };
+
+            result.Add(new RmSampleData(row.SolutionLabel, values, blanks));
+        }
+
         return result;
     }
 
-    /// <summary>
+/// <summary>
     /// Returns CRM map: CrmId -> (Element -> Value)
     /// Duplicate CrmId rows will be merged safely (prevents "same key added" crash).
     /// </summary>
@@ -1048,6 +1133,24 @@ public class OptimizationService : IOptimizationService
         }
 
         return 0m;
+    }
+
+    private static Dictionary<string, decimal> GetBaseBlankValues(List<RmSampleData> data)
+    {
+        var result = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var sample in data)
+        {
+            foreach (var kvp in sample.BlankValues)
+            {
+                if (kvp.Value.HasValue && !result.ContainsKey(kvp.Key))
+                {
+                    result[kvp.Key] = kvp.Value.Value;
+                }
+            }
+        }
+
+        return result;
     }
 
     private static decimal GetBaseBlankValue(List<RmSampleData> data, string element)
