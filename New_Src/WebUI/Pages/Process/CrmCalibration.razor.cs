@@ -30,6 +30,20 @@ namespace WebUI.Pages.Process
         private bool _isLoading = false;
         private string? _projectName;
 
+        // Scale Application Range (Python feature)
+        private decimal? _scaleRangeMin;
+        private decimal? _scaleRangeMax;
+        private bool _scaleAbove50Only = false;
+
+        // Acceptable Ranges (Python feature - magnitude-based thresholds)
+        private decimal _rangeLow = 2.0m;     // |x| < 10: absolute ±
+        private decimal _rangeMid = 20.0m;    // 10 ≤ |x| < 100: percentage
+        private decimal _rangeHigh1 = 10.0m;  // 100 ≤ |x| < 1000: percentage
+        private decimal _rangeHigh2 = 8.0m;   // 1000 ≤ |x| < 10000: percentage
+        private decimal _rangeHigh3 = 5.0m;   // 10000 ≤ |x| < 100000: percentage
+        private decimal _rangeHigh4 = 3.0m;   // |x| ≥ 100000: percentage
+        private bool _rangesDialogVisible = false;
+
 
         protected override async Task OnInitializedAsync()
         {
@@ -105,7 +119,18 @@ namespace WebUI.Pages.Process
                 MaxIterations = _maxIterations,
                 PopulationSize = _populationSize,
                 UseMultiModel = _useMultiModel,
-                Elements = _selectedElements.Any() ? _selectedElements.ToList() : null
+                Elements = _selectedElements.Any() ? _selectedElements.ToList() : null,
+                // Acceptable Ranges (Python: calculate_dynamic_range)
+                RangeLow = _rangeLow,
+                RangeMid = _rangeMid,
+                RangeHigh1 = _rangeHigh1,
+                RangeHigh2 = _rangeHigh2,
+                RangeHigh3 = _rangeHigh3,
+                RangeHigh4 = _rangeHigh4,
+                // Scale Application Range
+                ScaleRangeMin = _scaleRangeMin,
+                ScaleRangeMax = _scaleRangeMax,
+                ScaleAbove50Only = _scaleAbove50Only
             };
 
             var result = await OptimizationService.OptimizeAsync(request);
@@ -307,5 +332,44 @@ namespace WebUI.Pages.Process
             decimal DiffBefore,
             decimal DiffAfter,
             bool IsPassed);
+
+        /// <summary>
+        /// Opens the Acceptable Ranges dialog (matches Python's open_range_dialog)
+        /// </summary>
+        private void OpenRangesDialog()
+        {
+            _rangesDialogVisible = true;
+        }
+
+        /// <summary>
+        /// Closes the Acceptable Ranges dialog
+        /// </summary>
+        private void CloseRangesDialog()
+        {
+            _rangesDialogVisible = false;
+        }
+
+        /// <summary>
+        /// Applies the ranges and refreshes statistics
+        /// </summary>
+        private async Task ApplyRangesAsync()
+        {
+            _rangesDialogVisible = false;
+            await GetCurrentStats();
+            Snackbar.Add("Acceptable ranges updated", Severity.Success);
+        }
+
+        /// <summary>
+        /// Resets the ranges to default values
+        /// </summary>
+        private void ResetRanges()
+        {
+            _rangeLow = 2.0m;
+            _rangeMid = 20.0m;
+            _rangeHigh1 = 10.0m;
+            _rangeHigh2 = 8.0m;
+            _rangeHigh3 = 5.0m;
+            _rangeHigh4 = 3.0m;
+        }
     }
 }

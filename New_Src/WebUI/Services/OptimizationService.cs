@@ -35,6 +35,35 @@ public class BlankScaleOptimizationRequest
 
     [JsonPropertyName("seed")]
     public int? Seed { get; set; }
+
+    // Acceptable Ranges (Python: calculate_dynamic_range)
+    [JsonPropertyName("rangeLow")]
+    public decimal RangeLow { get; set; } = 2.0m;
+
+    [JsonPropertyName("rangeMid")]
+    public decimal RangeMid { get; set; } = 20.0m;
+
+    [JsonPropertyName("rangeHigh1")]
+    public decimal RangeHigh1 { get; set; } = 10.0m;
+
+    [JsonPropertyName("rangeHigh2")]
+    public decimal RangeHigh2 { get; set; } = 8.0m;
+
+    [JsonPropertyName("rangeHigh3")]
+    public decimal RangeHigh3 { get; set; } = 5.0m;
+
+    [JsonPropertyName("rangeHigh4")]
+    public decimal RangeHigh4 { get; set; } = 3.0m;
+
+    // Scale Application Range
+    [JsonPropertyName("scaleRangeMin")]
+    public decimal? ScaleRangeMin { get; set; }
+
+    [JsonPropertyName("scaleRangeMax")]
+    public decimal? ScaleRangeMax { get; set; }
+
+    [JsonPropertyName("scaleAbove50Only")]
+    public bool ScaleAbove50Only { get; set; } = false;
 }
 
 public class BlankScaleOptimizationResult

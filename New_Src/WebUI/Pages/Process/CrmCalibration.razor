@@ -131,6 +131,35 @@
                                Color="Color.Primary"
                                Class="mb-3" />
 
+                    @* Scale Application Range (Python feature) *@
+                    <MudText Typo="Typo.caption" Class="mb-1">Scale Application Range:</MudText>
+                    <MudStack Row="true" Spacing="2" Class="mb-3">
+                        <MudNumericField @bind-Value="_scaleRangeMin"
+                                         Label="Min"
+                                         Variant="Variant.Outlined"
+                                         Class="flex-grow-1" />
+                        <MudNumericField @bind-Value="_scaleRangeMax"
+                                         Label="Max"
+                                         Variant="Variant.Outlined"
+                                         Class="flex-grow-1" />
+                    </MudStack>
+                    <MudCheckBox @bind-Value="_scaleAbove50Only"
+                                 Label="Scale > 50 only"
+                                 Color="Color.Primary"
+                                 Dense="true"
+                                 Class="mb-3" />
+
+                    @* Acceptable Ranges Button (Python feature) *@
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Secondary"
+                               FullWidth="true"
+                               StartIcon="@Icons.Material.Filled.Tune"
+                               OnClick="OpenRangesDialog"
+                               Class="mb-3">
+                        Acceptable Ranges
+                    </MudButton>
+
+
                     <MudStack Spacing="1" Class="mb-4">
                         <MudButton Variant="Variant.Outlined"
                                    Color="Color.Info"
@@ -416,6 +445,68 @@
         </MudGrid>
     }
 </MudContainer>
+
+@* Acceptable Ranges Dialog (matches Python's open_range_dialog) *@
+<MudDialog @bind-Visible="_rangesDialogVisible" Options="new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.Tune" Class="me-2" />
+            Acceptable Ranges Configuration
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-4 mud-text-secondary">
+            Configure the acceptable range thresholds for different value magnitudes.
+        </MudText>
+        <MudGrid>
+            <MudItem xs="6">
+                <MudNumericField @bind-Value="_rangeLow"
+                                 Label="|x| < 10 (±absolute)"
+                                 Variant="Variant.Outlined"
+                                 Step="0.5M"
+                                 HelperText="Absolute tolerance" />
+            </MudItem>
+            <MudItem xs="6">
+                <MudNumericField @bind-Value="_rangeMid"
+                                 Label="10 ≤ |x| < 100 (%)"
+                                 Variant="Variant.Outlined"
+                                 Step="1M"
+                                 HelperText="Percentage tolerance" />
+            </MudItem>
+            <MudItem xs="6">
+                <MudNumericField @bind-Value="_rangeHigh1"
+                                 Label="100 ≤ |x| < 1000 (%)"
+                                 Variant="Variant.Outlined"
+                                 Step="1M" />
+            </MudItem>
+            <MudItem xs="6">
+                <MudNumericField @bind-Value="_rangeHigh2"
+                                 Label="1000 ≤ |x| < 10000 (%)"
+                                 Variant="Variant.Outlined"
+                                 Step="1M" />
+            </MudItem>
+            <MudItem xs="6">
+                <MudNumericField @bind-Value="_rangeHigh3"
+                                 Label="10000 ≤ |x| < 100000 (%)"
+                                 Variant="Variant.Outlined"
+                                 Step="1M" />
+            </MudItem>
+            <MudItem xs="6">
+                <MudNumericField @bind-Value="_rangeHigh4"
+                                 Label="|x| ≥ 100000 (%)"
+                                 Variant="Variant.Outlined"
+                                 Step="1M" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="ResetRanges">Reset to Default</MudButton>
+        <MudSpacer />
+        <MudButton Variant="Variant.Text" Color="Color.Secondary" OnClick="CloseRangesDialog">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ApplyRangesAsync">Apply</MudButton>
+    </DialogActions>
+</MudDialog>
+
 <style>
     .loading-overlay {
         position: fixed;

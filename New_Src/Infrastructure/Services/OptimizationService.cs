@@ -974,10 +974,39 @@ public class OptimizationService : IOptimizationService
         return corrected >= crmValue - range && corrected <= crmValue + range;
     }
 
-    private static decimal CalculateDynamicRange(decimal value)
+    /// <summary>
+    /// Calculate dynamic acceptable range for a given value, matching Python's magnitude-based logic.
+    /// Uses configurable default percentages for different value ranges:
+    /// - |x| < 10: ±2.0 (absolute)
+    /// - 10 ≤ |x| < 100: ±20%
+    /// - 100 ≤ |x| < 1000: ±10%
+    /// - 1000 ≤ |x| < 10000: ±8%
+    /// - 10000 ≤ |x| < 100000: ±5%
+    /// - |x| ≥ 100000: ±3%
+    /// </summary>
+    private static decimal CalculateDynamicRange(
+        decimal value,
+        decimal rangeLow = 2.0m,
+        decimal rangeMid = 20.0m,
+        decimal rangeHigh1 = 10.0m,
+        decimal rangeHigh2 = 8.0m,
+        decimal rangeHigh3 = 5.0m,
+        decimal rangeHigh4 = 3.0m)
     {
-        // Match Python: range = crm_val * 0.1
-        return Math.Abs(value) * 0.10m;
+        var absValue = Math.Abs(value);
+
+        if (absValue < 10m)
+            return rangeLow;
+        else if (absValue < 100m)
+            return absValue * (rangeMid / 100m);
+        else if (absValue < 1000m)
+            return absValue * (rangeHigh1 / 100m);
+        else if (absValue < 10000m)
+            return absValue * (rangeHigh2 / 100m);
+        else if (absValue < 100000m)
+            return absValue * (rangeHigh3 / 100m);
+        else
+            return absValue * (rangeHigh4 / 100m);
     }
 
     private static List<OptimizedSampleDto> BuildOptimizedData(

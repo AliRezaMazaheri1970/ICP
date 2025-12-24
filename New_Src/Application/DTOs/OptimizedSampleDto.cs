@@ -12,6 +12,15 @@ namespace Application.DTOs;
 /// <param name="UseMultiModel">Indicates whether to evaluate multiple models (e.g., A, B, C) and select the best one.</param>
 /// <param name="PreviewOnly">When true, calculates results without persisting changes.</param>
 /// <param name="Seed">An optional integer seed to ensure reproducible random number generation.</param>
+/// <param name="RangeLow">Absolute tolerance for |x| &lt; 10. Defaults to 2.0.</param>
+/// <param name="RangeMid">Percentage tolerance for 10 ≤ |x| &lt; 100. Defaults to 20%.</param>
+/// <param name="RangeHigh1">Percentage tolerance for 100 ≤ |x| &lt; 1000. Defaults to 10%.</param>
+/// <param name="RangeHigh2">Percentage tolerance for 1000 ≤ |x| &lt; 10000. Defaults to 8%.</param>
+/// <param name="RangeHigh3">Percentage tolerance for 10000 ≤ |x| &lt; 100000. Defaults to 5%.</param>
+/// <param name="RangeHigh4">Percentage tolerance for |x| ≥ 100000. Defaults to 3%.</param>
+/// <param name="ScaleRangeMin">Optional minimum value for scale application range.</param>
+/// <param name="ScaleRangeMax">Optional maximum value for scale application range.</param>
+/// <param name="ScaleAbove50Only">When true, only apply scale to values above 50.</param>
 public record BlankScaleOptimizationRequest(
     Guid ProjectId,
     List<string>? Elements = null,
@@ -21,7 +30,18 @@ public record BlankScaleOptimizationRequest(
     int PopulationSize = 20,
     bool UseMultiModel = true,
     bool PreviewOnly = false,
-    int? Seed = null
+    int? Seed = null,
+    // Acceptable Ranges (Python: calculate_dynamic_range)
+    decimal RangeLow = 2.0m,
+    decimal RangeMid = 20.0m,
+    decimal RangeHigh1 = 10.0m,
+    decimal RangeHigh2 = 8.0m,
+    decimal RangeHigh3 = 5.0m,
+    decimal RangeHigh4 = 3.0m,
+    // Scale Application Range (Python: scale_range_min/max)
+    decimal? ScaleRangeMin = null,
+    decimal? ScaleRangeMax = null,
+    bool ScaleAbove50Only = false
 );
 
 /// <summary>
