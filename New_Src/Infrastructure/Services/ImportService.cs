@@ -589,4 +589,64 @@ public class ImportService : IImportService
     }
 
     #endregion
+
+
+
+    /// <summary>
+    /// Analyzes the file content to categorize rows into Contracts, CRMs, and Blanks
+    /// similar to the desktop application logic.
+    /// </summary>
+// این متد را داخل کلاس ImportService قرار دهید
+
+    public async Task<Result<AnalysisPreviewResult>> AnalyzeFileAsync(Stream fileStream, string fileName)
+    {
+        try
+        {
+            var result = new AnalysisPreviewResult();
+
+            // اطمینان از اینکه استریم از ابتدا خوانده می‌شود
+            if (fileStream.CanSeek)
+            {
+                fileStream.Position = 0;
+            }
+
+            using var reader = new StreamReader(fileStream, leaveOpen: true);
+
+            string? line;
+            while ((line = await reader.ReadLineAsync()) != null)
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+
+                var trimmedLine = line.Trim();
+
+                // 1. تشخیص CRM
+                if (trimmedLine.StartsWith("CRM", StringComparison.OrdinalIgnoreCase))
+                {
+                    result.CRMs.Add(trimmedLine);
+                }
+                // 2. تشخیص Blank
+                else if (trimmedLine.Contains("Blank", StringComparison.OrdinalIgnoreCase) ||
+                         trimmedLine.Contains("BLANK", StringComparison.OrdinalIgnoreCase))
+                {
+                    result.Blanks.Add(trimmedLine);
+                }
+                // 3. تشخیص قراردادها (مثلاً اگر با عدد شروع شود)
+                else if (char.IsDigit(trimmedLine[0]))
+                {
+                    result.Contracts.Add(trimmedLine);
+                }
+            }
+
+            // مقادیر نمونه برای دستگاه و نوع فایل
+            result.Device = "Mass alam9000 1";
+            result.FileType = Path.GetExtension(fileName).Trim('.');
+
+            return Result<AnalysisPreviewResult>.Success(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Analysis failed for {FileName}", fileName);
+            return Result<AnalysisPreviewResult>.Fail($"Analysis failed: {ex.Message}");
+        }
+    }
 }
