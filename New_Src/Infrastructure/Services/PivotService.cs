@@ -789,8 +789,9 @@ public class PivotService : IPivotService
             return sets;
         }
 
-        // CORRECT LOGIC: rowsPerSet = Total rows / Number of Sets (setSize)
-        int rowsPerSet = rows.Count / setSize;
+        // FIXED LOGIC: setSize is already "rows per set" (calculated as TotalRows / GCD)
+        // So we should use it directly as the chunk size.
+        int rowsPerSet = setSize;
 
         for (int i = 0; i < rows.Count; i += rowsPerSet)
         {

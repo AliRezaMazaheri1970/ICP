@@ -117,6 +117,32 @@ public class ReportService
     }
 
     /// <summary>
+    /// Export Raw Excel
+    /// </summary>
+    public async Task<ServiceResult<byte[]>> ExportRawExcelAsync(Guid projectId)
+    {
+        try
+        {
+            SetAuthHeader();
+
+            var response = await _httpClient.GetAsync($"reports/{projectId}/excel/raw");
+
+            if (response.IsSuccessStatusCode)
+            {
+                var bytes = await response.Content.ReadAsByteArrayAsync();
+                return ServiceResult<byte[]>.Success(bytes);
+            }
+
+            return ServiceResult<byte[]>.Fail($"Export failed: {response.StatusCode}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error exporting to Raw Excel");
+            return ServiceResult<byte[]>.Fail($"Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Export to CSV
     /// </summary>
     public async Task<ServiceResult<byte[]>> ExportToCsvAsync(Guid projectId, bool useOxide = false)
