@@ -179,3 +179,11 @@ public record FilePreviewResult(
     List<string> SuggestedColumnMappings,
     string? Message
 );
+public class AnalysisPreviewResult
+{
+    public List<string> Contracts { get; set; } = new();
+    public List<string> CRMs { get; set; } = new();
+    public List<string> Blanks { get; set; } = new();
+    public string Device { get; set; } = "Unknown";
+    public string FileType { get; set; } = "Unknown";
+}
