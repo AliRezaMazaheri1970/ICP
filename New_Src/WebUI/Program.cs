@@ -85,6 +85,7 @@ builder.Services.AddScoped<WebUI.Services.PivotService>();
 <<<<<<< Updated upstream
 <<<<<<< Updated upstream
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 
 
 builder.Services.AddScoped<WebUI.Services.CrmService>();
@@ -93,6 +94,11 @@ builder.Services.AddScoped<WebUI.Services.OptimizationService>();
 
 builder.Services.AddScoped<WebUI.Services.DashboardService>();
 builder.Services.AddScoped<WebUI.Services.UserManagementService>();
+=======
+builder.Services.AddScoped<WebUI.Services.CrmService>();
+builder.Services.AddScoped<WebUI.Services.OptimizationService>();
+builder.Services.AddScoped<WebUI.Services.ReportService>();
+>>>>>>> Stashed changes
 =======
 builder.Services.AddScoped<WebUI.Services.CrmService>();
 builder.Services.AddScoped<WebUI.Services.OptimizationService>();
