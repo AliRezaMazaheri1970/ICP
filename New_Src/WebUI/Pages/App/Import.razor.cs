@@ -12,21 +12,20 @@ namespace WebUI.Pages.App
         private IBrowserFile? selectedFile;
         private byte[]? fileContent;
         private string fileName = "";
+        private string displayFileName = "";
         private string fileContentType = "";
         private long fileSizeBytes;
 
         private bool isViewer = false;
         private bool isLoading;
-        private bool showAdvancedOptions = false;
+        private string description = "";
 
         private string projectName = "";
         private string selectedDevice = "";
         private string selectedFileType = "";
 
-        private string delimiter = ",";
-        private int headerRow = 1;
         private bool skipLastRow = true;
-        private bool autoDetectType = true;
+      
 
         private List<string> deviceOptions = new()
         {
@@ -46,18 +45,11 @@ namespace WebUI.Pages.App
         };
         private AnalysisPreviewResult? analysisData;
 
-        //private List<RecentImport> recentImports = new();
-
-
-
-        private string fileIcon => GetFileIcon();
-        private string fileSize => fileSizeBytes > 0 ? FormatFileSize(fileSizeBytes) : "";
-
         private bool CanImport => fileContent != null
-                          // && !string.IsNullOrWhiteSpace(projectName)  <-- این خط را حذف کنید
-                          && !string.IsNullOrWhiteSpace(selectedDevice)
-                          && !isLoading
-                          && !isViewer;
+                           && !string.IsNullOrWhiteSpace(displayFileName) 
+                           && !string.IsNullOrWhiteSpace(selectedDevice)
+                           && !isLoading
+                           && !isViewer;
 
         protected override void OnInitialized()
         {
@@ -78,14 +70,7 @@ namespace WebUI.Pages.App
 
         private void GoToDashboard() => NavManager.NavigateTo("/dashboard");
 
-        private string GetDropZoneClass()
-        {
-            return "d-flex flex-column align-center justify-center";
-            //return fileContent != null
-            //    ? "d-flex flex-column align-center justify-center border-success"
-            //    : "d-flex flex-column align-center justify-center";
-        }
-
+   
         private async Task OnInputFileChangeStandard(InputFileChangeEventArgs e)
         {
             if (isViewer) return;
@@ -103,6 +88,7 @@ namespace WebUI.Pages.App
             {
                 selectedFile = file;
                 fileName = file.Name;
+                displayFileName = file.Name;
                 fileContentType = file.ContentType ?? "application/octet-stream";
                 fileSizeBytes = file.Size;
 
@@ -110,10 +96,6 @@ namespace WebUI.Pages.App
                 await file.OpenReadStream(maxAllowedSize: 200 * 1024 * 1024).CopyToAsync(ms);
                 fileContent = ms.ToArray();
 
-                //if (string.IsNullOrWhiteSpace(projectName))
-                //{
-                //    projectName = Path.GetFileNameWithoutExtension(fileName);
-                //}
 
                 await DoPreview();
             }
@@ -135,14 +117,10 @@ namespace WebUI.Pages.App
             fileName = "";
             fileContentType = "";
             fileSizeBytes = 0;
-            analysisData = null; // پاک کردن نتایج آنالیز
+            analysisData = null;
         }
 
-        //private async Task PreviewFile()
-        //{
-        //    await DoPreview();
-        //}
-
+     
         private async Task DoPreview()
         {
             if (fileContent == null || fileContent.Length == 0) return;
@@ -155,12 +133,12 @@ namespace WebUI.Pages.App
                 if (result.Succeeded && result.Data != null)
                 {
                     analysisData = result.Data;
-                    // previewData = null; // اگر متغیر previewData هنوز در کد هست آن نال کنید
+                
                     Snackbar.Add("Analysis completed", Severity.Success);
                 }
                 else
                 {
-                    // اصلاح خطای Message
+                
                     var errorMsg = result.Messages?.FirstOrDefault() ?? "Analysis failed";
                     Snackbar.Add(errorMsg, Severity.Error);
                 }
@@ -173,7 +151,7 @@ namespace WebUI.Pages.App
 
         private async Task ReselectFile(InputFileChangeEventArgs e)
         {
-            // همان منطق انتخاب فایل
+            
             await OnInputFileChangeStandard(e);
         }
 
@@ -185,7 +163,7 @@ namespace WebUI.Pages.App
                 return;
             }
 
-            if (fileContent == null || string.IsNullOrWhiteSpace(projectName)) return;
+            if (fileContent == null) return;
 
             isLoading = true;
             StateHasChanged();
@@ -194,16 +172,15 @@ namespace WebUI.Pages.App
             {
                 var user = AuthService.GetCurrentUser();
                 using var stream = new MemoryStream(fileContent);
-                var finalProjectName = string.IsNullOrWhiteSpace(projectName)
-                            ? Path.GetFileNameWithoutExtension(fileName)
-                            : projectName;
+                var finalProjectName = string.IsNullOrWhiteSpace(displayFileName)
+                                     ? fileName
+                                     : displayFileName;
 
-                var request = new AdvancedImportRequest(projectName, user?.Name)
+                var request = new AdvancedImportRequest(finalProjectName, user?.Name) 
                 {
                     SkipLastRow = skipLastRow
                 };
 
-                // 3. فراخوانی متد با امضای صحیح (Stream, fileName, Request)
                 var result = await ImportService.ImportAdvancedAsync(
                     stream,
                     fileName,
@@ -211,18 +188,13 @@ namespace WebUI.Pages.App
 
                 if (result.Succeeded)
                 {
-                    //Snackbar.Add($"Project '{projectName}' imported!", Severity.Success);
-                    //recentImports.Insert(0, new RecentImport { Name = projectName, Status = "Success" });
-                    //if (recentImports.Count > 5) recentImports.RemoveAt(5);
-                    //ClearFile();
-                    //projectName = "";
-                    Snackbar.Add($"Project '{projectName}' imported successfully!", Severity.Success);
-                    ClearFile(); // بازگشت به صفحه اول
+                
+                    Snackbar.Add($"Project '{finalProjectName}' imported successfully!", Severity.Success);
+                    ClearFile(); 
                     projectName = "";
                 }
                 else
                 {
-                    // اصلاح خطای Message: استفاده از Messages.FirstOrDefault()
                     var errorMsg = result.Messages?.FirstOrDefault() ?? "Import failed";
                     Snackbar.Add(errorMsg, Severity.Error);
                 }
@@ -256,12 +228,7 @@ namespace WebUI.Pages.App
             return $"{bytes / 1048576.0:F1} MB";
         }
 
-        //private class RecentImport
-        //{
-        //    public string Name { get; set; } = "";
-        //    public string Status { get; set; } = "";
-        //}
-
+    
         private async Task OnBeforeNavigation(LocationChangingContext context)
         {
             if (isLoading)

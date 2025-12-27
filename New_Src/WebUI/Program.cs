@@ -32,7 +32,23 @@ builder.Services.AddMudServices(config =>
 // 3. Database Connection (حیاتی برای رفع خطاها)
 // ============================================
 // اطمینان حاصل کنید که کانکشن استرینگ در appsettings.json موجود است
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+//var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+//if (string.IsNullOrEmpty(connectionString))
+//{
+//    // اگر فایل appsettings.json خوانده نشود یا مقدار خالی باشد، اینجا برنامه متوقف می‌شود و دلیل را می‌گوید
+//    throw new InvalidOperationException("Connection string 'DefaultConnection' not found. Please check appsettings.json.");
+//}
+
+var connectionString = "Data Source=192.168.0.13;Initial Catalog=ICP;Persist Security Info=True;User ID=sa;Password=AliReza23280;MultipleActiveResultSets=False;TrustServerCertificate=True";
+
+// بررسی می‌کنیم که خالی نباشد (که الان قطعا نیست)
+if (string.IsNullOrEmpty(connectionString))
+{
+    throw new InvalidOperationException("Connection String is Empty!");
+}
+
+
+
 
 // اگر از SQL Server استفاده می‌کنید:
 builder.Services.AddDbContext<IsatisDbContext>(options =>
@@ -61,11 +77,19 @@ builder.Services.AddScoped<IOptimizationService, Infrastructure.Services.Optimiz
 builder.Services.AddScoped<IVersionService, Infrastructure.Services.VersionService>();
 builder.Services.AddScoped<Application.Services.IRmCheckService, Infrastructure.Services.RmCheckService>();
 
-
 builder.Services.AddScoped<WebUI.Services.ProjectService>();
 builder.Services.AddScoped<WebUI.Services.CorrectionService>();
 builder.Services.AddScoped<WebUI.Services.DriftService>();
 builder.Services.AddScoped<WebUI.Services.AuthService>();
+builder.Services.AddScoped<WebUI.Services.PivotService>();
+
+
+builder.Services.AddScoped<WebUI.Services.CrmService>();
+builder.Services.AddScoped<WebUI.Services.ReportService>();
+builder.Services.AddScoped<WebUI.Services.OptimizationService>();
+
+builder.Services.AddScoped<WebUI.Services.DashboardService>();
+builder.Services.AddScoped<WebUI.Services.UserManagementService>();
 // ============================================
 // 6. HttpClient (Optional / Context dependent)
 // ============================================

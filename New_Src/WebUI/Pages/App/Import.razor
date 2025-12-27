@@ -22,18 +22,13 @@
     </div>
 }
 
-@* کانتینر اصلی تمام عرض *@
 <MudContainer MaxWidth="MaxWidth.False" Class="mt-6 px-6">
 
     @if (fileContent == null)
     {
-        @* ============================================== *@
-        @* حالت اول: دقیقاً شبیه عکس ارسالی (وسط‌چین) *@
-        @* ============================================== *@
 
         <div class="mx-auto" style="max-width: 1000px;">
 
-            @* --- هدر: عنوان و دکمه بازگشت (بیرون از کادر) --- *@
             <div class="d-flex justify-space-between align-center mb-6">
                 <div>
                     <MudText Typo="Typo.h3" Class="fw-bold">Import Data</MudText>
@@ -47,39 +42,48 @@
                     BACK
                 </MudButton>
             </div>
+            @if (!isViewer)
+            {
 
-            @* --- کادر اصلی سفید --- *@
-            <MudPaper Elevation="0" Class="pa-8" Style="border-radius: 12px;">
+                <MudPaper Elevation="0" Class="pa-8" Style="border-radius: 12px;">
 
-                @* ناحیه خط‌چین (Dashed Area) *@
-                <div class="drop-zone-dashed d-flex flex-column align-center justify-center relative-container">
+                    <div class="drop-zone-dashed d-flex flex-column align-center justify-center relative-container">
 
-                    <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Primary" Style="font-size: 5rem; opacity: 0.8;" Class="mb-4" />
+                        <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Primary" Style="font-size: 5rem; opacity: 0.8;" Class="mb-4" />
 
-                    <MudText Typo="Typo.h5" Class="mb-2 fw-bold" Style="color: #455a64;">Drop file here or click to browse</MudText>
+                        <MudText Typo="Typo.h5" Class="mb-2 fw-bold" Style="color: #455a64;">Drop file here or click to browse</MudText>
 
-                    <MudText Typo="Typo.body2" Class="mud-text-secondary">
-                        Supported formats: CSV, Excel, TXT
-                    </MudText>
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                            Supported formats: CSV, Excel, TXT
+                        </MudText>
 
-                    @if (!isViewer)
-                    {
-                        @* اینپوت فایل مخفی روی کل ناحیه *@
                         <InputFile OnChange="OnInputFileChangeStandard"
                                    accept=".csv, .xlsx, .xls, .txt"
                                    class="absolute-file-input" />
-                    }
-                </div>
 
-            </MudPaper>
+                    </div>
+
+                </MudPaper>
+            }
+            else
+            {
+                <MudPaper Elevation="0" Class="pa-8" Style="border-radius: 12px;">
+
+                    <div class="drop-zone-dashed d-flex flex-column align-center justify-center relative-container">
+
+                        <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Style="font-size: 5rem; opacity: 0.8;" Class="mb-4" />
+
+                        <MudText Typo="Typo.h5" Class="mb-2 fw-bold" Style="color: #455a64;">Viewer is not upload projects</MudText>
+
+                    </div>
+
+                </MudPaper>
+            }
         </div>
     }
     else
     {
-        @* ============================================== *@
-        @* حالت دوم: تمام صفحه (بعد از انتخاب فایل) *@
-        @* ============================================== *@
-
+    
         <MudPaper Elevation="3" Class="pa-4 custom-window" Style="width: 100%;">
 
             <div class="d-flex justify-space-between align-center mb-4 border-bottom pb-2">
@@ -87,23 +91,37 @@
                 <MudIconButton Icon="@Icons.Material.Filled.Close" OnClick="ClearFile" Color="Color.Error" />
             </div>
 
-            @* ردیف انتخاب فایل *@
             <MudGrid Class="align-center mb-3">
                 <MudItem xs="12" md="2">
-                    <MudText Typo="Typo.subtitle2" Class="fw-bold">Raw Data File:</MudText>
+                    <MudText Typo="Typo.subtitle2" Class="fw-bold">Project Name / File:</MudText>
                 </MudItem>
                 <MudItem xs="12" md="10">
-                    <div class="d-flex gap-2 relative-container">
-                        <MudTextField Value="@fileName" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" FullWidth="true" Class="white-bg" />
-                        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" Class="select-file-btn">
-                            Select File
-                        </MudButton>
-                        <InputFile OnChange="ReselectFile" accept=".csv, .xlsx, .xls, .txt" class="absolute-file-input" />
+                    <div class="d-flex gap-2" style="width: 100%;">
+
+                        <MudTextField @bind-Value="displayFileName"
+                                      Variant="Variant.Outlined"
+                                      Margin="Margin.Dense"
+                                      ReadOnly="false"
+                                      FullWidth="true"
+                                      Class="white-bg"
+                                      Placeholder="Project Name" />
+
+                        <div class="relative-container" style="width: auto; min-width: 130px;">
+                            <MudButton Variant="Variant.Filled"
+                                       Color="Color.Primary"
+                                       StartIcon="@Icons.Material.Filled.FolderOpen"
+                                       Class="select-file-btn"
+                                       FullWidth="true">
+                                Select File
+                            </MudButton>
+                            <InputFile OnChange="ReselectFile"
+                                       accept=".csv, .xlsx, .xls, .txt"
+                                       class="absolute-file-input" />
+                        </div>
                     </div>
                 </MudItem>
             </MudGrid>
 
-            @* باکس‌های نمایش داده *@
             <MudGrid Class="mb-2" Spacing="1">
                 <MudItem xs="12" md="2"><MudText Typo="Typo.subtitle2">Extracted Contracts:</MudText></MudItem>
                 <MudItem xs="12" md="10">
@@ -172,9 +190,14 @@
                     </MudSelect>
                 </MudItem>
 
+
                 <MudItem xs="12" md="2" Class="d-flex align-center"><MudText Typo="Typo.subtitle2">Description:</MudText></MudItem>
                 <MudItem xs="12" md="10">
-                    <MudTextField @bind-Value="projectName" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Optional notes..." Class="white-bg" />
+                    <MudTextField @bind-Value="description"
+                                  Variant="Variant.Outlined"
+                                  Margin="Margin.Dense"
+                                  Placeholder="Optional notes (will not affect project name)..."
+                                  Class="white-bg" />
                 </MudItem>
             </MudGrid>
 
@@ -184,9 +207,9 @@
                     {
                         <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
                         <span>Processing...</span>
-     }
-    else
-    {
+                    }
+                    else
+                    {
                         <span>Upload</span>
                     }
                 </MudButton>
@@ -202,8 +225,7 @@
 </MudContainer>
 
 <style>
-    /* --- استایل‌های اختصاصی --- */
-
+ 
     .white-card {
         background-color: white;
     }
@@ -214,18 +236,16 @@
         border: 2px dashed #cfd8dc;
         border-radius: 8px;
         transition: background-color 0.2s;
-       
     }
 
-    /* اگر در حالت دارک مود بودیم، باکس درگ دراپ تیره نشود و خوانا بماند */
     .mud-theme-dark .drop-zone-dashed {
-        background-color: #e0e0e0; /* کمی تیره‌تر از سفید خالص برای دارک مود */
+        background-color: #e0e0e0; 
         border-color: #9e9e9e;
     }
 
         .mud-theme-dark .drop-zone-dashed h5,
         .mud-theme-dark .drop-zone-dashed p {
-            color: #424242 !important; /* متن‌های داخل باکس درگ همیشه تیره باشند */
+            color: #424242 !important; 
         }
 
     .drop-zone-dashed:hover {
@@ -244,44 +264,32 @@
         z-index: 10;
     }
 
-    /* --- استایل‌های پنجره ویندوزی (حالت دوم) --- */
-
     .custom-window {
-        /* رنگ زمینه پنجره اصلی */
-       
+     
         border: 1px solid #999;
     }
 
-    /* تنظیمات دارک مود برای خود پنجره اصلی */
     .mud-theme-dark .custom-window {
-        background-color: #333333; /* در دارک مود، زمینه پنجره تیره شود */
+        background-color: #333333; 
         border-color: #555;
     }
 
         .mud-theme-dark .custom-window .mud-typography {
-            color: #ffffff !important; /* تیترهای پنجره سفید شوند */
+            color: #ffffff !important; 
         }
 
-    /* ======================================================= */
-    /* اصلاحیه مهم برای سفید ماندن اینپوت‌ها در دارک مود */
-    /* ======================================================= */
-
-    /* 1. پس زمینه اینپوت همیشه سفید باشد */
+  
     .white-bg .mud-input-control-input-container {
         background-color: white !important;
     }
 
-    /* 2. رنگ متن داخل اینپوت همیشه مشکی باشد (رفع مشکل نامرئی شدن) */
     .white-bg .mud-input-slot {
         color: #000000 !important;
     }
 
-    /* 3. رنگ آیکون‌ها (مثل فلش دراپ‌داون) تیره باشد تا روی زمینه سفید دیده شود */
     .white-bg .mud-icon-root {
         color: #616161 !important;
     }
-
-    /* ======================================================= */
 
     .console-box {
         background-color: #ffffff;
