@@ -557,9 +557,17 @@ public class OptimizationService : IOptimizationService
     private static string ExtractElementKey(string rawElement)
     {
         if (string.IsNullOrWhiteSpace(rawElement))
-            return "";
+            return string.Empty;
 
-        var noUnderscore = rawElement.Split('_', StringSplitOptions.RemoveEmptyEntries)[0];
+        return rawElement.Trim();
+    }
+
+    private static string ExtractElementSymbol(string elementKey)
+    {
+        if (string.IsNullOrWhiteSpace(elementKey))
+            return string.Empty;
+
+        var noUnderscore = elementKey.Split('_', StringSplitOptions.RemoveEmptyEntries)[0];
         var parts = noUnderscore.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         return parts.Length > 0 ? parts[0] : noUnderscore.Trim();
     }
@@ -640,7 +648,8 @@ public class OptimizationService : IOptimizationService
             if (!crmData.TryGetValue(crmKey, out var crmValues))
                 continue;
 
-            if (!crmValues.TryGetValue(row.Element, out var crmValue))
+            var crmSymbol = ExtractElementSymbol(row.Element);
+            if (!crmValues.TryGetValue(crmSymbol, out var crmValue))
                 continue;
 
             var sampleValue = row.CorrCon ?? row.SolnConc;
@@ -789,28 +798,36 @@ public class OptimizationService : IOptimizationService
         return result;
     }
 
-/// <summary>
+    /// <summary>
     /// Returns CRM map: CrmId -> (Element -> Value)
-    /// Duplicate CrmId rows will be merged safely (prevents "same key added" crash).
+    /// Uses preferred analysis methods to mirror Python selection behavior.
     /// </summary>
     private async Task<Dictionary<string, Dictionary<string, decimal>>> GetCrmDataAsync()
     {
         var crmRecords = await _db.CrmData.AsNoTracking().ToListAsync();
+        var preferredMethods = new[] { "4-Acid Digestion", "Aqua Regia Digestion" };
 
         var result = new Dictionary<string, Dictionary<string, decimal>>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var crm in crmRecords)
+        foreach (var group in crmRecords.GroupBy(c => c.CrmId, StringComparer.OrdinalIgnoreCase))
         {
-            if (string.IsNullOrWhiteSpace(crm.CrmId))
-                continue;
+            var selected = group
+                .OrderBy(c =>
+                {
+                    if (string.IsNullOrWhiteSpace(c.AnalysisMethod))
+                        return 99;
+                    var idx = Array.FindIndex(preferredMethods, m => string.Equals(m, c.AnalysisMethod, StringComparison.OrdinalIgnoreCase));
+                    return idx >= 0 ? idx : 50;
+                })
+                .FirstOrDefault();
 
-            if (string.IsNullOrWhiteSpace(crm.ElementValues))
+            if (selected == null || string.IsNullOrWhiteSpace(selected.ElementValues))
                 continue;
 
             Dictionary<string, decimal>? values;
             try
             {
-                values = JsonSerializer.Deserialize<Dictionary<string, decimal>>(crm.ElementValues);
+                values = JsonSerializer.Deserialize<Dictionary<string, decimal>>(selected.ElementValues);
             }
             catch
             {
@@ -820,20 +837,7 @@ public class OptimizationService : IOptimizationService
             if (values == null || values.Count == 0)
                 continue;
 
-            if (!result.TryGetValue(crm.CrmId, out var dict))
-            {
-                dict = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
-                result[crm.CrmId] = dict;
-            }
-
-            // merge strategy: keep MAX (safe + stable)
-            foreach (var kv in values)
-            {
-                if (!dict.TryGetValue(kv.Key, out var old))
-                    dict[kv.Key] = kv.Value;
-                else
-                    dict[kv.Key] = Math.Max(old, kv.Value);
-            }
+            result[group.Key] = new Dictionary<string, decimal>(values, StringComparer.OrdinalIgnoreCase);
         }
 
         return result;
@@ -871,8 +875,17 @@ public class OptimizationService : IOptimizationService
             if (matchedCrmId == null)
                 continue;
 
-            var crmValues = crmData[matchedCrmId]
-                .ToDictionary(k => k.Key, v => (decimal?)v.Value, StringComparer.OrdinalIgnoreCase);
+            var crmValuesBySymbol = crmData[matchedCrmId];
+            var crmValues = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var sampleKey in sample.Values.Keys)
+            {
+                var symbol = ExtractElementSymbol(sampleKey);
+                if (crmValuesBySymbol.TryGetValue(symbol, out var value))
+                {
+                    crmValues[sampleKey] = value;
+                }
+            }
 
             result.Add(new MatchedSample(sample.SolutionLabel, matchedCrmId, sample.Values, crmValues, sample.BlankValues));
         }
