@@ -82,6 +82,7 @@ builder.Services.AddScoped<WebUI.Services.CorrectionService>();
 builder.Services.AddScoped<WebUI.Services.DriftService>();
 builder.Services.AddScoped<WebUI.Services.AuthService>();
 builder.Services.AddScoped<WebUI.Services.PivotService>();
+<<<<<<< Updated upstream
 
 
 builder.Services.AddScoped<WebUI.Services.CrmService>();
@@ -90,6 +91,11 @@ builder.Services.AddScoped<WebUI.Services.OptimizationService>();
 
 builder.Services.AddScoped<WebUI.Services.DashboardService>();
 builder.Services.AddScoped<WebUI.Services.UserManagementService>();
+=======
+builder.Services.AddScoped<WebUI.Services.CrmService>();
+builder.Services.AddScoped<WebUI.Services.OptimizationService>();
+builder.Services.AddScoped<WebUI.Services.ReportService>();
+>>>>>>> Stashed changes
 // ============================================
 // 6. HttpClient (Optional / Context dependent)
 // ============================================

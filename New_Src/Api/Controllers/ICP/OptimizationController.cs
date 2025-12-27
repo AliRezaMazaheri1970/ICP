@@ -113,4 +113,60 @@ public class OptimizationController : ControllerBase
         var result = await _optimizationService.GetDebugSamplesAsync(projectId);
         return Ok(new { succeeded = true, data = result });
     }
+
+    /// <summary>
+    /// Retrieves CRM method options for a project to mirror Python CRM selection behavior.
+    /// </summary>
+    /// <param name="projectId">The unique identifier of the project.</param>
+    /// <returns>CRM method options per CRM id.</returns>
+    [HttpGet("{projectId:guid}/crm-options")]
+    public async Task<ActionResult> GetCrmOptions(Guid projectId)
+    {
+        var result = await _optimizationService.GetCrmOptionsAsync(projectId);
+
+        if (!result.Succeeded)
+        {
+            return BadRequest(new { succeeded = false, messages = result.Messages });
+        }
+
+        return Ok(new { succeeded = true, data = result.Data });
+    }
+
+    /// <summary>
+    /// Retrieves per-row CRM selection options (Python-style CRM dialog support).
+    /// </summary>
+    [HttpGet("{projectId:guid}/crm-selection-options")]
+    public async Task<ActionResult> GetCrmSelectionOptions(Guid projectId)
+    {
+        var result = await _optimizationService.GetCrmSelectionOptionsAsync(projectId);
+
+        if (!result.Succeeded)
+        {
+            return BadRequest(new { succeeded = false, messages = result.Messages });
+        }
+
+        return Ok(new { succeeded = true, data = result.Data });
+    }
+
+    /// <summary>
+    /// Saves per-row CRM selections for a project.
+    /// </summary>
+    [HttpPost("{projectId:guid}/crm-selections")]
+    public async Task<ActionResult> SaveCrmSelections(Guid projectId, [FromBody] CrmSelectionSaveRequest request)
+    {
+        if (projectId != request.ProjectId)
+        {
+            return BadRequest(new { succeeded = false, messages = new[] { "ProjectId mismatch." } });
+        }
+
+        var user = User?.Identity?.Name;
+        var result = await _optimizationService.SaveCrmSelectionsAsync(request, user);
+
+        if (!result.Succeeded)
+        {
+            return BadRequest(new { succeeded = false, messages = result.Messages });
+        }
+
+        return Ok(new { succeeded = true, data = result.Data });
+    }
 }

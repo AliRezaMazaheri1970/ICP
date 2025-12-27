@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Routing;
 using MudBlazor;
 using WebUI.Services;
+using System;
 
 namespace WebUI.Pages.Process
 {
@@ -29,6 +30,12 @@ namespace WebUI.Pages.Process
         private List<OptimizedSampleRow> _manualRows = new();
         private bool _isLoading = false;
         private string? _projectName;
+        private List<CrmMethodOptionDto> _crmOptions = new();
+        private Dictionary<string, string> _crmSelections = new(StringComparer.OrdinalIgnoreCase);
+        private HashSet<string> _includedCrmIds = new(StringComparer.OrdinalIgnoreCase);
+        private string _excludedLabelsInput = string.Empty;
+        private List<CrmSelectionRowDto> _crmSelectionRows = new();
+        private Dictionary<string, bool> _showAllMethods = new(StringComparer.OrdinalIgnoreCase);
 
         // Scale Application Range (Python feature)
         private decimal? _scaleRangeMin;
@@ -62,7 +69,152 @@ namespace WebUI.Pages.Process
             }
 
             await LoadElements();
+            await LoadCrmOptions();
+            await LoadCrmSelections();
             await GetCurrentStats();
+        }
+
+        private async Task LoadCrmOptions()
+        {
+            if (_projectId == null) return;
+
+            var result = await OptimizationService.GetCrmOptionsAsync(_projectId.Value);
+            if (result.Succeeded && result.Data != null)
+            {
+                _crmOptions = result.Data.Items;
+                _crmSelections.Clear();
+                _includedCrmIds.Clear();
+
+                foreach (var option in _crmOptions)
+                {
+                    if (!string.IsNullOrWhiteSpace(option.DefaultMethod))
+                    {
+                        _crmSelections[option.CrmId] = option.DefaultMethod!;
+                    }
+                    _includedCrmIds.Add(option.CrmId);
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(result.Message))
+            {
+                Snackbar.Add(result.Message, Severity.Warning);
+            }
+        }
+
+        private async Task LoadCrmSelections()
+        {
+            if (_projectId == null) return;
+
+            var result = await OptimizationService.GetCrmSelectionOptionsAsync(_projectId.Value);
+            if (result.Succeeded && result.Data != null)
+            {
+                _crmSelectionRows = result.Data.Items;
+                _showAllMethods.Clear();
+                foreach (var row in _crmSelectionRows)
+                {
+                    _showAllMethods[GetRowKey(row)] = false;
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(result.Message))
+            {
+                Snackbar.Add(result.Message, Severity.Warning);
+            }
+        }
+
+        private static string GetRowKey(CrmSelectionRowDto row)
+            => $"{row.SolutionLabel}::{row.RowIndex}";
+
+        private List<string> GetRowOptions(CrmSelectionRowDto row)
+        {
+            var key = GetRowKey(row);
+            if (_showAllMethods.TryGetValue(key, out var showAll) && showAll)
+                return row.AllOptions;
+
+            return row.PreferredOptions.Count > 0 ? row.PreferredOptions : row.AllOptions;
+        }
+
+        private bool GetShowAll(CrmSelectionRowDto row)
+        {
+            return _showAllMethods.TryGetValue(GetRowKey(row), out var showAll) && showAll;
+        }
+
+        private EventCallback<bool> GetShowAllChangedHandler(CrmSelectionRowDto row)
+        {
+            return EventCallback.Factory.Create<bool>(this, v => ToggleShowAll(row, v));
+        }
+
+        private EventCallback<string> GetRowSelectionChangedHandler(CrmSelectionRowDto row)
+        {
+            return EventCallback.Factory.Create<string>(this, v => SaveRowSelectionAsync(row, v));
+        }
+
+        private void ToggleShowAll(CrmSelectionRowDto row, bool value)
+        {
+            _showAllMethods[GetRowKey(row)] = value;
+        }
+
+        private async Task SaveRowSelectionAsync(CrmSelectionRowDto row, string? selected)
+        {
+            if (_projectId == null || string.IsNullOrWhiteSpace(selected))
+                return;
+
+            row.SelectedOption = selected;
+
+            var request = new CrmSelectionSaveRequest
+            {
+                ProjectId = _projectId.Value,
+                Selections = new List<CrmSelectionItemDto>
+                {
+                    new CrmSelectionItemDto
+                    {
+                        SolutionLabel = row.SolutionLabel,
+                        RowIndex = row.RowIndex,
+                        SelectedCrmKey = selected
+                    }
+                }
+            };
+
+            var result = await OptimizationService.SaveCrmSelectionsAsync(request);
+            if (!result.Succeeded)
+            {
+                Snackbar.Add(result.Message ?? "Failed to save CRM selection", Severity.Error);
+            }
+        }
+
+        private string? GetCrmSelection(string crmId)
+        {
+            return _crmSelections.TryGetValue(crmId, out var method) ? method : null;
+        }
+
+        private void SetCrmSelection(string crmId, string? method)
+        {
+            if (string.IsNullOrWhiteSpace(method))
+            {
+                _crmSelections.Remove(crmId);
+                return;
+            }
+
+            _crmSelections[crmId] = method;
+        }
+
+        private void ToggleIncludedCrmId(string crmId, bool isIncluded)
+        {
+            if (isIncluded)
+                _includedCrmIds.Add(crmId);
+            else
+                _includedCrmIds.Remove(crmId);
+        }
+
+        private List<string> ParseExcludedLabels()
+        {
+            if (string.IsNullOrWhiteSpace(_excludedLabelsInput))
+                return new List<string>();
+
+            return _excludedLabelsInput
+                .Split(new[] { ',', ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => x.Trim())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
 
         private async Task LoadElements()
@@ -111,6 +263,13 @@ namespace WebUI.Pages.Process
             _isLoading = true;
             StateHasChanged();
 
+            if (_crmSelectionRows.Any(r => string.IsNullOrWhiteSpace(r.SelectedOption)))
+            {
+                Snackbar.Add("Please select CRM method for all CRM rows before optimization.", Severity.Warning);
+                _isLoading = false;
+                return;
+            }
+
             var request = new BlankScaleOptimizationRequest
             {
                 ProjectId = _projectId.Value,
@@ -130,7 +289,10 @@ namespace WebUI.Pages.Process
                 // Scale Application Range
                 ScaleRangeMin = _scaleRangeMin,
                 ScaleRangeMax = _scaleRangeMax,
-                ScaleAbove50Only = _scaleAbove50Only
+                ScaleAbove50Only = _scaleAbove50Only,
+                CrmSelections = _crmSelections.Count > 0 ? new Dictionary<string, string>(_crmSelections) : null,
+                IncludedCrmIds = _includedCrmIds.Count > 0 ? _includedCrmIds.ToList() : null,
+                ExcludedSolutionLabels = ParseExcludedLabels()
             };
 
             var result = await OptimizationService.OptimizeAsync(request);

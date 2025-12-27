@@ -58,17 +58,41 @@ public class OptimizationService : IOptimizationService
                 _random = new Random(request.Seed.Value);
 
             // 2. دریافت داده‌های پروژه (Read-Only برای محاسبات)
-            var crmData = await GetCrmDataAsync();
-            if (crmData.Count == 0)
+            var crmMaps = await GetCrmDataMapsAsync(request.CrmSelections);
+            if (crmMaps.ByKey.Count == 0)
                 return Result<BlankScaleOptimizationResult>.Fail("No CRM data found");
 
-            var projectData = await GetProjectRmDataAsync(request.ProjectId, crmData);
+            var includedCrmIds = request.IncludedCrmIds != null
+                ? new HashSet<string>(request.IncludedCrmIds, StringComparer.OrdinalIgnoreCase)
+                : null;
+            var excludedLabels = request.ExcludedSolutionLabels != null
+                ? new HashSet<string>(request.ExcludedSolutionLabels, StringComparer.OrdinalIgnoreCase)
+                : null;
+
+            var rowSelections = await GetCrmSelectionMapAsync(request.ProjectId);
+            var projectData = await GetProjectRmDataAsync(
+                request.ProjectId,
+                crmMaps,
+                includedCrmIds,
+                rowSelections,
+                request.RangeLow,
+                request.RangeMid,
+                request.RangeHigh1,
+                request.RangeHigh2,
+                request.RangeHigh3,
+                request.RangeHigh4);
             if (projectData.Count == 0)
                 return Result<BlankScaleOptimizationResult>.Fail("No RM samples found in project");
             var baseBlanks = GetBaseBlankValues(projectData);
 
             // 4. تطبیق داده‌های پروژه با CRM
-            var matchedData = MatchWithCrm(projectData, crmData);
+            var matchedData = MatchWithCrm(projectData, crmMaps, rowSelections);
+            if (includedCrmIds != null && includedCrmIds.Count > 0)
+            {
+                matchedData = matchedData
+                    .Where(m => includedCrmIds.Contains(ExtractCrmIdNumber(m.CrmId)))
+                    .ToList();
+            }
             if (matchedData.Count == 0)
                 return Result<BlankScaleOptimizationResult>.Fail("No matching CRM data found for RM samples");
 
@@ -78,7 +102,23 @@ public class OptimizationService : IOptimizationService
                 : GetCommonElements(matchedData);
 
             // 6. محاسبه آمار اولیه (قبل از بهینه‌سازی)
-            var initialStats = CalculateStatistics(matchedData, elements, 0m, 1m, request.MinDiffPercent, request.MaxDiffPercent);
+            var initialStats = CalculateStatistics(
+                matchedData,
+                elements,
+                0m,
+                1m,
+                request.MinDiffPercent,
+                request.MaxDiffPercent,
+                excludedLabels,
+                request.ScaleRangeMin,
+                request.ScaleRangeMax,
+                request.ScaleAbove50Only,
+                request.RangeLow,
+                request.RangeMid,
+                request.RangeHigh1,
+                request.RangeHigh2,
+                request.RangeHigh3,
+                request.RangeHigh4);
 
             var elementOptimizations = new Dictionary<string, ElementOptimization>(StringComparer.OrdinalIgnoreCase);
             var bestBlanks = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
@@ -94,16 +134,42 @@ public class OptimizationService : IOptimizationService
                 if (request.UseMultiModel)
                 {
                     (optimalBlank, optimalScale, passedAfter, selectedModel) = OptimizeElementMultiModel(
-                        matchedData, element,
-                        request.MinDiffPercent, request.MaxDiffPercent,
-                        request.MaxIterations, request.PopulationSize);
+                        matchedData,
+                        element,
+                        request.MinDiffPercent,
+                        request.MaxDiffPercent,
+                        request.MaxIterations,
+                        request.PopulationSize,
+                        excludedLabels,
+                        request.ScaleRangeMin,
+                        request.ScaleRangeMax,
+                        request.ScaleAbove50Only,
+                        request.RangeLow,
+                        request.RangeMid,
+                        request.RangeHigh1,
+                        request.RangeHigh2,
+                        request.RangeHigh3,
+                        request.RangeHigh4);
                 }
                 else
                 {
                     (optimalBlank, optimalScale, passedAfter) = OptimizeElementImproved(
-                        matchedData, element,
-                        request.MinDiffPercent, request.MaxDiffPercent,
-                        request.MaxIterations, request.PopulationSize);
+                        matchedData,
+                        element,
+                        request.MinDiffPercent,
+                        request.MaxDiffPercent,
+                        request.MaxIterations,
+                        request.PopulationSize,
+                        excludedLabels,
+                        request.ScaleRangeMin,
+                        request.ScaleRangeMax,
+                        request.ScaleAbove50Only,
+                        request.RangeLow,
+                        request.RangeMid,
+                        request.RangeHigh1,
+                        request.RangeHigh2,
+                        request.RangeHigh3,
+                        request.RangeHigh4);
                     selectedModel = "A";
                 }
 
@@ -111,7 +177,15 @@ public class OptimizationService : IOptimizationService
                 initialStats.ElementStats.TryGetValue(element, out var before);
                 var passedBefore = before?.Passed ?? 0;
                 var meanBefore = before?.MeanDiff ?? 0m;
-                var meanAfter = CalculateMeanDiff(matchedData, element, optimalBlank, optimalScale);
+                var meanAfter = CalculateMeanDiff(
+                    matchedData,
+                    element,
+                    optimalBlank,
+                    optimalScale,
+                    excludedLabels,
+                    request.ScaleRangeMin,
+                    request.ScaleRangeMax,
+                    request.ScaleAbove50Only);
                 var baseBlank = GetBaseBlankValue(matchedData, element);
                 var effectiveBlank = baseBlank - optimalBlank;
 
@@ -192,7 +266,17 @@ public class OptimizationService : IOptimizationService
                 bestBlanks,
                 bestScales,
                 request.MinDiffPercent,
-                request.MaxDiffPercent);
+                request.MaxDiffPercent,
+                excludedLabels,
+                request.ScaleRangeMin,
+                request.ScaleRangeMax,
+                request.ScaleAbove50Only,
+                request.RangeLow,
+                request.RangeMid,
+                request.RangeHigh1,
+                request.RangeHigh2,
+                request.RangeHigh3,
+                request.RangeHigh4);
 
             var totalPassedBefore = elementOptimizations.Values.Sum(x => x.PassedBefore);
             var totalPassedAfter = elementOptimizations.Values.Sum(x => x.PassedAfter);
@@ -257,8 +341,19 @@ public class OptimizationService : IOptimizationService
                 .OrderBy(r => r.DataId)
                 .ToListAsync();
 
-            var crmData = await GetCrmDataAsync();
-            var projectData = await GetProjectRmDataAsync(request.ProjectId, crmData);
+            var crmMaps = await GetCrmDataMapsAsync();
+            var rowSelections = await GetCrmSelectionMapAsync(request.ProjectId);
+            var projectData = await GetProjectRmDataAsync(
+                request.ProjectId,
+                crmMaps,
+                null,
+                rowSelections,
+                2.0m,
+                20.0m,
+                10.0m,
+                8.0m,
+                5.0m,
+                3.0m);
             var blankAdjust = GetBaseBlankValue(projectData, request.Element) - request.Blank;
             var baseBlanks = GetBaseBlankValues(projectData);
 
@@ -285,9 +380,20 @@ public class OptimizationService : IOptimizationService
     {
         try
         {
-            var crmData = await GetCrmDataAsync();
-            var projectData = await GetProjectRmDataAsync(request.ProjectId, crmData);
-            var matchedData = MatchWithCrm(projectData, crmData);
+            var crmMaps = await GetCrmDataMapsAsync();
+            var rowSelections = await GetCrmSelectionMapAsync(request.ProjectId);
+            var projectData = await GetProjectRmDataAsync(
+                request.ProjectId,
+                crmMaps,
+                null,
+                rowSelections,
+                2.0m,
+                20.0m,
+                10.0m,
+                8.0m,
+                5.0m,
+                3.0m);
+            var matchedData = MatchWithCrm(projectData, crmMaps, rowSelections);
 
             if (matchedData.Count == 0)
                 return Result<ManualBlankScaleResult>.Fail("No matching CRM data found");
@@ -297,10 +403,58 @@ public class OptimizationService : IOptimizationService
             var blanks = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase) { [request.Element] = blankAdjust };
             var scales = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase) { [request.Element] = request.Scale };
 
-            var beforeStats = CalculateStatistics(matchedData, elements, 0m, 1m, -10m, 10m);
-            var afterStats = CalculateStatistics(matchedData, elements, blankAdjust, request.Scale, -10m, 10m);
+            var beforeStats = CalculateStatistics(
+                matchedData,
+                elements,
+                0m,
+                1m,
+                -10m,
+                10m,
+                null,
+                null,
+                null,
+                false,
+                2.0m,
+                20.0m,
+                10.0m,
+                8.0m,
+                5.0m,
+                3.0m);
+            var afterStats = CalculateStatistics(
+                matchedData,
+                elements,
+                blankAdjust,
+                request.Scale,
+                -10m,
+                10m,
+                null,
+                null,
+                null,
+                false,
+                2.0m,
+                20.0m,
+                10.0m,
+                8.0m,
+                5.0m,
+                3.0m);
 
-            var optimizedData = BuildOptimizedData(matchedData, elements, blanks, scales, -10m, 10m);
+            var optimizedData = BuildOptimizedData(
+                matchedData,
+                elements,
+                blanks,
+                scales,
+                -10m,
+                10m,
+                null,
+                null,
+                null,
+                false,
+                2.0m,
+                20.0m,
+                10.0m,
+                8.0m,
+                5.0m,
+                3.0m);
 
             var passedBefore = beforeStats.ElementStats.TryGetValue(request.Element, out var bs) ? bs.Passed : 0;
             var passedAfter = afterStats.ElementStats.TryGetValue(request.Element, out var afs) ? afs.Passed : 0;
@@ -319,15 +473,42 @@ public class OptimizationService : IOptimizationService
     {
         try
         {
-            var crmData = await GetCrmDataAsync();
-            var projectData = await GetProjectRmDataAsync(projectId, crmData);
-            var matchedData = MatchWithCrm(projectData, crmData);
+            var crmMaps = await GetCrmDataMapsAsync();
+            var rowSelections = await GetCrmSelectionMapAsync(projectId);
+            var projectData = await GetProjectRmDataAsync(
+                projectId,
+                crmMaps,
+                null,
+                rowSelections,
+                2.0m,
+                20.0m,
+                10.0m,
+                8.0m,
+                5.0m,
+                3.0m);
+            var matchedData = MatchWithCrm(projectData, crmMaps, rowSelections);
 
             if (matchedData.Count == 0)
                 return Result<BlankScaleOptimizationResult>.Fail("No matching CRM data found");
 
             var elements = GetCommonElements(matchedData);
-            var stats = CalculateStatistics(matchedData, elements, 0m, 1m, minDiff, maxDiff);
+            var stats = CalculateStatistics(
+                matchedData,
+                elements,
+                0m,
+                1m,
+                minDiff,
+                maxDiff,
+                null,
+                null,
+                null,
+                false,
+                2.0m,
+                20.0m,
+                10.0m,
+                8.0m,
+                5.0m,
+                3.0m);
 
             var elementOptimizations = elements.ToDictionary(
                 e => e,
@@ -342,7 +523,23 @@ public class OptimizationService : IOptimizationService
             var blanks = elements.ToDictionary(e => e, _ => 0m, StringComparer.OrdinalIgnoreCase);
             var scales = elements.ToDictionary(e => e, _ => 1m, StringComparer.OrdinalIgnoreCase);
 
-            var optimizedData = BuildOptimizedData(matchedData, elements, blanks, scales, minDiff, maxDiff);
+            var optimizedData = BuildOptimizedData(
+                matchedData,
+                elements,
+                blanks,
+                scales,
+                minDiff,
+                maxDiff,
+                null,
+                null,
+                null,
+                false,
+                2.0m,
+                20.0m,
+                10.0m,
+                8.0m,
+                5.0m,
+                3.0m);
 
             return Result<BlankScaleOptimizationResult>.Success(new BlankScaleOptimizationResult(
                 matchedData.Count,
@@ -358,6 +555,212 @@ public class OptimizationService : IOptimizationService
             _logger.LogError(ex, "GetCurrentStatistics failed for {ProjectId}", projectId);
             return Result<BlankScaleOptimizationResult>.Fail("Failed to get statistics: " + ex.Message);
         }
+    }
+
+    public async Task<Result<CrmOptionsResult>> GetCrmOptionsAsync(Guid projectId)
+    {
+        try
+        {
+            var rawRows = await _db.RawDataRows.AsNoTracking()
+                .Where(r => r.ProjectId == projectId)
+                .Select(r => new { r.ColumnData, r.SampleId })
+                .ToListAsync();
+
+            var crmNumbers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var row in rawRows)
+            {
+                if (string.IsNullOrWhiteSpace(row.ColumnData))
+                    continue;
+
+                try
+                {
+                    using var doc = JsonDocument.Parse(row.ColumnData);
+                    var root = doc.RootElement;
+                    var label = TryGetString(root, "Solution Label") ?? row.SampleId ?? "";
+                    var crmId = ExtractCrmId(label);
+                    if (!string.IsNullOrWhiteSpace(crmId))
+                        crmNumbers.Add(crmId);
+                }
+                catch
+                {
+                    // ignore parse errors
+                }
+            }
+
+            var crmRecords = await _db.CrmData.AsNoTracking().ToListAsync();
+            var preferredMethods = new[] { "4-Acid Digestion", "Aqua Regia Digestion" };
+            var numberPattern = new Regex(@"(\d+)", RegexOptions.IgnoreCase);
+
+            var options = new List<CrmMethodOptionDto>();
+
+            foreach (var crmNumber in crmNumbers.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+            {
+                var methods = crmRecords
+                    .Where(r => r.CrmId != null && numberPattern.Match(r.CrmId).Success && numberPattern.Match(r.CrmId).Groups[1].Value == crmNumber)
+                    .Select(r => r.AnalysisMethod)
+                    .Where(m => !string.IsNullOrWhiteSpace(m))
+                    .Select(m => m!)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                string? defaultMethod = null;
+                foreach (var preferred in preferredMethods)
+                {
+                    if (methods.Any(m => string.Equals(m, preferred, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        defaultMethod = preferred;
+                        break;
+                    }
+                }
+
+                defaultMethod ??= methods.FirstOrDefault();
+
+                options.Add(new CrmMethodOptionDto(crmNumber, methods, defaultMethod));
+            }
+
+            return Result<CrmOptionsResult>.Success(new CrmOptionsResult(options));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load CRM options for project {ProjectId}", projectId);
+            return Result<CrmOptionsResult>.Fail($"Failed to load CRM options: {ex.Message}");
+        }
+    }
+
+    public async Task<Result<CrmSelectionOptionsResult>> GetCrmSelectionOptionsAsync(Guid projectId)
+    {
+        try
+        {
+            var crmMaps = await GetCrmDataMapsAsync();
+            if (crmMaps.ByKey.Count == 0)
+                return Result<CrmSelectionOptionsResult>.Fail("No CRM data found");
+
+            var selections = await GetCrmSelectionMapAsync(projectId);
+            var rows = await BuildCrmSelectionRowsAsync(projectId, crmMaps, selections);
+
+            return Result<CrmSelectionOptionsResult>.Success(new CrmSelectionOptionsResult(rows));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load CRM selection options for project {ProjectId}", projectId);
+            return Result<CrmSelectionOptionsResult>.Fail($"Failed to load CRM selection options: {ex.Message}");
+        }
+    }
+
+    public async Task<Result<bool>> SaveCrmSelectionsAsync(CrmSelectionSaveRequest request, string? selectedBy)
+    {
+        try
+        {
+            if (request.Selections == null || request.Selections.Count == 0)
+                return Result<bool>.Success(true);
+
+            var existing = await _db.CrmSelections
+                .Where(s => s.ProjectId == request.ProjectId)
+                .ToListAsync();
+
+            foreach (var item in request.Selections)
+            {
+                if (string.IsNullOrWhiteSpace(item.SolutionLabel) || string.IsNullOrWhiteSpace(item.SelectedCrmKey))
+                    continue;
+
+                var match = existing.FirstOrDefault(e =>
+                    string.Equals(e.SolutionLabel, item.SolutionLabel, StringComparison.OrdinalIgnoreCase) &&
+                    e.RowIndex == item.RowIndex);
+
+                if (match == null)
+                {
+                    _db.CrmSelections.Add(new CrmSelection
+                    {
+                        ProjectId = request.ProjectId,
+                        SolutionLabel = item.SolutionLabel,
+                        RowIndex = item.RowIndex,
+                        SelectedCrmKey = item.SelectedCrmKey,
+                        SelectedBy = selectedBy,
+                        SelectedAt = DateTime.UtcNow
+                    });
+                }
+                else
+                {
+                    match.SelectedCrmKey = item.SelectedCrmKey;
+                    match.SelectedBy = selectedBy;
+                    match.SelectedAt = DateTime.UtcNow;
+                }
+            }
+
+            await _db.SaveChangesAsync();
+            return Result<bool>.Success(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to save CRM selections for project {ProjectId}", request.ProjectId);
+            return Result<bool>.Fail($"Failed to save CRM selections: {ex.Message}");
+        }
+    }
+
+    private async Task<Dictionary<string, string>> GetCrmSelectionMapAsync(Guid projectId)
+    {
+        var rows = await _db.CrmSelections.AsNoTracking()
+            .Where(s => s.ProjectId == projectId)
+            .ToListAsync();
+
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in rows)
+        {
+            var key = BuildRowKey(row.SolutionLabel, row.RowIndex);
+            map[key] = row.SelectedCrmKey;
+        }
+
+        return map;
+    }
+
+    private async Task<List<CrmSelectionRowDto>> BuildCrmSelectionRowsAsync(
+        Guid projectId,
+        CrmDataMaps crmMaps,
+        Dictionary<string, string> selections)
+    {
+        var parsedRows = await LoadParsedRowsAsync(projectId);
+        var result = new List<CrmSelectionRowDto>();
+        var added = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var row in parsedRows)
+        {
+            if (!IsSampleType(row.Type))
+                continue;
+
+            var crmId = ExtractCrmId(row.SolutionLabel);
+            if (crmId == null)
+                continue;
+
+            if (!crmMaps.AllKeysByNumber.TryGetValue(crmId, out var allKeys) || allKeys.Count == 0)
+                continue;
+
+            var preferred = crmMaps.PreferredKeysByNumber.TryGetValue(crmId, out var pref) && pref.Count > 0
+                ? pref
+                : allKeys;
+
+            var rowKey = BuildRowKey(row.SolutionLabel, row.RowIndex);
+            if (added.Contains(rowKey))
+                continue;
+
+            selections.TryGetValue(rowKey, out var selectedKey);
+            if (string.IsNullOrWhiteSpace(selectedKey) && preferred.Count == 1)
+            {
+                selectedKey = preferred[0];
+            }
+
+            result.Add(new CrmSelectionRowDto(
+                row.SolutionLabel,
+                row.RowIndex,
+                crmId,
+                preferred.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
+                allKeys.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
+                selectedKey));
+
+            added.Add(rowKey);
+        }
+
+        return result;
     }
 
     public async Task<object> GetDebugSamplesAsync(Guid projectId)
@@ -536,12 +939,33 @@ public class OptimizationService : IOptimizationService
         public string ColumnData { get; set; } = "";
     }
 
-    private sealed record ParsedRow(
-        string SolutionLabel,
-        string Type,
-        string Element,
-        decimal? CorrCon,
-        decimal? SolnConc);
+    private sealed class ParsedRow
+    {
+        public ParsedRow(
+            string solutionLabel,
+            string type,
+            string element,
+            decimal? corrCon,
+            decimal? solnConc,
+            int originalIndex)
+        {
+            SolutionLabel = solutionLabel;
+            Type = type;
+            Element = element;
+            CorrCon = corrCon;
+            SolnConc = solnConc;
+            OriginalIndex = originalIndex;
+            RowIndex = originalIndex;
+        }
+
+        public string SolutionLabel { get; }
+        public string Type { get; }
+        public string Element { get; }
+        public decimal? CorrCon { get; }
+        public decimal? SolnConc { get; }
+        public int OriginalIndex { get; }
+        public int RowIndex { get; set; }
+    }
 
     private static string? TryGetString(JsonElement root, string propName)
     {
@@ -609,13 +1033,38 @@ public class OptimizationService : IOptimizationService
         return match.Success ? match.Groups[1].Value : null;
     }
 
+    private static string ExtractCrmIdNumber(string crmId)
+    {
+        if (string.IsNullOrWhiteSpace(crmId))
+            return string.Empty;
+
+        var match = Regex.Match(crmId, @"(\d+)", RegexOptions.IgnoreCase);
+        return match.Success ? match.Groups[1].Value : crmId;
+    }
+
+    private static string BuildCrmSelectionKey(CrmData crm)
+    {
+        var method = string.IsNullOrWhiteSpace(crm.AnalysisMethod) ? "Unknown" : crm.AnalysisMethod.Trim();
+        return $"{crm.CrmId} ({method})";
+    }
+
+    private static string BuildRowKey(string solutionLabel, int rowIndex)
+        => $"{solutionLabel}::{rowIndex}";
+
     private Dictionary<string, decimal> ComputeBestBlankValues(
         List<ParsedRow> rows,
-        Dictionary<string, Dictionary<string, decimal>> crmData)
+        CrmDataMaps crmMaps,
+        HashSet<string>? includedCrmIds,
+        Dictionary<string, string>? rowSelections,
+        decimal rangeLow,
+        decimal rangeMid,
+        decimal rangeHigh1,
+        decimal rangeHigh2,
+        decimal rangeHigh3,
+        decimal rangeHigh4)
     {
         var blankCandidates = new Dictionary<string, List<decimal>>(StringComparer.OrdinalIgnoreCase);
         var crmSamples = new Dictionary<string, List<(decimal SampleValue, decimal CrmValue)>>(StringComparer.OrdinalIgnoreCase);
-        var crmIdLookup = BuildCrmIdLookup(crmData);
 
         foreach (var row in rows)
         {
@@ -642,10 +1091,19 @@ public class OptimizationService : IOptimizationService
             }
 
             var crmId = ExtractCrmId(row.SolutionLabel);
-            if (crmId == null || !crmIdLookup.TryGetValue(crmId, out var crmKey))
+            if (crmId == null)
+                continue;
+            if (includedCrmIds != null && includedCrmIds.Count > 0 && !includedCrmIds.Contains(crmId))
                 continue;
 
-            if (!crmData.TryGetValue(crmKey, out var crmValues))
+            var rowKey = BuildRowKey(row.SolutionLabel, row.RowIndex);
+            string? selectedKey = null;
+            if (rowSelections != null && rowSelections.TryGetValue(rowKey, out var selectionValue))
+                selectedKey = selectionValue;
+            if (string.IsNullOrWhiteSpace(selectedKey))
+                crmMaps.DefaultKeyByNumber.TryGetValue(crmId, out selectedKey);
+
+            if (string.IsNullOrWhiteSpace(selectedKey) || !crmMaps.ByKey.TryGetValue(selectedKey!, out var crmValues))
                 continue;
 
             var crmSymbol = ExtractElementSymbol(row.Element);
@@ -689,7 +1147,14 @@ public class OptimizationService : IOptimizationService
                 foreach (var (sampleValue, crmValue) in samples)
                 {
                     var corrected = sampleValue - candidate;
-                    var range = CalculateDynamicRange(crmValue);
+                    var range = CalculateDynamicRange(
+                        crmValue,
+                        rangeLow,
+                        rangeMid,
+                        rangeHigh1,
+                        rangeHigh2,
+                        rangeHigh3,
+                        rangeHigh4);
                     var lower = crmValue - range;
                     var upper = crmValue + range;
 
@@ -718,13 +1183,96 @@ public class OptimizationService : IOptimizationService
         return best;
     }
 
-    // ---------------------------
-    // Data Loading / Matching
-    // ---------------------------
+    private static void AssignRowIndexes(List<ParsedRow> rows)
+    {
+        var setSizes = CalculateSetSizes(rows);
+        var groupedBySolution = rows.GroupBy(r => r.SolutionLabel);
 
-    private async Task<List<RmSampleData>> GetProjectRmDataAsync(
-        Guid projectId,
-        Dictionary<string, Dictionary<string, decimal>> crmData)
+        foreach (var group in groupedBySolution)
+        {
+            var solutionLabel = group.Key;
+            var setSize = setSizes.GetValueOrDefault(solutionLabel, 1);
+            var orderedRows = group.OrderBy(r => r.OriginalIndex).ToList();
+            var sets = DivideIntoSets(orderedRows, setSize);
+
+            foreach (var set in sets)
+            {
+                if (!set.Any())
+                    continue;
+
+                var rowIndex = set.First().OriginalIndex;
+                foreach (var row in set)
+                {
+                    row.RowIndex = rowIndex;
+                }
+            }
+        }
+    }
+
+    private static Dictionary<string, int> CalculateSetSizes(List<ParsedRow> rawData)
+    {
+        var setSizes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var groupedBySolution = rawData.GroupBy(r => r.SolutionLabel);
+
+        foreach (var group in groupedBySolution)
+        {
+            var rows = group.ToList();
+            var elementCounts = rows.GroupBy(r => r.Element).Select(g => g.Count()).ToArray();
+
+            if (elementCounts.Length > 0)
+            {
+                int gcd = elementCounts.Aggregate(GCD);
+                int totalRows = rows.Count;
+                if (gcd > 0 && totalRows % gcd == 0)
+                {
+                    setSizes[group.Key] = totalRows / gcd;
+                }
+                else
+                {
+                    setSizes[group.Key] = totalRows;
+                }
+            }
+            else
+            {
+                setSizes[group.Key] = 1;
+            }
+        }
+
+        return setSizes;
+    }
+
+    private static List<List<ParsedRow>> DivideIntoSets(List<ParsedRow> rows, int setSize)
+    {
+        var sets = new List<List<ParsedRow>>();
+        if (setSize <= 0 || rows.Count == 0 || rows.Count % setSize != 0)
+        {
+            sets.Add(rows);
+            return sets;
+        }
+
+        int rowsPerSet = setSize;
+        for (int i = 0; i < rows.Count; i += rowsPerSet)
+        {
+            var set = rows.Skip(i).Take(rowsPerSet).ToList();
+            if (set.Any())
+                sets.Add(set);
+        }
+
+        return sets;
+    }
+
+    private static int GCD(int a, int b)
+    {
+        while (b != 0)
+        {
+            int temp = b;
+            b = a % b;
+            a = temp;
+        }
+        return a;
+    }
+
+    private async Task<List<ParsedRow>> LoadParsedRowsAsync(Guid projectId)
     {
         var rawRows = await _db.RawDataRows.AsNoTracking()
             .Where(r => r.ProjectId == projectId)
@@ -732,6 +1280,7 @@ public class OptimizationService : IOptimizationService
             .ToListAsync();
 
         var parsedRows = new List<ParsedRow>();
+        int index = 0;
 
         foreach (var row in rawRows)
         {
@@ -751,7 +1300,7 @@ public class OptimizationService : IOptimizationService
                 decimal? corrCon = TryGetDecimal(root, "Corr Con", out var cc) ? cc : null;
                 decimal? solnConc = TryGetDecimal(root, "Soln Conc", out var sc) ? sc : null;
 
-                parsedRows.Add(new ParsedRow(solutionLabel, type, element, corrCon, solnConc));
+                parsedRows.Add(new ParsedRow(solutionLabel, type, element, corrCon, solnConc, index++));
             }
             catch
             {
@@ -759,21 +1308,51 @@ public class OptimizationService : IOptimizationService
             }
         }
 
-        var blankValues = ComputeBestBlankValues(parsedRows, crmData);
+        AssignRowIndexes(parsedRows);
+        return parsedRows;
+    }
+
+    // ---------------------------
+    // Data Loading / Matching
+    // ---------------------------
+
+    private async Task<List<RmSampleData>> GetProjectRmDataAsync(
+        Guid projectId,
+        CrmDataMaps crmMaps,
+        HashSet<string>? includedCrmIds,
+        Dictionary<string, string>? rowSelections,
+        decimal rangeLow,
+        decimal rangeMid,
+        decimal rangeHigh1,
+        decimal rangeHigh2,
+        decimal rangeHigh3,
+        decimal rangeHigh4)
+    {
+        var parsedRows = await LoadParsedRowsAsync(projectId);
+
+        var blankValues = ComputeBestBlankValues(
+            parsedRows,
+            crmMaps,
+            includedCrmIds,
+            rowSelections,
+            rangeLow,
+            rangeMid,
+            rangeHigh1,
+            rangeHigh2,
+            rangeHigh3,
+            rangeHigh4);
         var result = new List<RmSampleData>();
-        var rmPattern = new Regex(@"^(OREAS|SRM|CRM|NIST|BCR|TILL|GBW|RM|PAR)", RegexOptions.IgnoreCase);
 
         foreach (var row in parsedRows)
         {
             if (string.IsNullOrWhiteSpace(row.SolutionLabel))
                 continue;
 
-            if (!rmPattern.IsMatch(row.SolutionLabel) &&
-                !row.SolutionLabel.Contains("par", StringComparison.OrdinalIgnoreCase) &&
-                !row.SolutionLabel.Contains("rm", StringComparison.OrdinalIgnoreCase))
-            {
+            var crmId = ExtractCrmId(row.SolutionLabel);
+            if (crmId == null)
                 continue;
-            }
+            if (includedCrmIds != null && includedCrmIds.Count > 0 && !includedCrmIds.Contains(crmId))
+                continue;
 
             if (string.IsNullOrWhiteSpace(row.Element))
                 continue;
@@ -792,42 +1371,41 @@ public class OptimizationService : IOptimizationService
                 [row.Element] = blankValues.TryGetValue(row.Element, out var bv) ? bv : 0m
             };
 
-            result.Add(new RmSampleData(row.SolutionLabel, values, blanks));
+            result.Add(new RmSampleData(row.SolutionLabel, row.RowIndex, values, blanks));
         }
 
         return result;
     }
 
     /// <summary>
-    /// Returns CRM map: CrmId -> (Element -> Value)
-    /// Uses preferred analysis methods to mirror Python selection behavior.
+    /// Builds CRM maps keyed by "CRM ID (Method)" plus default key per CRM number.
     /// </summary>
-    private async Task<Dictionary<string, Dictionary<string, decimal>>> GetCrmDataAsync()
+    private async Task<CrmDataMaps> GetCrmDataMapsAsync(Dictionary<string, string>? crmSelections = null)
     {
         var crmRecords = await _db.CrmData.AsNoTracking().ToListAsync();
         var preferredMethods = new[] { "4-Acid Digestion", "Aqua Regia Digestion" };
 
-        var result = new Dictionary<string, Dictionary<string, decimal>>(StringComparer.OrdinalIgnoreCase);
+        var byKey = new Dictionary<string, Dictionary<string, decimal>>(StringComparer.OrdinalIgnoreCase);
+        var allKeysByNumber = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        var preferredKeysByNumber = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        var keyToMethod = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var group in crmRecords.GroupBy(c => c.CrmId, StringComparer.OrdinalIgnoreCase))
+        foreach (var crm in crmRecords)
         {
-            var selected = group
-                .OrderBy(c =>
-                {
-                    if (string.IsNullOrWhiteSpace(c.AnalysisMethod))
-                        return 99;
-                    var idx = Array.FindIndex(preferredMethods, m => string.Equals(m, c.AnalysisMethod, StringComparison.OrdinalIgnoreCase));
-                    return idx >= 0 ? idx : 50;
-                })
-                .FirstOrDefault();
-
-            if (selected == null || string.IsNullOrWhiteSpace(selected.ElementValues))
+            if (string.IsNullOrWhiteSpace(crm.CrmId))
                 continue;
+
+            var number = ExtractCrmIdNumber(crm.CrmId);
+            if (string.IsNullOrWhiteSpace(number))
+                continue;
+
+            var key = BuildCrmSelectionKey(crm);
+            keyToMethod[key] = crm.AnalysisMethod;
 
             Dictionary<string, decimal>? values;
             try
             {
-                values = JsonSerializer.Deserialize<Dictionary<string, decimal>>(selected.ElementValues);
+                values = JsonSerializer.Deserialize<Dictionary<string, decimal>>(crm.ElementValues);
             }
             catch
             {
@@ -837,45 +1415,74 @@ public class OptimizationService : IOptimizationService
             if (values == null || values.Count == 0)
                 continue;
 
-            result[group.Key] = new Dictionary<string, decimal>(values, StringComparer.OrdinalIgnoreCase);
+            byKey[key] = new Dictionary<string, decimal>(values, StringComparer.OrdinalIgnoreCase);
+
+            if (!allKeysByNumber.TryGetValue(number, out var allList))
+            {
+                allList = new List<string>();
+                allKeysByNumber[number] = allList;
+            }
+            allList.Add(key);
+
+            if (!string.IsNullOrWhiteSpace(crm.AnalysisMethod) &&
+                preferredMethods.Any(m => string.Equals(m, crm.AnalysisMethod, StringComparison.OrdinalIgnoreCase)))
+            {
+                if (!preferredKeysByNumber.TryGetValue(number, out var prefList))
+                {
+                    prefList = new List<string>();
+                    preferredKeysByNumber[number] = prefList;
+                }
+                prefList.Add(key);
+            }
         }
 
-        return result;
+        var defaultKeyByNumber = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var kvp in allKeysByNumber)
+        {
+            var number = kvp.Key;
+            var allKeys = kvp.Value.OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToList();
+            var prefKeys = preferredKeysByNumber.TryGetValue(number, out var pref)
+                ? pref.OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToList()
+                : new List<string>();
+
+            string? selected = null;
+            if (crmSelections != null && crmSelections.TryGetValue(number, out var selectedMethod))
+            {
+                selected = allKeys.FirstOrDefault(k =>
+                    string.Equals(keyToMethod.GetValueOrDefault(k), selectedMethod, StringComparison.OrdinalIgnoreCase));
+            }
+
+            selected ??= prefKeys.FirstOrDefault() ?? allKeys.FirstOrDefault();
+
+            if (!string.IsNullOrWhiteSpace(selected))
+                defaultKeyByNumber[number] = selected!;
+        }
+
+        return new CrmDataMaps(byKey, defaultKeyByNumber, allKeysByNumber, preferredKeysByNumber, keyToMethod);
     }
 
-    private List<MatchedSample> MatchWithCrm(List<RmSampleData> projectData, Dictionary<string, Dictionary<string, decimal>> crmData)
+    private List<MatchedSample> MatchWithCrm(
+        List<RmSampleData> projectData,
+        CrmDataMaps crmMaps,
+        Dictionary<string, string>? rowSelections)
     {
         var result = new List<MatchedSample>();
-        if (projectData.Count == 0 || crmData.Count == 0) return result;
-
-        // extracts first number (e.g. "OREAS 100a" -> "100", "CRM 252 y" -> "252")
-        var numberPattern = new Regex(@"(\d+)", RegexOptions.IgnoreCase);
+        if (projectData.Count == 0 || crmMaps.ByKey.Count == 0) return result;
 
         foreach (var sample in projectData)
         {
-            var sm = numberPattern.Match(sample.SolutionLabel);
-            var sampleNum = sm.Success ? sm.Groups[1].Value : "";
-            if (string.IsNullOrEmpty(sampleNum))
+            var sampleCrmId = ExtractCrmId(sample.SolutionLabel);
+            if (string.IsNullOrEmpty(sampleCrmId))
                 continue;
 
-            string? matchedCrmId = null;
-
-            foreach (var crmId in crmData.Keys)
-            {
-                var cm = numberPattern.Match(crmId);
-                if (!cm.Success) continue;
-
-                if (cm.Groups[1].Value == sampleNum)
-                {
-                    matchedCrmId = crmId;
-                    break;
-                }
-            }
-
-            if (matchedCrmId == null)
+            var rowKey = BuildRowKey(sample.SolutionLabel, sample.RowIndex);
+            var selectedKey = rowSelections != null && rowSelections.TryGetValue(rowKey, out var sk) ? sk : null;
+            if (string.IsNullOrWhiteSpace(selectedKey))
+                crmMaps.DefaultKeyByNumber.TryGetValue(sampleCrmId, out selectedKey);
+            if (string.IsNullOrWhiteSpace(selectedKey) || !crmMaps.ByKey.TryGetValue(selectedKey!, out var crmValuesBySymbol))
                 continue;
 
-            var crmValuesBySymbol = crmData[matchedCrmId];
             var crmValues = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var sampleKey in sample.Values.Keys)
@@ -887,7 +1494,7 @@ public class OptimizationService : IOptimizationService
                 }
             }
 
-            result.Add(new MatchedSample(sample.SolutionLabel, matchedCrmId, sample.Values, crmValues, sample.BlankValues));
+            result.Add(new MatchedSample(sample.SolutionLabel, sample.RowIndex, selectedKey!, sample.Values, crmValues, sample.BlankValues));
         }
 
         return result;
@@ -924,7 +1531,17 @@ public class OptimizationService : IOptimizationService
         decimal blankAdjust,
         decimal scale,
         decimal minDiff,
-        decimal maxDiff)
+        decimal maxDiff,
+        HashSet<string>? excludedLabels,
+        decimal? scaleRangeMin,
+        decimal? scaleRangeMax,
+        bool scaleAbove50Only,
+        decimal rangeLow,
+        decimal rangeMid,
+        decimal rangeHigh1,
+        decimal rangeHigh2,
+        decimal rangeHigh3,
+        decimal rangeHigh4)
     {
         int total = 0;
         var stats = new Dictionary<string, ElementStats>(StringComparer.OrdinalIgnoreCase);
@@ -942,13 +1559,31 @@ public class OptimizationService : IOptimizationService
                 // Get blank_val for this element (default to 0 if not found)
                 var blankVal = s.BlankValues.TryGetValue(element, out var bv) && bv.HasValue ? bv.Value : 0m;
 
+                var applyCorrection = ShouldApplyCorrection(
+                    s.SolutionLabel,
+                    sv.Value,
+                    excludedLabels,
+                    scaleRangeMin,
+                    scaleRangeMax,
+                    scaleAbove50Only);
+
                 // Python formula: (sample_val - blank_val + blank_adjust) * scale
-                var corrected = (sv.Value - blankVal + blankAdjust) * scale;
+                var corrected = applyCorrection
+                    ? (sv.Value - blankVal + blankAdjust) * scale
+                    : sv.Value;
                 var diff = ((corrected - cv.Value) / cv.Value) * 100m;
 
                 diffs.Add(diff);
 
-                if (IsInDynamicRange(corrected, cv.Value))
+                if (IsInDynamicRange(
+                    corrected,
+                    cv.Value,
+                    rangeLow,
+                    rangeMid,
+                    rangeHigh1,
+                    rangeHigh2,
+                    rangeHigh3,
+                    rangeHigh4))
                     passed++;
             }
 
@@ -960,7 +1595,15 @@ public class OptimizationService : IOptimizationService
         return (total, stats);
     }
 
-    private decimal CalculateMeanDiff(List<MatchedSample> data, string element, decimal blankAdjust, decimal scale)
+    private decimal CalculateMeanDiff(
+        List<MatchedSample> data,
+        string element,
+        decimal blankAdjust,
+        decimal scale,
+        HashSet<string>? excludedLabels,
+        decimal? scaleRangeMin,
+        decimal? scaleRangeMax,
+        bool scaleAbove50Only)
     {
         var diffs = new List<decimal>();
 
@@ -972,8 +1615,18 @@ public class OptimizationService : IOptimizationService
             // Get blank_val for this element
             var blankVal = s.BlankValues.TryGetValue(element, out var bv) && bv.HasValue ? bv.Value : 0m;
 
+            var applyCorrection = ShouldApplyCorrection(
+                s.SolutionLabel,
+                sv.Value,
+                excludedLabels,
+                scaleRangeMin,
+                scaleRangeMax,
+                scaleAbove50Only);
+
             // Python formula: (sample_val - blank_val + blank_adjust) * scale
-            var corrected = (sv.Value - blankVal + blankAdjust) * scale;
+            var corrected = applyCorrection
+                ? (sv.Value - blankVal + blankAdjust) * scale
+                : sv.Value;
             var diff = ((corrected - cv.Value) / cv.Value) * 100m;
             diffs.Add(diff);
         }
@@ -981,10 +1634,48 @@ public class OptimizationService : IOptimizationService
         return diffs.Count > 0 ? diffs.Average() : 0m;
     }
 
-    private static bool IsInDynamicRange(decimal corrected, decimal crmValue)
+    private static bool IsInDynamicRange(
+        decimal corrected,
+        decimal crmValue,
+        decimal rangeLow,
+        decimal rangeMid,
+        decimal rangeHigh1,
+        decimal rangeHigh2,
+        decimal rangeHigh3,
+        decimal rangeHigh4)
     {
-        var range = CalculateDynamicRange(crmValue);
+        var range = CalculateDynamicRange(
+            crmValue,
+            rangeLow,
+            rangeMid,
+            rangeHigh1,
+            rangeHigh2,
+            rangeHigh3,
+            rangeHigh4);
         return corrected >= crmValue - range && corrected <= crmValue + range;
+    }
+
+    private static bool ShouldApplyCorrection(
+        string solutionLabel,
+        decimal value,
+        HashSet<string>? excludedLabels,
+        decimal? scaleRangeMin,
+        decimal? scaleRangeMax,
+        bool scaleAbove50Only)
+    {
+        if (excludedLabels != null && excludedLabels.Contains(solutionLabel))
+            return false;
+
+        if (scaleAbove50Only && value <= 50m)
+            return false;
+
+        if (scaleRangeMin.HasValue && scaleRangeMax.HasValue)
+        {
+            if (value < scaleRangeMin.Value || value > scaleRangeMax.Value)
+                return false;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -1028,7 +1719,17 @@ public class OptimizationService : IOptimizationService
         Dictionary<string, decimal> blankAdjusts,
         Dictionary<string, decimal> scales,
         decimal minDiff,
-        decimal maxDiff)
+        decimal maxDiff,
+        HashSet<string>? excludedLabels,
+        decimal? scaleRangeMin,
+        decimal? scaleRangeMax,
+        bool scaleAbove50Only,
+        decimal rangeLow,
+        decimal rangeMid,
+        decimal rangeHigh1,
+        decimal rangeHigh2,
+        decimal rangeHigh3,
+        decimal rangeHigh4)
     {
         var result = new List<OptimizedSampleDto>();
 
@@ -1052,21 +1753,46 @@ public class OptimizationService : IOptimizationService
                 var blankVal = sample.BlankValues.TryGetValue(element, out var bv) && bv.HasValue ? bv.Value : 0m;
 
                 var original = sv.Value;
+                var applyCorrection = ShouldApplyCorrection(
+                    sample.SolutionLabel,
+                    original,
+                    excludedLabels,
+                    scaleRangeMin,
+                    scaleRangeMax,
+                    scaleAbove50Only);
 
                 // Python formula: (sample_val - blank_val + blank_adjust) * scale
-                var optimized = (original - blankVal + blankAdjust) * scale;
+                var optimized = applyCorrection
+                    ? (original - blankVal + blankAdjust) * scale
+                    : original;
 
                 optimizedValues[element] = optimized;
 
-                var db = ((original - cv.Value) / cv.Value) * 100m;
+                var correctedBefore = applyCorrection ? (original - blankVal) : original;
+                var db = ((correctedBefore - cv.Value) / cv.Value) * 100m;
                 var da = ((optimized - cv.Value) / cv.Value) * 100m;
 
                 diffBefore[element] = db;
                 diffAfter[element] = da;
 
-                var correctedBefore = original - blankVal;
-                passBefore[element] = IsInDynamicRange(correctedBefore, cv.Value);
-                passAfter[element] = IsInDynamicRange(optimized, cv.Value);
+                passBefore[element] = IsInDynamicRange(
+                    correctedBefore,
+                    cv.Value,
+                    rangeLow,
+                    rangeMid,
+                    rangeHigh1,
+                    rangeHigh2,
+                    rangeHigh3,
+                    rangeHigh4);
+                passAfter[element] = IsInDynamicRange(
+                    optimized,
+                    cv.Value,
+                    rangeLow,
+                    rangeMid,
+                    rangeHigh1,
+                    rangeHigh2,
+                    rangeHigh3,
+                    rangeHigh4);
             }
 
             result.Add(new OptimizedSampleDto(
@@ -1095,13 +1821,38 @@ public class OptimizationService : IOptimizationService
         decimal minDiff,
         decimal maxDiff,
         int maxIterations,
-        int populationSize)
+        int populationSize,
+        HashSet<string>? excludedLabels,
+        decimal? scaleRangeMin,
+        decimal? scaleRangeMax,
+        bool scaleAbove50Only,
+        decimal rangeLow,
+        decimal rangeMid,
+        decimal rangeHigh1,
+        decimal rangeHigh2,
+        decimal rangeHigh3,
+        decimal rangeHigh4)
     {
-        var samples = BuildElementSamples(data, element);
+        var samples = BuildElementSamples(
+            data,
+            element,
+            excludedLabels,
+            scaleRangeMin,
+            scaleRangeMax,
+            scaleAbove50Only);
         if (samples.Count == 0)
             return (0m, 1m, 0);
 
-        var outcome = OptimizeModelA(samples, maxIterations, populationSize);
+        var outcome = OptimizeModelA(
+            samples,
+            maxIterations,
+            populationSize,
+            rangeLow,
+            rangeMid,
+            rangeHigh1,
+            rangeHigh2,
+            rangeHigh3,
+            rangeHigh4);
         return (outcome.Blank, outcome.Scale, outcome.Passed);
     }
 
@@ -1111,15 +1862,58 @@ public class OptimizationService : IOptimizationService
         decimal minDiff,
         decimal maxDiff,
         int maxIterations,
-        int populationSize)
+        int populationSize,
+        HashSet<string>? excludedLabels,
+        decimal? scaleRangeMin,
+        decimal? scaleRangeMax,
+        bool scaleAbove50Only,
+        decimal rangeLow,
+        decimal rangeMid,
+        decimal rangeHigh1,
+        decimal rangeHigh2,
+        decimal rangeHigh3,
+        decimal rangeHigh4)
     {
-        var samples = BuildElementSamples(data, element);
+        var samples = BuildElementSamples(
+            data,
+            element,
+            excludedLabels,
+            scaleRangeMin,
+            scaleRangeMax,
+            scaleAbove50Only);
         if (samples.Count == 0)
             return (0m, 1m, 0, "A");
 
-        var modelA = OptimizeModelA(samples, maxIterations, populationSize);
-        var modelB = OptimizeModelB(samples, maxIterations, populationSize);
-        var modelC = OptimizeModelC(samples, maxIterations, populationSize);
+        var modelA = OptimizeModelA(
+            samples,
+            maxIterations,
+            populationSize,
+            rangeLow,
+            rangeMid,
+            rangeHigh1,
+            rangeHigh2,
+            rangeHigh3,
+            rangeHigh4);
+        var modelB = OptimizeModelB(
+            samples,
+            maxIterations,
+            populationSize,
+            rangeLow,
+            rangeMid,
+            rangeHigh1,
+            rangeHigh2,
+            rangeHigh3,
+            rangeHigh4);
+        var modelC = OptimizeModelC(
+            samples,
+            maxIterations,
+            populationSize,
+            rangeLow,
+            rangeMid,
+            rangeHigh1,
+            rangeHigh2,
+            rangeHigh3,
+            rangeHigh4);
 
         var modelADistance = modelA.Scale == 1m ? (double?)null : modelB.AvgDistance;
 
@@ -1138,7 +1932,13 @@ public class OptimizationService : IOptimizationService
         return (best.Blank, best.Scale, best.Passed, best.Model);
     }
 
-    private static List<ElementSample> BuildElementSamples(List<MatchedSample> data, string element)
+    private static List<ElementSample> BuildElementSamples(
+        List<MatchedSample> data,
+        string element,
+        HashSet<string>? excludedLabels,
+        decimal? scaleRangeMin,
+        decimal? scaleRangeMax,
+        bool scaleAbove50Only)
     {
         var samples = new List<ElementSample>();
 
@@ -1148,7 +1948,14 @@ public class OptimizationService : IOptimizationService
             if (!s.CrmValues.TryGetValue(element, out var cv) || !cv.HasValue || cv.Value == 0m) continue;
 
             var blankVal = s.BlankValues.TryGetValue(element, out var bv) && bv.HasValue ? bv.Value : 0m;
-            samples.Add(new ElementSample((double)sv.Value, (double)cv.Value, (double)blankVal));
+            var applyCorrection = ShouldApplyCorrection(
+                s.SolutionLabel,
+                sv.Value,
+                excludedLabels,
+                scaleRangeMin,
+                scaleRangeMax,
+                scaleAbove50Only);
+            samples.Add(new ElementSample((double)sv.Value, (double)cv.Value, (double)blankVal, applyCorrection));
         }
 
         return samples;
@@ -1194,7 +2001,16 @@ public class OptimizationService : IOptimizationService
         return 0m;
     }
 
-    private ModelOutcome OptimizeModelA(List<ElementSample> samples, int maxIterations, int populationSize)
+    private ModelOutcome OptimizeModelA(
+        List<ElementSample> samples,
+        int maxIterations,
+        int populationSize,
+        decimal rangeLow,
+        decimal rangeMid,
+        decimal rangeHigh1,
+        decimal rangeHigh2,
+        decimal rangeHigh3,
+        decimal rangeHigh4)
     {
         var total = samples.Count;
         var (blankMin, blankMax) = GetBlankBounds(samples);
@@ -1202,7 +2018,16 @@ public class OptimizationService : IOptimizationService
 
         double Objective(double blankAdjust, double scale)
         {
-            var inRange = CountInRange(samples, blankAdjust, scale);
+            var inRange = CountInRange(
+                samples,
+                blankAdjust,
+                scale,
+                rangeLow,
+                rangeMid,
+                rangeHigh1,
+                rangeHigh2,
+                rangeHigh3,
+                rangeHigh4);
             var reg = 10.0 * Math.Abs(scale - 1.0);
             return -inRange + (reg / total);
         }
@@ -1210,10 +2035,28 @@ public class OptimizationService : IOptimizationService
         var result = RunDifferentialEvolution(Objective, (blankMin, blankMax), (scaleMin, scaleMax), maxIterations, populationSize);
         var blank = result.Blank;
         var scale = result.Scale;
-        var inRangeAfter = CountInRange(samples, blank, scale);
+        var inRangeAfter = CountInRange(
+            samples,
+            blank,
+            scale,
+            rangeLow,
+            rangeMid,
+            rangeHigh1,
+            rangeHigh2,
+            rangeHigh3,
+            rangeHigh4);
 
         var blankOnly = RunDifferentialEvolution((b, _) => Objective(b, 1.0), (blankMin, blankMax), (1.0, 1.0), maxIterations, populationSize);
-        var inRangeBlank = CountInRange(samples, blankOnly.Blank, 1.0);
+        var inRangeBlank = CountInRange(
+            samples,
+            blankOnly.Blank,
+            1.0,
+            rangeLow,
+            rangeMid,
+            rangeHigh1,
+            rangeHigh2,
+            rangeHigh3,
+            rangeHigh4);
 
         if (inRangeBlank > inRangeAfter || (inRangeBlank == inRangeAfter && (double)inRangeBlank / total >= 0.75))
         {
@@ -1222,11 +2065,29 @@ public class OptimizationService : IOptimizationService
             inRangeAfter = inRangeBlank;
         }
 
-        var avgDistance = AverageDistance(samples, blank, scale);
+        var avgDistance = AverageDistance(
+            samples,
+            blank,
+            scale,
+            rangeLow,
+            rangeMid,
+            rangeHigh1,
+            rangeHigh2,
+            rangeHigh3,
+            rangeHigh4);
         return new ModelOutcome("A", (decimal)blank, (decimal)scale, inRangeAfter, avgDistance);
     }
 
-    private ModelOutcome OptimizeModelB(List<ElementSample> samples, int maxIterations, int populationSize)
+    private ModelOutcome OptimizeModelB(
+        List<ElementSample> samples,
+        int maxIterations,
+        int populationSize,
+        decimal rangeLow,
+        decimal rangeMid,
+        decimal rangeHigh1,
+        decimal rangeHigh2,
+        decimal rangeHigh3,
+        decimal rangeHigh4)
     {
         var total = samples.Count;
         var meanAbsSample = AverageAbsSample(samples);
@@ -1235,7 +2096,16 @@ public class OptimizationService : IOptimizationService
 
         double Objective(double blankAdjust, double scale)
         {
-            var totalDistance = TotalHuberDistance(samples, blankAdjust, scale);
+            var totalDistance = TotalHuberDistance(
+                samples,
+                blankAdjust,
+                scale,
+                rangeLow,
+                rangeMid,
+                rangeHigh1,
+                rangeHigh2,
+                rangeHigh3,
+                rangeHigh4);
             var reg = 0.1 * (Math.Abs(scale - 1.0) * meanAbsSample);
             return (totalDistance / total) + reg;
         }
@@ -1243,12 +2113,48 @@ public class OptimizationService : IOptimizationService
         var result = RunDifferentialEvolution(Objective, (blankMin, blankMax), (scaleMin, scaleMax), maxIterations, populationSize);
         var blank = result.Blank;
         var scale = result.Scale;
-        var inRangeAfter = CountInRange(samples, blank, scale);
-        var avgDistance = AverageDistance(samples, blank, scale);
+        var inRangeAfter = CountInRange(
+            samples,
+            blank,
+            scale,
+            rangeLow,
+            rangeMid,
+            rangeHigh1,
+            rangeHigh2,
+            rangeHigh3,
+            rangeHigh4);
+        var avgDistance = AverageDistance(
+            samples,
+            blank,
+            scale,
+            rangeLow,
+            rangeMid,
+            rangeHigh1,
+            rangeHigh2,
+            rangeHigh3,
+            rangeHigh4);
 
         var blankOnly = RunDifferentialEvolution((b, _) => Objective(b, 1.0), (blankMin, blankMax), (1.0, 1.0), maxIterations, populationSize);
-        var inRangeBlank = CountInRange(samples, blankOnly.Blank, 1.0);
-        var avgDistanceBlank = AverageDistance(samples, blankOnly.Blank, 1.0);
+        var inRangeBlank = CountInRange(
+            samples,
+            blankOnly.Blank,
+            1.0,
+            rangeLow,
+            rangeMid,
+            rangeHigh1,
+            rangeHigh2,
+            rangeHigh3,
+            rangeHigh4);
+        var avgDistanceBlank = AverageDistance(
+            samples,
+            blankOnly.Blank,
+            1.0,
+            rangeLow,
+            rangeMid,
+            rangeHigh1,
+            rangeHigh2,
+            rangeHigh3,
+            rangeHigh4);
 
         if (inRangeBlank > inRangeAfter || (inRangeBlank == inRangeAfter && (double)inRangeBlank / total >= 0.75))
         {
@@ -1261,7 +2167,16 @@ public class OptimizationService : IOptimizationService
         return new ModelOutcome("B", (decimal)blank, (decimal)scale, inRangeAfter, avgDistance);
     }
 
-    private ModelOutcome OptimizeModelC(List<ElementSample> samples, int maxIterations, int populationSize)
+    private ModelOutcome OptimizeModelC(
+        List<ElementSample> samples,
+        int maxIterations,
+        int populationSize,
+        decimal rangeLow,
+        decimal rangeMid,
+        decimal rangeHigh1,
+        decimal rangeHigh2,
+        decimal rangeHigh3,
+        decimal rangeHigh4)
     {
         var total = samples.Count;
         var meanAbsSample = AverageAbsSample(samples);
@@ -1270,7 +2185,16 @@ public class OptimizationService : IOptimizationService
 
         double Objective(double blankAdjust, double scale)
         {
-            var totalSse = TotalSse(samples, blankAdjust, scale);
+            var totalSse = TotalSse(
+                samples,
+                blankAdjust,
+                scale,
+                rangeLow,
+                rangeMid,
+                rangeHigh1,
+                rangeHigh2,
+                rangeHigh3,
+                rangeHigh4);
             var reg = 0.1 * (Math.Abs(scale - 1.0) * meanAbsSample);
             return (totalSse / total) + reg;
         }
@@ -1278,12 +2202,48 @@ public class OptimizationService : IOptimizationService
         var result = RunDifferentialEvolution(Objective, (blankMin, blankMax), (scaleMin, scaleMax), maxIterations, populationSize);
         var blank = result.Blank;
         var scale = result.Scale;
-        var inRangeAfter = CountInRange(samples, blank, scale);
-        var avgDistance = AverageDistance(samples, blank, scale);
+        var inRangeAfter = CountInRange(
+            samples,
+            blank,
+            scale,
+            rangeLow,
+            rangeMid,
+            rangeHigh1,
+            rangeHigh2,
+            rangeHigh3,
+            rangeHigh4);
+        var avgDistance = AverageDistance(
+            samples,
+            blank,
+            scale,
+            rangeLow,
+            rangeMid,
+            rangeHigh1,
+            rangeHigh2,
+            rangeHigh3,
+            rangeHigh4);
 
         var blankOnly = RunDifferentialEvolution((b, _) => Objective(b, 1.0), (blankMin, blankMax), (1.0, 1.0), maxIterations, populationSize);
-        var inRangeBlank = CountInRange(samples, blankOnly.Blank, 1.0);
-        var avgDistanceBlank = AverageDistance(samples, blankOnly.Blank, 1.0);
+        var inRangeBlank = CountInRange(
+            samples,
+            blankOnly.Blank,
+            1.0,
+            rangeLow,
+            rangeMid,
+            rangeHigh1,
+            rangeHigh2,
+            rangeHigh3,
+            rangeHigh4);
+        var avgDistanceBlank = AverageDistance(
+            samples,
+            blankOnly.Blank,
+            1.0,
+            rangeLow,
+            rangeMid,
+            rangeHigh1,
+            rangeHigh2,
+            rangeHigh3,
+            rangeHigh4);
 
         if (inRangeBlank > inRangeAfter || (inRangeBlank == inRangeAfter && (double)inRangeBlank / total >= 0.75))
         {
@@ -1313,14 +2273,38 @@ public class OptimizationService : IOptimizationService
     private static (double Min, double Max) GetScaleBounds()
         => (1.0 - 0.3, 1.0 + 0.3);
 
-    private static int CountInRange(List<ElementSample> samples, double blankAdjust, double scale)
+    private static double ComputeCorrectedValue(ElementSample sample, double blankAdjust, double scale)
+    {
+        if (!sample.ApplyCorrection)
+            return sample.SampleValue;
+
+        return (sample.SampleValue - sample.BlankValue + blankAdjust) * scale;
+    }
+
+    private static int CountInRange(
+        List<ElementSample> samples,
+        double blankAdjust,
+        double scale,
+        decimal rangeLow,
+        decimal rangeMid,
+        decimal rangeHigh1,
+        decimal rangeHigh2,
+        decimal rangeHigh3,
+        decimal rangeHigh4)
     {
         int passed = 0;
 
         foreach (var sample in samples)
         {
-            var corrected = (sample.SampleValue - sample.BlankValue + blankAdjust) * scale;
-            var range = CalculateDynamicRange(sample.CrmValue);
+            var corrected = ComputeCorrectedValue(sample, blankAdjust, scale);
+            var range = CalculateDynamicRange(
+                sample.CrmValue,
+                rangeLow,
+                rangeMid,
+                rangeHigh1,
+                rangeHigh2,
+                rangeHigh3,
+                rangeHigh4);
             var lower = sample.CrmValue - range;
             var upper = sample.CrmValue + range;
 
@@ -1339,36 +2323,79 @@ public class OptimizationService : IOptimizationService
         return samples.Average(s => Math.Abs(s.SampleValue));
     }
 
-    private static double AverageDistance(List<ElementSample> samples, double blankAdjust, double scale)
+    private static double AverageDistance(
+        List<ElementSample> samples,
+        double blankAdjust,
+        double scale,
+        decimal rangeLow,
+        decimal rangeMid,
+        decimal rangeHigh1,
+        decimal rangeHigh2,
+        decimal rangeHigh3,
+        decimal rangeHigh4)
     {
         if (samples.Count == 0)
             return 0.0;
 
-        var distances = samples.Select(s => DistanceToRange((s.SampleValue - s.BlankValue + blankAdjust) * scale, s.CrmValue));
+        var distances = samples.Select(s => DistanceToRange(
+            ComputeCorrectedValue(s, blankAdjust, scale),
+            s.CrmValue,
+            rangeLow,
+            rangeMid,
+            rangeHigh1,
+            rangeHigh2,
+            rangeHigh3,
+            rangeHigh4));
         return distances.Average();
     }
 
-    private static double TotalHuberDistance(List<ElementSample> samples, double blankAdjust, double scale)
+    private static double TotalHuberDistance(
+        List<ElementSample> samples,
+        double blankAdjust,
+        double scale,
+        decimal rangeLow,
+        decimal rangeMid,
+        decimal rangeHigh1,
+        decimal rangeHigh2,
+        decimal rangeHigh3,
+        decimal rangeHigh4)
     {
         double total = 0.0;
 
         foreach (var sample in samples)
         {
-            var corrected = (sample.SampleValue - sample.BlankValue + blankAdjust) * scale;
-            var dist = DistanceToRange(corrected, sample.CrmValue);
+            var corrected = ComputeCorrectedValue(sample, blankAdjust, scale);
+            var dist = DistanceToRange(
+                corrected,
+                sample.CrmValue,
+                rangeLow,
+                rangeMid,
+                rangeHigh1,
+                rangeHigh2,
+                rangeHigh3,
+                rangeHigh4);
             total += Huber(1.0, dist);
         }
 
         return total;
     }
 
-    private static double TotalSse(List<ElementSample> samples, double blankAdjust, double scale)
+    private static double TotalSse(
+        List<ElementSample> samples,
+        double blankAdjust,
+        double scale,
+        decimal rangeLow,
+        decimal rangeMid,
+        decimal rangeHigh1,
+        decimal rangeHigh2,
+        decimal rangeHigh3,
+        decimal rangeHigh4)
     {
         double total = 0.0;
 
         foreach (var sample in samples)
         {
-            var corrected = (sample.SampleValue - sample.BlankValue + blankAdjust) * scale;
+            var corrected = ComputeCorrectedValue(sample, blankAdjust, scale);
             var diff = corrected - sample.CrmValue;
             total += diff * diff;
         }
@@ -1455,15 +2482,47 @@ public class OptimizationService : IOptimizationService
         return (finalBest.Blank, finalBest.Scale, finalObjective);
     }
 
-    private static double CalculateDynamicRange(double value)
+    private static double CalculateDynamicRange(
+        double value,
+        decimal rangeLow,
+        decimal rangeMid,
+        decimal rangeHigh1,
+        decimal rangeHigh2,
+        decimal rangeHigh3,
+        decimal rangeHigh4)
     {
-        // Match Python: range = crm_val * 0.1
-        return Math.Abs(value) * 0.1;
+        var absValue = Math.Abs(value);
+        if (absValue < 10)
+            return (double)rangeLow;
+        if (absValue < 100)
+            return absValue * ((double)rangeMid / 100.0);
+        if (absValue < 1000)
+            return absValue * ((double)rangeHigh1 / 100.0);
+        if (absValue < 10000)
+            return absValue * ((double)rangeHigh2 / 100.0);
+        if (absValue < 100000)
+            return absValue * ((double)rangeHigh3 / 100.0);
+        return absValue * ((double)rangeHigh4 / 100.0);
     }
 
-    private static double DistanceToRange(double corrected, double crmValue)
+    private static double DistanceToRange(
+        double corrected,
+        double crmValue,
+        decimal rangeLow,
+        decimal rangeMid,
+        decimal rangeHigh1,
+        decimal rangeHigh2,
+        decimal rangeHigh3,
+        decimal rangeHigh4)
     {
-        var range = CalculateDynamicRange(crmValue);
+        var range = CalculateDynamicRange(
+            crmValue,
+            rangeLow,
+            rangeMid,
+            rangeHigh1,
+            rangeHigh2,
+            rangeHigh3,
+            rangeHigh4);
         var lower = crmValue - range;
         var upper = crmValue + range;
 
@@ -1494,16 +2553,28 @@ public class OptimizationService : IOptimizationService
     // Internal types
     // ---------------------------
 
-    private sealed record RmSampleData(string SolutionLabel, Dictionary<string, decimal?> Values, Dictionary<string, decimal?> BlankValues);
+    private sealed record CrmDataMaps(
+        Dictionary<string, Dictionary<string, decimal>> ByKey,
+        Dictionary<string, string> DefaultKeyByNumber,
+        Dictionary<string, List<string>> AllKeysByNumber,
+        Dictionary<string, List<string>> PreferredKeysByNumber,
+        Dictionary<string, string?> KeyToMethod);
+
+    private sealed record RmSampleData(
+        string SolutionLabel,
+        int RowIndex,
+        Dictionary<string, decimal?> Values,
+        Dictionary<string, decimal?> BlankValues);
 
     private sealed record MatchedSample(
         string SolutionLabel,
+        int RowIndex,
         string CrmId,
         Dictionary<string, decimal?> SampleValues,
         Dictionary<string, decimal?> CrmValues,
         Dictionary<string, decimal?> BlankValues);
 
-    private sealed record ElementSample(double SampleValue, double CrmValue, double BlankValue);
+    private sealed record ElementSample(double SampleValue, double CrmValue, double BlankValue, bool ApplyCorrection);
 
     private sealed record ModelOutcome(string Model, decimal Blank, decimal Scale, int Passed, double AvgDistance);
 

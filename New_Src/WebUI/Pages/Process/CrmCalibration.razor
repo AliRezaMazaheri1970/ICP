@@ -114,8 +114,58 @@
                         }
                     </MudSelect>
 
+                    @if (_crmSelectionRows.Any())
+                    {
+                        <MudDivider Class="my-2" />
+                        <MudText Typo="Typo.subtitle2" Class="mb-2">CRM Row Selection (Python-style)</MudText>
+
+                        <MudTable Items="@_crmSelectionRows"
+                                  Dense="true"
+                                  Hover="true"
+                                  FixedHeader="true"
+                                  Height="220px"
+                                  Breakpoint="Breakpoint.None"
+                                  HorizontalScrollbar="true">
+                            <HeaderContent>
+                                <MudTh>Label</MudTh>
+                                <MudTh>Row</MudTh>
+                                <MudTh>Selection</MudTh>
+                                <MudTh>More</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd>@context.SolutionLabel</MudTd>
+                                <MudTd>@context.RowIndex</MudTd>
+                                <MudTd>
+                                    <MudSelect T="string"
+                                               Value="@context.SelectedOption"
+                                               ValueChanged="@GetRowSelectionChangedHandler(context)"
+                                               Variant="Variant.Outlined"
+                                               Dense="true">
+                                        @foreach (var opt in GetRowOptions(context))
+                                        {
+                                            <MudSelectItem Value="@opt">@opt</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                </MudTd>
+                                <MudTd>
+                                    <MudCheckBox T="bool"
+                                                 Checked="@GetShowAll(context)"
+                                                 CheckedChanged="@GetShowAllChangedHandler(context)"
+                                                 Label="More"
+                                                 Dense="true" />
+                                </MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    }
+
                     <MudDivider Class="my-2" />
                     <MudText Typo="Typo.subtitle2" Class="mb-2">Manual Preview</MudText>
+
+                    <MudText Typo="Typo.caption" Class="mb-1">Exclude Labels (comma/line separated)</MudText>
+                    <MudTextField @bind-Value="_excludedLabelsInput"
+                                  Variant="Variant.Outlined"
+                                  Lines="3"
+                                  Class="mb-3" />
 
                     <MudNumericField @bind-Value="_previewBlank"
                                      Label="Blank"

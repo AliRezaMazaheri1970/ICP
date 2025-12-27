@@ -44,4 +44,21 @@ public interface IOptimizationService
     /// <param name="projectId">The unique identifier of the project.</param>
     /// <returns>An object containing the debug dataset.</returns>
     Task<object> GetDebugSamplesAsync(Guid projectId);
+
+    /// <summary>
+    /// Retrieves CRM method options detected in a project to mirror Python CRM selection behavior.
+    /// </summary>
+    /// <param name="projectId">The unique identifier of the project.</param>
+    /// <returns>A result containing CRM method options per CRM id.</returns>
+    Task<Result<CrmOptionsResult>> GetCrmOptionsAsync(Guid projectId);
+
+    /// <summary>
+    /// Retrieves per-row CRM selection options for a project (Python-compatible).
+    /// </summary>
+    Task<Result<CrmSelectionOptionsResult>> GetCrmSelectionOptionsAsync(Guid projectId);
+
+    /// <summary>
+    /// Saves per-row CRM selections for a project.
+    /// </summary>
+    Task<Result<bool>> SaveCrmSelectionsAsync(CrmSelectionSaveRequest request, string? selectedBy);
 }

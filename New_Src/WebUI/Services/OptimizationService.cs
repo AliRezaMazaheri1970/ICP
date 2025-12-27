@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -64,6 +65,81 @@ public class BlankScaleOptimizationRequest
 
     [JsonPropertyName("scaleAbove50Only")]
     public bool ScaleAbove50Only { get; set; } = false;
+
+    [JsonPropertyName("crmSelections")]
+    public Dictionary<string, string>? CrmSelections { get; set; }
+
+    [JsonPropertyName("includedCrmIds")]
+    public List<string>? IncludedCrmIds { get; set; }
+
+    [JsonPropertyName("excludedSolutionLabels")]
+    public List<string>? ExcludedSolutionLabels { get; set; }
+}
+
+public class CrmMethodOptionDto
+{
+    [JsonPropertyName("crmId")]
+    public string CrmId { get; set; } = "";
+
+    [JsonPropertyName("methods")]
+    public List<string> Methods { get; set; } = new();
+
+    [JsonPropertyName("defaultMethod")]
+    public string? DefaultMethod { get; set; }
+}
+
+public class CrmOptionsResult
+{
+    [JsonPropertyName("items")]
+    public List<CrmMethodOptionDto> Items { get; set; } = new();
+}
+
+public class CrmSelectionRowDto
+{
+    [JsonPropertyName("solutionLabel")]
+    public string SolutionLabel { get; set; } = "";
+
+    [JsonPropertyName("rowIndex")]
+    public int RowIndex { get; set; }
+
+    [JsonPropertyName("crmId")]
+    public string CrmId { get; set; } = "";
+
+    [JsonPropertyName("preferredOptions")]
+    public List<string> PreferredOptions { get; set; } = new();
+
+    [JsonPropertyName("allOptions")]
+    public List<string> AllOptions { get; set; } = new();
+
+    [JsonPropertyName("selectedOption")]
+    public string? SelectedOption { get; set; }
+}
+
+public class CrmSelectionOptionsResult
+{
+    [JsonPropertyName("items")]
+    public List<CrmSelectionRowDto> Items { get; set; } = new();
+}
+
+public class CrmSelectionItemDto
+{
+    [JsonPropertyName("solutionLabel")]
+    public string SolutionLabel { get; set; } = "";
+
+    [JsonPropertyName("rowIndex")]
+    public int RowIndex { get; set; }
+
+    [JsonPropertyName("selectedCrmKey")]
+    public string SelectedCrmKey { get; set; } = "";
+}
+
+public class CrmSelectionSaveRequest
+{
+    [JsonPropertyName("projectId")]
+    public Guid ProjectId { get; set; }
+
+    [JsonPropertyName("selections")]
+    public List<CrmSelectionItemDto> Selections { get; set; } = new();
 }
 
 public class BlankScaleOptimizationResult
@@ -235,6 +311,96 @@ public class OptimizationService
         {
             _logger.LogError(ex, "Error running optimization");
             return ServiceResult<BlankScaleOptimizationResult>.Fail($"Error: {ex.Message}");
+        }
+    }
+
+    public async Task<ServiceResult<CrmOptionsResult>> GetCrmOptionsAsync(Guid projectId)
+    {
+        try
+        {
+            SetAuthHeader();
+
+            var response = await _httpClient.GetAsync($"optimization/{projectId}/crm-options");
+            var content = await response.Content.ReadAsStringAsync();
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = JsonSerializer.Deserialize<ApiResult<CrmOptionsResult>>(content,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                if (result?.Succeeded == true && result.Data != null)
+                    return ServiceResult<CrmOptionsResult>.Success(result.Data);
+
+                return ServiceResult<CrmOptionsResult>.Fail(result?.Message ?? "Failed to load CRM options");
+            }
+
+            return ServiceResult<CrmOptionsResult>.Fail($"Server error: {response.StatusCode}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error loading CRM options");
+            return ServiceResult<CrmOptionsResult>.Fail($"Error: {ex.Message}");
+        }
+    }
+
+    public async Task<ServiceResult<CrmSelectionOptionsResult>> GetCrmSelectionOptionsAsync(Guid projectId)
+    {
+        try
+        {
+            SetAuthHeader();
+
+            var response = await _httpClient.GetAsync($"optimization/{projectId}/crm-selection-options");
+            var content = await response.Content.ReadAsStringAsync();
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = JsonSerializer.Deserialize<ApiResult<CrmSelectionOptionsResult>>(content,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                if (result?.Succeeded == true && result.Data != null)
+                    return ServiceResult<CrmSelectionOptionsResult>.Success(result.Data);
+
+                return ServiceResult<CrmSelectionOptionsResult>.Fail(result?.Message ?? "Failed to load CRM selections");
+            }
+
+            return ServiceResult<CrmSelectionOptionsResult>.Fail($"Server error: {response.StatusCode}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error loading CRM selections");
+            return ServiceResult<CrmSelectionOptionsResult>.Fail($"Error: {ex.Message}");
+        }
+    }
+
+    public async Task<ServiceResult<bool>> SaveCrmSelectionsAsync(CrmSelectionSaveRequest request)
+    {
+        try
+        {
+            SetAuthHeader();
+
+            var json = JsonSerializer.Serialize(request);
+            var response = await _httpClient.PostAsync(
+                $"optimization/{request.ProjectId}/crm-selections",
+                new StringContent(json, Encoding.UTF8, "application/json"));
+
+            var content = await response.Content.ReadAsStringAsync();
+            if (response.IsSuccessStatusCode)
+            {
+                var result = JsonSerializer.Deserialize<ApiResult<bool>>(content,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                if (result?.Succeeded == true)
+                    return ServiceResult<bool>.Success(true);
+
+                return ServiceResult<bool>.Fail(result?.Message ?? "Failed to save CRM selections");
+            }
+
+            return ServiceResult<bool>.Fail($"Server error: {response.StatusCode}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error saving CRM selections");
+            return ServiceResult<bool>.Fail($"Error: {ex.Message}");
         }
     }
 

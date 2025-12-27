@@ -21,6 +21,9 @@ namespace Application.DTOs;
 /// <param name="ScaleRangeMin">Optional minimum value for scale application range.</param>
 /// <param name="ScaleRangeMax">Optional maximum value for scale application range.</param>
 /// <param name="ScaleAbove50Only">When true, only apply scale to values above 50.</param>
+/// <param name="CrmSelections">Optional CRM method selections keyed by CRM numeric id (e.g., "258").</param>
+/// <param name="IncludedCrmIds">Optional list of CRM numeric ids to include (e.g., "258").</param>
+/// <param name="ExcludedSolutionLabels">Optional list of solution labels to exclude from optimization.</param>
 public record BlankScaleOptimizationRequest(
     Guid ProjectId,
     List<string>? Elements = null,
@@ -41,7 +44,10 @@ public record BlankScaleOptimizationRequest(
     // Scale Application Range (Python: scale_range_min/max)
     decimal? ScaleRangeMin = null,
     decimal? ScaleRangeMax = null,
-    bool ScaleAbove50Only = false
+    bool ScaleAbove50Only = false,
+    Dictionary<string, string>? CrmSelections = null,
+    List<string>? IncludedCrmIds = null,
+    List<string>? ExcludedSolutionLabels = null
 );
 
 /// <summary>
