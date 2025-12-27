@@ -67,7 +67,7 @@ public interface IProjectPersistenceService
     /// <param name="rawRows">A list of raw data rows to save, if applicable.</param>
     /// <param name="stateJson">The initial JSON state configuration, if applicable.</param>
     /// <returns>A result containing details of the saved project.</returns>
-    Task<Result<ProjectSaveResult>> SaveProjectAsync(Guid projectId, string projectName, string? owner, List<RawDataDto>? rawRows, string? stateJson);
+    Task<Result<ProjectSaveResult>> SaveProjectAsync(Guid projectId, string projectName, string? owner, List<RawDataDto>? rawRows, string? stateJson, string? device = null, string? fileType = null, string? description = null);
 
     /// <summary>
     /// Retrieves the complete data and metadata for a specific project.

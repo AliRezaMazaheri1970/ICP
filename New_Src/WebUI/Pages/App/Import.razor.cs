@@ -1,5 +1,5 @@
 ﻿using Application.DTOs;
-using Application.Services; // این خط برای رفع خطای CS1061 ضروری است
+using Application.Services;
 using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.AspNetCore.Components.Routing;
 using MudBlazor;
@@ -9,47 +9,43 @@ namespace WebUI.Pages.App
 {
     public partial class Import
     {
+        // ============================================
+        // متغیرهای بخش آپلود (Tab 1)
+        // ============================================
         private IBrowserFile? selectedFile;
         private byte[]? fileContent;
         private string fileName = "";
+
+        // نام نمایشی فایل (برای نام پروژه)
         private string displayFileName = "";
+
         private string fileContentType = "";
         private long fileSizeBytes;
 
         private bool isViewer = false;
         private bool isLoading;
-        private string description = "";
 
-        private string projectName = "";
+        private string description = "";
         private string selectedDevice = "";
         private string selectedFileType = "";
-
         private bool skipLastRow = true;
-      
 
-        private List<string> deviceOptions = new()
-        {
-            "Mass elan9000 1",
-            "Mass elan9000 2",
-            "OES 715",
-            "OES 735 1",
-            "OES 735 2"
-        };
+        private List<string> deviceOptions = new() { "Mass elan9000 1", "Mass elan9000 2", "OES 715", "OES 735 1", "OES 735 2" };
+        private List<string> fileTypeOptions = new() { "oes 4cc", "oes 6cc", "txt format", "xlsx format" };
 
-        private List<string> fileTypeOptions = new()
-        {
-            "oes 4cc",
-            "oes 6cc",
-            "txt format",
-            "xlsx format"
-        };
         private AnalysisPreviewResult? analysisData;
 
-        private bool CanImport => fileContent != null
-                           && !string.IsNullOrWhiteSpace(displayFileName) 
-                           && !string.IsNullOrWhiteSpace(selectedDevice)
-                           && !isLoading
-                           && !isViewer;
+        // ============================================
+        // متغیرهای بخش مدیریت فایل‌ها (Tab 2)
+        // ============================================
+        private string filterContract = "";
+
+        // ✅ تغییر مهم: استفاده از کلاس UI Model به جای Entity اصلی
+        private List<ProjectUiModel> existingFiles = new();
+
+        // ============================================
+        // متدها
+        // ============================================
 
         protected override void OnInitialized()
         {
@@ -59,18 +55,35 @@ namespace WebUI.Pages.App
                 NavManager.NavigateTo("/login");
                 return;
             }
+            if (string.Equals(user.Position, "Viewer", StringComparison.OrdinalIgnoreCase)) isViewer = true;
 
-            if (string.Equals(user.Position, "Viewer", StringComparison.OrdinalIgnoreCase))
-            {
-                isViewer = true;
-            }
             selectedDevice = deviceOptions.FirstOrDefault() ?? "";
             selectedFileType = fileTypeOptions.FirstOrDefault() ?? "";
+
+            // ✅ مقداردهی دیتای دامی برای جدول (بدون خطا)
+            existingFiles = new List<ProjectUiModel>
+            {
+                new ProjectUiModel
+                {
+                    Id = 1,
+                    ProjectName = "1404-08-26 oes RET 1713 1745 1748 22009",
+                    CreatedBy = "Device Operator",
+                    Created = DateTime.Now.AddDays(-1),
+                    Device = "Mass elan9000 1"
+                },
+                new ProjectUiModel
+                {
+                    Id = 2,
+                    ProjectName = "1404-09-01 oes RET 1714 (test file)",
+                    CreatedBy = "Admin",
+                    Created = DateTime.Now,
+                    Device = "OES 735 1"
+                }
+            };
         }
 
         private void GoToDashboard() => NavManager.NavigateTo("/dashboard");
 
-   
         private async Task OnInputFileChangeStandard(InputFileChangeEventArgs e)
         {
             if (isViewer) return;
@@ -88,14 +101,13 @@ namespace WebUI.Pages.App
             {
                 selectedFile = file;
                 fileName = file.Name;
-                displayFileName = file.Name;
+                displayFileName = file.Name; // نام پیش‌فرض پروژه
                 fileContentType = file.ContentType ?? "application/octet-stream";
                 fileSizeBytes = file.Size;
 
                 using var ms = new MemoryStream();
                 await file.OpenReadStream(maxAllowedSize: 200 * 1024 * 1024).CopyToAsync(ms);
                 fileContent = ms.ToArray();
-
 
                 await DoPreview();
             }
@@ -115,30 +127,27 @@ namespace WebUI.Pages.App
             selectedFile = null;
             fileContent = null;
             fileName = "";
+            displayFileName = "";
             fileContentType = "";
             fileSizeBytes = 0;
             analysisData = null;
+            description = "";
         }
 
-     
         private async Task DoPreview()
         {
             if (fileContent == null || fileContent.Length == 0) return;
-
             try
             {
                 using var ms = new MemoryStream(fileContent);
                 var result = await ImportService.AnalyzeFileAsync(ms, fileName);
-
                 if (result.Succeeded && result.Data != null)
                 {
                     analysisData = result.Data;
-                
                     Snackbar.Add("Analysis completed", Severity.Success);
                 }
                 else
                 {
-                
                     var errorMsg = result.Messages?.FirstOrDefault() ?? "Analysis failed";
                     Snackbar.Add(errorMsg, Severity.Error);
                 }
@@ -151,7 +160,6 @@ namespace WebUI.Pages.App
 
         private async Task ReselectFile(InputFileChangeEventArgs e)
         {
-            
             await OnInputFileChangeStandard(e);
         }
 
@@ -172,26 +180,27 @@ namespace WebUI.Pages.App
             {
                 var user = AuthService.GetCurrentUser();
                 using var stream = new MemoryStream(fileContent);
+
+                // استفاده از نام ویرایش شده توسط کاربر
                 var finalProjectName = string.IsNullOrWhiteSpace(displayFileName)
                                      ? fileName
                                      : displayFileName;
 
-                var request = new AdvancedImportRequest(finalProjectName, user?.Name) 
+                var request = new AdvancedImportRequest(finalProjectName, user?.Name)
                 {
-                    SkipLastRow = skipLastRow
+                    SkipLastRow = skipLastRow,
+                    Device = selectedDevice,
+                    FileType = selectedFileType,
+                    Description = description
                 };
 
-                var result = await ImportService.ImportAdvancedAsync(
-                    stream,
-                    fileName,
-                    request);
+                var result = await ImportService.ImportAdvancedAsync(stream, fileName, request);
 
                 if (result.Succeeded)
                 {
-                
                     Snackbar.Add($"Project '{finalProjectName}' imported successfully!", Severity.Success);
-                    ClearFile(); 
-                    projectName = "";
+                    ClearFile();
+                    // اینجا می‌توانید بعد از آپلود موفق، لیست existingFiles را رفرش کنید
                 }
                 else
                 {
@@ -208,6 +217,8 @@ namespace WebUI.Pages.App
                 isLoading = false;
             }
         }
+
+        // Helpers
         private string GetFileIcon()
         {
             if (string.IsNullOrEmpty(fileName)) return Icons.Material.Filled.InsertDriveFile;
@@ -228,13 +239,28 @@ namespace WebUI.Pages.App
             return $"{bytes / 1048576.0:F1} MB";
         }
 
-    
+        private bool CanImport => fileContent != null
+                          && !string.IsNullOrWhiteSpace(displayFileName)
+                          && !string.IsNullOrWhiteSpace(selectedDevice)
+                          && !isLoading
+                          && !isViewer;
+
         private async Task OnBeforeNavigation(LocationChangingContext context)
         {
-            if (isLoading)
-            {
-                context.PreventNavigation();
-            }
+            if (isLoading) context.PreventNavigation();
+        }
+
+        // =========================================================
+        // ✅ کلاس مدل داخلی برای رفع خطا (DTO)
+        // =========================================================
+        public class ProjectUiModel
+        {
+            public int Id { get; set; }
+            public string ProjectName { get; set; } = "";
+            public string CreatedBy { get; set; } = "";
+            public DateTime Created { get; set; }
+            public string Device { get; set; } = "";
+            public bool Status { get; set; } = true;
         }
     }
 }

@@ -182,10 +182,10 @@ public class ImportService : IImportService
             // Get columns - either from detection or parse from first line
             var columns = detection.DetectedColumns;
             var delimiter = detection.DetectedDelimiter ?? ",";
-            
+
             int rowsRead = 0;
             string? line;
-            
+
             // Read first line for headers if not detected
             if ((columns == null || columns.Count == 0) && (line = await reader.ReadLineAsync()) != null)
             {
@@ -200,7 +200,7 @@ public class ImportService : IImportService
                 await reader.ReadLineAsync();
                 rowsRead++;
             }
-            
+
             // Ensure we have columns
             if (columns == null || columns.Count == 0)
             {
@@ -313,7 +313,10 @@ public class ImportService : IImportService
                         request.ProjectName,
                         request.Owner,
                         batch,
-                        null);
+                        null,
+                        request.Device,
+        request.FileType,
+        request.Description);
 
                     if (!saveResult.Succeeded)
                     {
@@ -337,7 +340,10 @@ public class ImportService : IImportService
                     request.ProjectName,
                     request.Owner,
                     batch,
-                    null);
+                    null,
+                    request.Device,
+        request.FileType,
+        request.Description);
 
                 if (!saveResult.Succeeded)
                 {
@@ -497,7 +503,10 @@ public class ImportService : IImportService
                         request.ProjectName,
                         request.Owner,
                         batch,
-                        null);
+                        null,
+                        request.Device,
+        request.FileType,
+        request.Description);
 
                     if (!saveResult.Succeeded)
                     {
@@ -521,7 +530,10 @@ public class ImportService : IImportService
                     request.ProjectName,
                     request.Owner,
                     batch,
-                    null);
+                    null,
+                    request.Device,
+        request.FileType,
+        request.Description);
 
                 if (!saveResult.Succeeded)
                 {

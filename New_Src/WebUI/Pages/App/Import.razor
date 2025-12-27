@@ -26,196 +26,222 @@
 
     @if (fileContent == null)
     {
-
-        <div class="mx-auto" style="max-width: 1000px;">
-
-            <div class="d-flex justify-space-between align-center mb-6">
-                <div>
-                    <MudText Typo="Typo.h3" Class="fw-bold">Import Data</MudText>
-                    <MudText Typo="Typo.subtitle1" Class="mud-text-secondary mt-1">Upload CSV or Excel files to start</MudText>
-                </div>
-                <MudButton StartIcon="@Icons.Material.Filled.ArrowBack"
-                           OnClick="GoToDashboard"
-                           Variant="Variant.Text"
-                           Color="Color.Default"
-                           Style="font-weight: bold; letter-spacing: 1px;">
-                    BACK
-                </MudButton>
-            </div>
-            @if (!isViewer)
+              @if (!isViewer)
             {
 
-                <MudPaper Elevation="0" Class="pa-8" Style="border-radius: 12px;">
-
-                    <div class="drop-zone-dashed d-flex flex-column align-center justify-center relative-container">
-
-                        <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Primary" Style="font-size: 5rem; opacity: 0.8;" Class="mb-4" />
-
-                        <MudText Typo="Typo.h5" Class="mb-2 fw-bold" Style="color: #455a64;">Drop file here or click to browse</MudText>
-
-                        <MudText Typo="Typo.body2" Class="mud-text-secondary">
-                            Supported formats: CSV, Excel, TXT
-                        </MudText>
-
-                        <InputFile OnChange="OnInputFileChangeStandard"
-                                   accept=".csv, .xlsx, .xls, .txt"
-                                   class="absolute-file-input" />
-
+            <div class="mx-auto" style="max-width: 1000px;">
+                <div class="d-flex justify-space-between align-center mb-6">
+                    <div>
+                        <MudText Typo="Typo.h3" Class="fw-bold">Import Data</MudText>
+                        <MudText Typo="Typo.subtitle1" Class="mud-text-secondary mt-1">Upload CSV or Excel files to start</MudText>
                     </div>
+                    <MudButton StartIcon="@Icons.Material.Filled.ArrowBack" OnClick="GoToDashboard" Variant="Variant.Text" Color="Color.Default" Style="font-weight: bold; letter-spacing: 1px;">BACK</MudButton>
+                </div>
 
+                <MudPaper Elevation="0" Class="pa-8 custom-card-all">
+                    <div class="drop-zone-dashed d-flex flex-column align-center justify-center relative-container">
+                        <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Primary" Style="font-size: 5rem; opacity: 0.8;" Class="mb-4" />
+                        <MudText Typo="Typo.h5" Class="mb-2 fw-bold" Style="color: #455a64;">Drop file here or click to browse</MudText>
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary">Supported formats: CSV, Excel, TXT</MudText>
+                        @if (!isViewer)
+                        {
+                            <InputFile OnChange="OnInputFileChangeStandard" accept=".csv, .xlsx, .xls, .txt" class="absolute-file-input" />
+                        }
+                    </div>
                 </MudPaper>
+            </div>
             }
             else
             {
-                <MudPaper Elevation="0" Class="pa-8" Style="border-radius: 12px;">
-
-                    <div class="drop-zone-dashed d-flex flex-column align-center justify-center relative-container">
-
-                        <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Style="font-size: 5rem; opacity: 0.8;" Class="mb-4" />
-
-                        <MudText Typo="Typo.h5" Class="mb-2 fw-bold" Style="color: #455a64;">Viewer is not upload projects</MudText>
-
+            <div class="mx-auto" style="max-width: 1000px;">
+                <div class="d-flex justify-space-between align-center mb-6">
+                    <div>
+                        <MudText Typo="Typo.h3" Class="fw-bold">Import Data</MudText>
+                        <MudText Typo="Typo.subtitle1" Class="mud-text-secondary mt-1">Upload CSV or Excel files to start</MudText>
                     </div>
+                    <MudButton StartIcon="@Icons.Material.Filled.ArrowBack" OnClick="GoToDashboard" Variant="Variant.Text" Color="Color.Default" Style="font-weight: bold; letter-spacing: 1px;">BACK</MudButton>
+                </div>
 
+                <MudPaper Elevation="0" Class="pa-8 white-card" Style="border-radius: 12px;">
+                    <div class="drop-zone-dashed d-flex flex-column align-center justify-center relative-container">
+                        <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Style="font-size: 5rem; opacity: 0.8;" Class="mb-4" />
+                        <MudText Typo="Typo.h5" Class="mb-2 fw-bold" Style="color: #455a64;">Viewer is not upload projects</MudText>
+                        
+                    </div>
                 </MudPaper>
+            </div>
             }
-        </div>
     }
     else
     {
-    
-        <MudPaper Elevation="3" Class="pa-4 custom-window" Style="width: 100%;">
+        <MudPaper Elevation="3" Class="custom-card-all" Style="width: 100%; overflow: hidden;">
 
-            <div class="d-flex justify-space-between align-center mb-4 border-bottom pb-2">
-                <MudText Typo="Typo.h6">File Management (Upload & CRUD)</MudText>
-                <MudIconButton Icon="@Icons.Material.Filled.Close" OnClick="ClearFile" Color="Color.Error" />
+            <div class="d-flex justify-space-between align-center px-4 py-2 border-bottom" style="background-color: #e0e0e0;">
+                <MudText Typo="Typo.h6" Style="font-size: 1rem; font-weight: bold;">File Management (Upload & CRUD)</MudText>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" OnClick="ClearFile" Size="Size.Small" Color="Color.Error" />
             </div>
 
-            <MudGrid Class="align-center mb-3">
-                <MudItem xs="12" md="2">
-                    <MudText Typo="Typo.subtitle2" Class="fw-bold">Project Name / File:</MudText>
-                </MudItem>
-                <MudItem xs="12" md="10">
-                    <div class="d-flex gap-2" style="width: 100%;">
+            <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="true" PanelClass="pa-4" Color="Color.Transparent" SliderColor="Color.Primary">
 
-                        <MudTextField @bind-Value="displayFileName"
-                                      Variant="Variant.Outlined"
-                                      Margin="Margin.Dense"
-                                      ReadOnly="false"
-                                      FullWidth="true"
-                                      Class="white-bg"
-                                      Placeholder="Project Name" />
+                <MudTabPanel Text="Upload New File">
 
-                        <div class="relative-container" style="width: auto; min-width: 130px;">
-                            <MudButton Variant="Variant.Filled"
-                                       Color="Color.Primary"
-                                       StartIcon="@Icons.Material.Filled.FolderOpen"
-                                       Class="select-file-btn"
-                                       FullWidth="true">
-                                Select File
-                            </MudButton>
-                            <InputFile OnChange="ReselectFile"
-                                       accept=".csv, .xlsx, .xls, .txt"
-                                       class="absolute-file-input" />
+                    <MudGrid Class="align-center mb-3">
+                        <MudItem xs="12" md="2">
+                            <MudText Typo="Typo.subtitle2" Class="fw-bold">Project Name:</MudText>
+                        </MudItem>
+                        <MudItem xs="12" md="10">
+                            <div class="d-flex gap-2" style="width: 100%;">
+                                <MudTextField @bind-Value="displayFileName" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="false" FullWidth="true" Class="white-bg" Placeholder="Project Name" />
+                                <div class="relative-container" style="width: auto; min-width: 130px;">
+                                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FolderOpen" Class="select-file-btn" FullWidth="true">Select File</MudButton>
+                                    <InputFile OnChange="ReselectFile" accept=".csv, .xlsx, .xls, .txt" class="absolute-file-input" />
+                                </div>
+                            </div>
+                        </MudItem>
+                    </MudGrid>
+
+                    <MudGrid Class="mb-2" Spacing="1">
+                        <MudItem xs="12" md="2"><MudText Typo="Typo.subtitle2">Extracted Contracts:</MudText></MudItem>
+                        <MudItem xs="12" md="10">
+                            <div class="console-box large-box">
+                                @if (analysisData?.Contracts != null)
+                                {
+                                    foreach (var item in analysisData.Contracts)
+                                    {
+                                        <div class="console-text">@item</div>
+                                    }
+                                }
+                            </div>
+                        </MudItem>
+                    </MudGrid>
+
+                    <MudGrid Class="mb-2" Spacing="1">
+                        <MudItem xs="12" md="2"><MudText Typo="Typo.subtitle2">Extracted CRMs:</MudText></MudItem>
+                        <MudItem xs="12" md="10">
+                            <div class="console-box medium-box">
+                                @if (analysisData?.CRMs != null)
+                                {
+                                    foreach (var item in analysisData.CRMs)
+                                    {
+                                        <div class="console-text">@item</div>
+                                    }
+                                }
+                            </div>
+                        </MudItem>
+                    </MudGrid>
+
+                    <MudGrid Class="mb-4" Spacing="1">
+                        <MudItem xs="12" md="2"><MudText Typo="Typo.subtitle2">Extracted Blanks:</MudText></MudItem>
+                        <MudItem xs="12" md="10">
+                            <div class="console-box medium-box">
+                                @if (analysisData?.Blanks != null)
+                                {
+                                    foreach (var item in analysisData.Blanks)
+                                    {
+                                        <div class="console-text">@item</div>
+                                    }
+                                }
+                            </div>
+                        </MudItem>
+                    </MudGrid>
+
+                    <MudDivider Class="mb-4" />
+
+                    <MudGrid Spacing="2">
+                        <MudItem xs="12" md="2" Class="d-flex align-center"><MudText Typo="Typo.subtitle2">Device:</MudText></MudItem>
+                        <MudItem xs="12" md="10">
+                            <MudSelect @bind-Value="selectedDevice" T="string" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Class="white-bg">
+                                @foreach (var device in deviceOptions)
+                                {
+                                    <MudSelectItem Value="@device">@device</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+
+                        <MudItem xs="12" md="2" Class="d-flex align-center"><MudText Typo="Typo.subtitle2">File Type:</MudText></MudItem>
+                        <MudItem xs="12" md="10">
+                            <MudSelect @bind-Value="selectedFileType" T="string" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Class="white-bg">
+                                @foreach (var type in fileTypeOptions)
+                                {
+                                    <MudSelectItem Value="@type">@type</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+
+                        <MudItem xs="12" md="2" Class="d-flex align-center"><MudText Typo="Typo.subtitle2">Description:</MudText></MudItem>
+                        <MudItem xs="12" md="10">
+                            <MudTextField @bind-Value="description" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="Optional notes..." Class="white-bg" />
+                        </MudItem>
+                    </MudGrid>
+
+                    <div class="d-flex justify-center mt-6 mb-2">
+                        <MudButton Variant="Variant.Filled" OnClick="ImportFile" Disabled="@(!CanImport)" Class="upload-btn" Style="width: 100%; height: 40px; background-color: #e0e0e0; color: black; border: 1px solid #ccc; font-weight: bold;">
+                            @if (isLoading)
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
+                                <span>Processing...</span>
+     }
+    else
+    {
+                                <span>Upload</span>
+                            }
+                        </MudButton>
+                    </div>
+
+                </MudTabPanel>
+
+                <MudTabPanel Text="Manage Existing Files">
+
+                    <div style="height: 600px; overflow-y: auto;">
+
+                        <MudGrid Class="mb-4 pa-2 border rounded" Style="background-color: #f9f9f9;">
+                            <MudItem xs="12" md="4">
+                                <MudTextField @bind-Value="filterContract" Label="Contract" Variant="Variant.Outlined" Margin="Margin.Dense" Class="white-bg" />
+                            </MudItem>
+                            <MudItem xs="12" md="4">
+                                <MudDateRangePicker Label="Upload Date Range" Variant="Variant.Outlined" Margin="Margin.Dense" Class="white-bg" />
+                            </MudItem>
+                            <MudItem xs="12" md="4" Class="d-flex align-center">
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true">Search</MudButton>
+                            </MudItem>
+                        </MudGrid>
+
+                        <MudTable Items="@existingFiles" Hover="true" Dense="true" Striped="true" Bordered="true" Elevation="0">
+                            <HeaderContent>
+                                <MudTh>Row</MudTh>
+                                <MudTh>File Name</MudTh>
+                                <MudTh>Uploaded By</MudTh>
+                                <MudTh>Device</MudTh>
+                                <MudTh>Upload Date</MudTh>
+                                <MudTh>Status</MudTh>
+                                <MudTh>Content Preview</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd DataLabel="Row">@context.Id</MudTd>
+                                <MudTd DataLabel="File Name">@context.ProjectName</MudTd>
+                                <MudTd DataLabel="Uploaded By">@context.CreatedBy</MudTd>
+                                <MudTd DataLabel="Device">Mass elan9000 1</MudTd>
+                                <MudTd DataLabel="Upload Date">@context.Created</MudTd>
+                                <MudTd DataLabel="Status">Active</MudTd>
+                                <MudTd DataLabel="Content Preview" Style="font-size: 0.8rem; color: #666;">
+
+                                    1713 with varieties...
+                                </MudTd>
+                            </RowTemplate>
+                        </MudTable>
+
+                        <div class="d-flex justify-end mt-4 gap-2">
+                            <MudButton Variant="Variant.Outlined" Size="Size.Small">Edit</MudButton>
+                            <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Error">Delete</MudButton>
+                            <MudButton Variant="Variant.Outlined" Size="Size.Small">Refresh</MudButton>
                         </div>
                     </div>
-                </MudItem>
-            </MudGrid>
 
-            <MudGrid Class="mb-2" Spacing="1">
-                <MudItem xs="12" md="2"><MudText Typo="Typo.subtitle2">Extracted Contracts:</MudText></MudItem>
-                <MudItem xs="12" md="10">
-                    <div class="console-box large-box">
-                        @if (analysisData?.Contracts != null)
-                        {
-                            foreach (var item in analysisData.Contracts)
-                            {
-                                <div class="console-text">@item</div>
-                            }
-                        }
-                    </div>
-                </MudItem>
-            </MudGrid>
+                </MudTabPanel>
 
-            <MudGrid Class="mb-2" Spacing="1">
-                <MudItem xs="12" md="2"><MudText Typo="Typo.subtitle2">Extracted CRMs:</MudText></MudItem>
-                <MudItem xs="12" md="10">
-                    <div class="console-box medium-box">
-                        @if (analysisData?.CRMs != null)
-                        {
-                            foreach (var item in analysisData.CRMs)
-                            {
-                                <div class="console-text">@item</div>
-                            }
-                        }
-                    </div>
-                </MudItem>
-            </MudGrid>
+            </MudTabs>
 
-            <MudGrid Class="mb-4" Spacing="1">
-                <MudItem xs="12" md="2"><MudText Typo="Typo.subtitle2">Extracted Blanks:</MudText></MudItem>
-                <MudItem xs="12" md="10">
-                    <div class="console-box medium-box">
-                        @if (analysisData?.Blanks != null)
-                        {
-                            foreach (var item in analysisData.Blanks)
-                            {
-                                <div class="console-text">@item</div>
-                            }
-                        }
-                    </div>
-                </MudItem>
-            </MudGrid>
-
-            <MudDivider Class="mb-4" />
-
-            <MudGrid Spacing="2">
-                <MudItem xs="12" md="2" Class="d-flex align-center"><MudText Typo="Typo.subtitle2">Device:</MudText></MudItem>
-                <MudItem xs="12" md="10">
-                    <MudSelect @bind-Value="selectedDevice" T="string" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Class="white-bg">
-                        @foreach (var device in deviceOptions)
-                        {
-                            <MudSelectItem Value="@device">@device</MudSelectItem>
-                        }
-                    </MudSelect>
-                </MudItem>
-
-                <MudItem xs="12" md="2" Class="d-flex align-center"><MudText Typo="Typo.subtitle2">File Type:</MudText></MudItem>
-                <MudItem xs="12" md="10">
-                    <MudSelect @bind-Value="selectedFileType" T="string" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Class="white-bg">
-                        @foreach (var type in fileTypeOptions)
-                        {
-                            <MudSelectItem Value="@type">@type</MudSelectItem>
-                        }
-                    </MudSelect>
-                </MudItem>
-
-
-                <MudItem xs="12" md="2" Class="d-flex align-center"><MudText Typo="Typo.subtitle2">Description:</MudText></MudItem>
-                <MudItem xs="12" md="10">
-                    <MudTextField @bind-Value="description"
-                                  Variant="Variant.Outlined"
-                                  Margin="Margin.Dense"
-                                  Placeholder="Optional notes (will not affect project name)..."
-                                  Class="white-bg" />
-                </MudItem>
-            </MudGrid>
-
-            <div class="d-flex justify-center mt-6 mb-2">
-                <MudButton Variant="Variant.Filled" OnClick="ImportFile" Disabled="@(!CanImport)" Class="upload-btn" Style="width: 100%; height: 40px; background-color: #e0e0e0; color: black; border: 1px solid #ccc; font-weight: bold;">
-                    @if (isLoading)
-                    {
-                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
-                        <span>Processing...</span>
-                    }
-                    else
-                    {
-                        <span>Upload</span>
-                    }
-                </MudButton>
-            </div>
-
-            <div class="d-flex justify-end">
+            <div class="d-flex justify-end px-4 py-2 border-top">
                 <MudButton Variant="Variant.Outlined" OnClick="ClearFile" Size="Size.Small" Color="Color.Error">Close</MudButton>
             </div>
 
@@ -225,11 +251,7 @@
 </MudContainer>
 
 <style>
- 
-    .white-card {
-        background-color: white;
-    }
-
+  
     .drop-zone-dashed {
         width: 100%;
         height: 350px;
@@ -239,17 +261,16 @@
     }
 
     .mud-theme-dark .drop-zone-dashed {
-        background-color: #e0e0e0; 
+        /* background-color: #e0e0e0; */
         border-color: #9e9e9e;
     }
 
-        .mud-theme-dark .drop-zone-dashed h5,
-        .mud-theme-dark .drop-zone-dashed p {
-            color: #424242 !important; 
+        .mud-theme-dark .drop-zone-dashed h5, .mud-theme-dark .drop-zone-dashed p {
+            color: #424242 !important;
         }
 
     .drop-zone-dashed:hover {
-        background-color: #d1ebff;
+        /* background-color: #d1ebff; */
         border-color: #224f7b;
     }
 
@@ -264,23 +285,17 @@
         z-index: 10;
     }
 
-    .custom-window {
-     
-        border: 1px solid #999;
-    }
-
     .mud-theme-dark .custom-window {
-        background-color: #333333; 
+        /* background-color: #333333; */
         border-color: #555;
     }
 
         .mud-theme-dark .custom-window .mud-typography {
-            color: #ffffff !important; 
+            color: #ffffff !important;
         }
 
-  
     .white-bg .mud-input-control-input-container {
-        background-color: white !important;
+        /* background-color: white !important; */
     }
 
     .white-bg .mud-input-slot {
@@ -292,7 +307,7 @@
     }
 
     .console-box {
-        background-color: #ffffff;
+        /* background-color: #ffffff; */
         border: 1px solid #a0a0a0;
         padding: 5px;
         overflow-y: auto;
@@ -331,5 +346,21 @@
     .relative-container {
         position: relative;
         width: 100%;
+    }
+
+    .mud-tabs-tabbar {
+        /* background-color: #e0e0e0; */
+        border-bottom: 1px solid #ccc;
+    }
+
+    .mud-tab {
+        min-width: 120px;
+        font-weight: bold;
+    }
+
+    .mud-tab-active {
+        /* background-color: #f0f0f0; */
+        border-bottom: 2px solid #1976d2;
+        color: #1976d2;
     }
 </style>

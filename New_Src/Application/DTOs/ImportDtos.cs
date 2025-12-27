@@ -78,7 +78,10 @@ public record AdvancedImportRequest(
     Dictionary<string, string>? ColumnMappings = null,
     bool SkipLastRow = true,
     bool AutoDetectType = true,
-    string? DefaultType = "Samp"
+    string? DefaultType = "Samp",
+    string? Device = null,
+    string? FileType = null,
+    string? Description = null
 );
 
 /// <summary>

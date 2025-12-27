@@ -33,7 +33,7 @@ public class ProjectPersistenceService : IProjectPersistenceService
     }
 
     /// <inheritdoc/>
-    public async Task<Result<ProjectSaveResult>> SaveProjectAsync(Guid projectId, string projectName, string? owner, List<RawDataDto>? rawRows, string? stateJson)
+    public async Task<Result<ProjectSaveResult>> SaveProjectAsync(Guid projectId, string projectName, string? owner, List<RawDataDto>? rawRows, string? stateJson, string? device = null, string? fileType = null, string? description = null)
     {
         // Use execution strategy for retry-safe transactions
         var strategy = _db.Database.CreateExecutionStrategy();
@@ -55,7 +55,10 @@ public class ProjectPersistenceService : IProjectPersistenceService
                         ProjectName = projectName,
                         CreatedAt = now,
                         LastModifiedAt = now,
-                        Owner = owner
+                        Owner = owner,
+                        Device = device ?? string.Empty,
+                        FileType = fileType ?? string.Empty,
+                        Description = description
                     };
                     _db.Projects.Add(project);
                 }
@@ -64,6 +67,10 @@ public class ProjectPersistenceService : IProjectPersistenceService
                     project.ProjectName = projectName;
                     project.LastModifiedAt = now;
                     project.Owner = owner;
+                    if (!string.IsNullOrEmpty(device)) project.Device = device;
+                    if (!string.IsNullOrEmpty(fileType)) project.FileType = fileType;
+                   
+                    if (description != null) project.Description = description;
                     _db.Projects.Update(project);
                 }
 
