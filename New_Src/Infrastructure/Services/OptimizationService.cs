@@ -638,6 +638,7 @@ public class OptimizationService : IOptimizationService
 
             var selections = await GetCrmSelectionMapAsync(projectId);
             var rows = await BuildCrmSelectionRowsAsync(projectId, crmMaps, selections);
+            await SaveDefaultCrmSelectionsAsync(projectId, rows);
 
             return Result<CrmSelectionOptionsResult>.Success(new CrmSelectionOptionsResult(rows));
         }
@@ -719,15 +720,12 @@ public class OptimizationService : IOptimizationService
         CrmDataMaps crmMaps,
         Dictionary<string, string> selections)
     {
-        var parsedRows = await LoadParsedRowsAsync(projectId);
+        var pivotRows = await LoadPivotRowsAsync(projectId);
         var result = new List<CrmSelectionRowDto>();
         var added = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var row in parsedRows)
+        foreach (var row in pivotRows)
         {
-            if (!IsSampleType(row.Type))
-                continue;
-
             var crmId = ExtractCrmId(row.SolutionLabel);
             if (crmId == null)
                 continue;
@@ -744,7 +742,7 @@ public class OptimizationService : IOptimizationService
                 continue;
 
             selections.TryGetValue(rowKey, out var selectedKey);
-            if (string.IsNullOrWhiteSpace(selectedKey) && preferred.Count == 1)
+            if (string.IsNullOrWhiteSpace(selectedKey) && preferred.Count > 0)
             {
                 selectedKey = preferred[0];
             }
@@ -761,6 +759,24 @@ public class OptimizationService : IOptimizationService
         }
 
         return result;
+    }
+
+    private async Task SaveDefaultCrmSelectionsAsync(Guid projectId, List<CrmSelectionRowDto> rows)
+    {
+        var defaults = rows
+            .Where(r => !string.IsNullOrWhiteSpace(r.SelectedOption))
+            .Select(r => new CrmSelectionItemDto(r.SolutionLabel, r.RowIndex, r.SelectedOption!))
+            .ToList();
+
+        if (defaults.Count == 0)
+            return;
+
+        var request = new CrmSelectionSaveRequest(projectId, defaults);
+        var result = await SaveCrmSelectionsAsync(request, null);
+        if (!result.Succeeded)
+        {
+            _logger.LogWarning("Failed to auto-save default CRM selections for project {ProjectId}.", projectId);
+        }
     }
 
     public async Task<object> GetDebugSamplesAsync(Guid projectId)
@@ -784,6 +800,114 @@ public class OptimizationService : IOptimizationService
             sampleLabels = labels.Take(50).ToList(),
             totalCrm = crmIds.Count,
             sampleCrm = crmIds.Take(50).ToList()
+        };
+    }
+
+    public async Task<object> GetPivotPreviewAsync(Guid projectId, int take, IEnumerable<string>? elements)
+    {
+        var pivotRows = await LoadPivotRowsAsync(projectId);
+        var safeTake = take <= 0 ? 10 : take;
+        var selected = pivotRows.Take(safeTake).ToList();
+
+        var elementList = elements?
+            .Where(e => !string.IsNullOrWhiteSpace(e))
+            .Select(e => e!.Trim())
+            .DistinctBy(e => e, StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? new List<string>();
+
+        if (elementList.Count == 0)
+        {
+            var discovered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var row in pivotRows)
+            {
+                foreach (var key in row.Values.Keys)
+                    discovered.Add(key);
+
+                if (discovered.Count >= 8)
+                    break;
+            }
+
+            elementList = discovered.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        var rows = selected
+            .Select(r => new
+            {
+                r.RowIndex,
+                r.SolutionLabel,
+                Values = elementList.ToDictionary(
+                    key => key,
+                    key => r.Values.TryGetValue(key, out var v) ? v : null)
+            })
+            .ToList();
+
+        return new
+        {
+            elements = elementList,
+            rows
+        };
+    }
+
+    public async Task<object> GetCrmPreviewAsync(string crmId, string? method, IEnumerable<string>? elements)
+    {
+        if (string.IsNullOrWhiteSpace(crmId))
+        {
+            return new { found = false, message = "crmId is required." };
+        }
+
+        var normalized = crmId.Trim();
+        var crmPrefix = $"OREAS {normalized}";
+        var query = _db.CrmData.AsNoTracking()
+            .Where(c => c.CrmId != null && c.CrmId.StartsWith(crmPrefix));
+
+        if (!string.IsNullOrWhiteSpace(method))
+        {
+            var trimmed = method.Trim();
+            query = query.Where(c => c.AnalysisMethod != null && c.AnalysisMethod == trimmed);
+        }
+
+        var crm = await query.OrderBy(c => c.CrmId).FirstOrDefaultAsync();
+        if (crm == null)
+        {
+            return new { found = false, message = "CRM record not found." };
+        }
+
+        Dictionary<string, decimal>? values;
+        try
+        {
+            values = JsonSerializer.Deserialize<Dictionary<string, decimal>>(crm.ElementValues);
+        }
+        catch
+        {
+            values = null;
+        }
+
+        values ??= new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+
+        var elementList = elements?
+            .Where(e => !string.IsNullOrWhiteSpace(e))
+            .Select(e => e!.Trim())
+            .DistinctBy(e => e, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (elementList == null || elementList.Count == 0)
+        {
+            elementList = values.Keys.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).Take(20).ToList();
+        }
+
+        var selected = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in elementList)
+        {
+            var symbol = key.Split(' ')[0];
+            selected[key] = values.TryGetValue(symbol, out var v) ? v : null;
+        }
+
+        return new
+        {
+            found = true,
+            crmId = crm.CrmId,
+            method = crm.AnalysisMethod,
+            values = selected
         };
     }
 
@@ -939,32 +1063,59 @@ public class OptimizationService : IOptimizationService
         public string ColumnData { get; set; } = "";
     }
 
-    private sealed class ParsedRow
+    private sealed class SampleRecord
     {
-        public ParsedRow(
+        public SampleRecord(
             string solutionLabel,
-            string type,
             string element,
-            decimal? corrCon,
-            decimal? solnConc,
-            int originalIndex)
+            decimal? value,
+            int originalIndex,
+            int positionInSolution)
         {
             SolutionLabel = solutionLabel;
-            Type = type;
             Element = element;
-            CorrCon = corrCon;
-            SolnConc = solnConc;
+            Value = value;
             OriginalIndex = originalIndex;
-            RowIndex = originalIndex;
+            PositionInSolution = positionInSolution;
         }
 
         public string SolutionLabel { get; }
-        public string Type { get; }
         public string Element { get; }
-        public decimal? CorrCon { get; }
-        public decimal? SolnConc { get; }
+        public decimal? Value { get; }
         public int OriginalIndex { get; }
-        public int RowIndex { get; set; }
+        public int PositionInSolution { get; }
+        public int GroupId { get; set; }
+        public int Uid { get; set; }
+        public string ColumnKey { get; set; } = "";
+    }
+
+    private sealed class PivotRow
+    {
+        public PivotRow(string solutionLabel, int rowIndex, Dictionary<string, decimal?> values)
+        {
+            SolutionLabel = solutionLabel;
+            RowIndex = rowIndex;
+            Values = values;
+        }
+
+        public string SolutionLabel { get; }
+        public int RowIndex { get; }
+        public Dictionary<string, decimal?> Values { get; }
+    }
+
+    private sealed class PivotRowBucket
+    {
+        public PivotRowBucket(string solutionLabel, int groupId, int firstIndex)
+        {
+            SolutionLabel = solutionLabel;
+            GroupId = groupId;
+            FirstIndex = firstIndex;
+        }
+
+        public string SolutionLabel { get; }
+        public int GroupId { get; }
+        public int FirstIndex { get; set; }
+        public Dictionary<string, decimal?> Values { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     private static string? TryGetString(JsonElement root, string propName)
@@ -984,6 +1135,25 @@ public class OptimizationService : IOptimizationService
             return string.Empty;
 
         return rawElement.Trim();
+    }
+
+    private static string NormalizeSolutionLabel(string label)
+    {
+        if (string.IsNullOrWhiteSpace(label))
+            return "Unknown";
+
+        var trimmed = label.Trim();
+        return string.Equals(trimmed, "nan", StringComparison.OrdinalIgnoreCase) ? "Unknown" : trimmed;
+    }
+
+    private static string NormalizeElementForPivot(string rawElement)
+    {
+        var cleaned = ExtractElementKey(rawElement);
+        if (string.IsNullOrWhiteSpace(cleaned))
+            return string.Empty;
+
+        var parts = cleaned.Split('_', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length > 0 ? parts[0].Trim() : cleaned.Trim();
     }
 
     private static string ExtractElementSymbol(string elementKey)
@@ -1052,7 +1222,7 @@ public class OptimizationService : IOptimizationService
         => $"{solutionLabel}::{rowIndex}";
 
     private Dictionary<string, decimal> ComputeBestBlankValues(
-        List<ParsedRow> rows,
+        List<PivotRow> rows,
         CrmDataMaps crmMaps,
         HashSet<string>? includedCrmIds,
         Dictionary<string, string>? rowSelections,
@@ -1068,25 +1238,24 @@ public class OptimizationService : IOptimizationService
 
         foreach (var row in rows)
         {
-            if (string.IsNullOrWhiteSpace(row.SolutionLabel) || string.IsNullOrWhiteSpace(row.Element))
-                continue;
-
-            if (!IsSampleType(row.Type))
+            if (string.IsNullOrWhiteSpace(row.SolutionLabel))
                 continue;
 
             if (BlankPattern.IsMatch(row.SolutionLabel))
             {
-                var candidate = row.CorrCon ?? row.SolnConc;
-                if (!candidate.HasValue)
-                    continue;
-
-                if (!blankCandidates.TryGetValue(row.Element, out var blankList))
+                foreach (var kvp in row.Values)
                 {
-                    blankList = new List<decimal>();
-                    blankCandidates[row.Element] = blankList;
-                }
+                    if (!kvp.Value.HasValue)
+                        continue;
 
-                blankList.Add(candidate.Value);
+                    if (!blankCandidates.TryGetValue(kvp.Key, out var blankList))
+                    {
+                        blankList = new List<decimal>();
+                        blankCandidates[kvp.Key] = blankList;
+                    }
+
+                    blankList.Add(kvp.Value.Value);
+                }
                 continue;
             }
 
@@ -1106,21 +1275,23 @@ public class OptimizationService : IOptimizationService
             if (string.IsNullOrWhiteSpace(selectedKey) || !crmMaps.ByKey.TryGetValue(selectedKey!, out var crmValues))
                 continue;
 
-            var crmSymbol = ExtractElementSymbol(row.Element);
-            if (!crmValues.TryGetValue(crmSymbol, out var crmValue))
-                continue;
-
-            var sampleValue = row.CorrCon ?? row.SolnConc;
-            if (!sampleValue.HasValue)
-                continue;
-
-            if (!crmSamples.TryGetValue(row.Element, out var crmList))
+            foreach (var kvp in row.Values)
             {
-                crmList = new List<(decimal SampleValue, decimal CrmValue)>();
-                crmSamples[row.Element] = crmList;
-            }
+                if (!kvp.Value.HasValue)
+                    continue;
 
-            crmList.Add((sampleValue.Value, crmValue));
+                var crmSymbol = ExtractElementSymbol(kvp.Key);
+                if (!crmValues.TryGetValue(crmSymbol, out var crmValue))
+                    continue;
+
+                if (!crmSamples.TryGetValue(kvp.Key, out var crmList))
+                {
+                    crmList = new List<(decimal SampleValue, decimal CrmValue)>();
+                    crmSamples[kvp.Key] = crmList;
+                }
+
+                crmList.Add((kvp.Value.Value, crmValue));
+            }
         }
 
         var best = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
@@ -1183,84 +1354,6 @@ public class OptimizationService : IOptimizationService
         return best;
     }
 
-    private static void AssignRowIndexes(List<ParsedRow> rows)
-    {
-        var setSizes = CalculateSetSizes(rows);
-        var groupedBySolution = rows.GroupBy(r => r.SolutionLabel);
-
-        foreach (var group in groupedBySolution)
-        {
-            var solutionLabel = group.Key;
-            var setSize = setSizes.GetValueOrDefault(solutionLabel, 1);
-            var orderedRows = group.OrderBy(r => r.OriginalIndex).ToList();
-            var sets = DivideIntoSets(orderedRows, setSize);
-
-            foreach (var set in sets)
-            {
-                if (!set.Any())
-                    continue;
-
-                var rowIndex = set.First().OriginalIndex;
-                foreach (var row in set)
-                {
-                    row.RowIndex = rowIndex;
-                }
-            }
-        }
-    }
-
-    private static Dictionary<string, int> CalculateSetSizes(List<ParsedRow> rawData)
-    {
-        var setSizes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var groupedBySolution = rawData.GroupBy(r => r.SolutionLabel);
-
-        foreach (var group in groupedBySolution)
-        {
-            var rows = group.ToList();
-            var elementCounts = rows.GroupBy(r => r.Element).Select(g => g.Count()).ToArray();
-
-            if (elementCounts.Length > 0)
-            {
-                int gcd = elementCounts.Aggregate(GCD);
-                int totalRows = rows.Count;
-                if (gcd > 0 && totalRows % gcd == 0)
-                {
-                    setSizes[group.Key] = totalRows / gcd;
-                }
-                else
-                {
-                    setSizes[group.Key] = totalRows;
-                }
-            }
-            else
-            {
-                setSizes[group.Key] = 1;
-            }
-        }
-
-        return setSizes;
-    }
-
-    private static List<List<ParsedRow>> DivideIntoSets(List<ParsedRow> rows, int setSize)
-    {
-        var sets = new List<List<ParsedRow>>();
-        if (setSize <= 0 || rows.Count == 0 || rows.Count % setSize != 0)
-        {
-            sets.Add(rows);
-            return sets;
-        }
-
-        int rowsPerSet = setSize;
-        for (int i = 0; i < rows.Count; i += rowsPerSet)
-        {
-            var set = rows.Skip(i).Take(rowsPerSet).ToList();
-            if (set.Any())
-                sets.Add(set);
-        }
-
-        return sets;
-    }
-
     private static int GCD(int a, int b)
     {
         while (b != 0)
@@ -1272,15 +1365,26 @@ public class OptimizationService : IOptimizationService
         return a;
     }
 
-    private async Task<List<ParsedRow>> LoadParsedRowsAsync(Guid projectId)
+    private static int GCDList(IEnumerable<int> values)
+    {
+        int result = 0;
+        foreach (var v in values)
+        {
+            result = result == 0 ? v : GCD(result, v);
+        }
+        return result == 0 ? 1 : result;
+    }
+
+    private async Task<List<PivotRow>> LoadPivotRowsAsync(Guid projectId)
     {
         var rawRows = await _db.RawDataRows.AsNoTracking()
             .Where(r => r.ProjectId == projectId)
             .OrderBy(r => r.DataId)
             .ToListAsync();
 
-        var parsedRows = new List<ParsedRow>();
-        int index = 0;
+        var samples = new List<SampleRecord>();
+        var solutionGroups = new Dictionary<string, List<SampleRecord>>(StringComparer.OrdinalIgnoreCase);
+        int sampleIndex = 0;
 
         foreach (var row in rawRows)
         {
@@ -1294,13 +1398,27 @@ public class OptimizationService : IOptimizationService
 
                 var solutionLabel = TryGetString(root, "Solution Label") ?? row.SampleId ?? "";
                 var type = TryGetString(root, "Type") ?? "";
+                if (!IsSampleType(type))
+                    continue;
+
                 var elementRaw = TryGetString(root, "Element") ?? "";
-                var element = ExtractElementKey(elementRaw);
+                var element = NormalizeElementForPivot(elementRaw);
 
                 decimal? corrCon = TryGetDecimal(root, "Corr Con", out var cc) ? cc : null;
-                decimal? solnConc = TryGetDecimal(root, "Soln Conc", out var sc) ? sc : null;
+                var value = corrCon;
 
-                parsedRows.Add(new ParsedRow(solutionLabel, type, element, corrCon, solnConc, index++));
+                var normalizedLabel = NormalizeSolutionLabel(solutionLabel);
+
+                if (!solutionGroups.TryGetValue(normalizedLabel, out var list))
+                {
+                    list = new List<SampleRecord>();
+                    solutionGroups[normalizedLabel] = list;
+                }
+
+                var record = new SampleRecord(normalizedLabel, element, value, sampleIndex, list.Count);
+                list.Add(record);
+                samples.Add(record);
+                sampleIndex++;
             }
             catch
             {
@@ -1308,8 +1426,109 @@ public class OptimizationService : IOptimizationService
             }
         }
 
-        AssignRowIndexes(parsedRows);
-        return parsedRows;
+        if (samples.Count == 0)
+            return new List<PivotRow>();
+
+        var mostCommonSizes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in solutionGroups)
+        {
+            var group = kvp.Value;
+            var counts = group.GroupBy(r => r.Element)
+                .Select(g => g.Count())
+                .ToList();
+            var total = group.Count;
+            if (counts.Count > 0)
+            {
+                var gcd = GCDList(counts);
+                mostCommonSizes[kvp.Key] = gcd > 1 && total % gcd == 0 ? total / gcd : total;
+            }
+            else
+            {
+                mostCommonSizes[kvp.Key] = total > 0 ? total : 1;
+            }
+        }
+
+        var repeatCounter = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        bool hasRepeats = false;
+        foreach (var rec in samples)
+        {
+            var size = mostCommonSizes.GetValueOrDefault(rec.SolutionLabel, 1);
+            rec.GroupId = size > 0 ? rec.PositionInSolution / size : 0;
+            var key = $"{rec.SolutionLabel}::{rec.GroupId}::{rec.Element}";
+            var count = repeatCounter.GetValueOrDefault(key) + 1;
+            repeatCounter[key] = count;
+            if (count > 1)
+            {
+                hasRepeats = true;
+                break;
+            }
+        }
+
+        var rowBuckets = new Dictionary<string, PivotRowBucket>(StringComparer.OrdinalIgnoreCase);
+
+        if (hasRepeats)
+        {
+            var occCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var rec in samples)
+            {
+                var key = $"{rec.SolutionLabel}::{rec.GroupId}::{rec.Element}";
+                occCounts[key] = occCounts.GetValueOrDefault(key) + 1;
+            }
+
+            var occCounter = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var rec in samples)
+            {
+                var key = $"{rec.SolutionLabel}::{rec.GroupId}::{rec.Element}";
+                var count = occCounts[key];
+                var idx = occCounter.GetValueOrDefault(key) + 1;
+                occCounter[key] = idx;
+                rec.ColumnKey = count > 1 ? $"{rec.Element}_{idx}" : rec.Element;
+
+                var rowKey = $"{rec.SolutionLabel}::{rec.GroupId}";
+                if (!rowBuckets.TryGetValue(rowKey, out var bucket))
+                {
+                    bucket = new PivotRowBucket(rec.SolutionLabel, rec.GroupId, rec.OriginalIndex);
+                    rowBuckets[rowKey] = bucket;
+                }
+
+                bucket.FirstIndex = Math.Min(bucket.FirstIndex, rec.OriginalIndex);
+                bucket.Values[rec.ColumnKey] = rec.Value;
+            }
+        }
+        else
+        {
+            var uidMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var rec in samples)
+            {
+                var uidKey = $"{rec.SolutionLabel}::{rec.Element}";
+                var uid = uidMap.GetValueOrDefault(uidKey) + 1;
+                uidMap[uidKey] = uid;
+                rec.Uid = uid - 1;
+
+                var rowKey = $"{rec.SolutionLabel}::{rec.Uid}";
+                if (!rowBuckets.TryGetValue(rowKey, out var bucket))
+                {
+                    bucket = new PivotRowBucket(rec.SolutionLabel, rec.Uid, rec.OriginalIndex);
+                    rowBuckets[rowKey] = bucket;
+                }
+
+                bucket.FirstIndex = Math.Min(bucket.FirstIndex, rec.OriginalIndex);
+                bucket.Values[rec.Element] = rec.Value;
+            }
+        }
+
+        var ordered = rowBuckets.Values
+            .OrderBy(r => r.FirstIndex)
+            .ToList();
+
+        var pivotRows = new List<PivotRow>(ordered.Count);
+        for (int i = 0; i < ordered.Count; i++)
+        {
+            var bucket = ordered[i];
+            pivotRows.Add(new PivotRow(bucket.SolutionLabel, i, bucket.Values));
+        }
+
+        return pivotRows;
     }
 
     // ---------------------------
@@ -1328,10 +1547,10 @@ public class OptimizationService : IOptimizationService
         decimal rangeHigh3,
         decimal rangeHigh4)
     {
-        var parsedRows = await LoadParsedRowsAsync(projectId);
+        var pivotRows = await LoadPivotRowsAsync(projectId);
 
         var blankValues = ComputeBestBlankValues(
-            parsedRows,
+            pivotRows,
             crmMaps,
             includedCrmIds,
             rowSelections,
@@ -1343,7 +1562,7 @@ public class OptimizationService : IOptimizationService
             rangeHigh4);
         var result = new List<RmSampleData>();
 
-        foreach (var row in parsedRows)
+        foreach (var row in pivotRows)
         {
             if (string.IsNullOrWhiteSpace(row.SolutionLabel))
                 continue;
@@ -1354,22 +1573,15 @@ public class OptimizationService : IOptimizationService
             if (includedCrmIds != null && includedCrmIds.Count > 0 && !includedCrmIds.Contains(crmId))
                 continue;
 
-            if (string.IsNullOrWhiteSpace(row.Element))
+            if (row.Values.Count == 0)
                 continue;
 
-            var conc = row.CorrCon ?? row.SolnConc;
-            if (!conc.HasValue)
-                continue;
-
-            var values = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase)
+            var values = new Dictionary<string, decimal?>(row.Values, StringComparer.OrdinalIgnoreCase);
+            var blanks = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var key in row.Values.Keys)
             {
-                [row.Element] = conc.Value
-            };
-
-            var blanks = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase)
-            {
-                [row.Element] = blankValues.TryGetValue(row.Element, out var bv) ? bv : 0m
-            };
+                blanks[key] = blankValues.TryGetValue(key, out var bv) ? bv : 0m;
+            }
 
             result.Add(new RmSampleData(row.SolutionLabel, row.RowIndex, values, blanks));
         }

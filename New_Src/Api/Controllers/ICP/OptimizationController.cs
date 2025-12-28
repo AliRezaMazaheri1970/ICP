@@ -149,6 +149,32 @@ public class OptimizationController : ControllerBase
     }
 
     /// <summary>
+    /// Returns a small pivot preview for debugging (row order + selected element values).
+    /// </summary>
+    [HttpGet("{projectId:guid}/pivot-preview")]
+    public async Task<ActionResult> GetPivotPreview(
+        Guid projectId,
+        [FromQuery] int take = 10,
+        [FromQuery] string[]? elements = null)
+    {
+        var result = await _optimizationService.GetPivotPreviewAsync(projectId, take, elements);
+        return Ok(new { succeeded = true, data = result });
+    }
+
+    /// <summary>
+    /// Returns CRM reference values for a CRM id + method (debug helper).
+    /// </summary>
+    [HttpGet("crm-preview")]
+    public async Task<ActionResult> GetCrmPreview(
+        [FromQuery] string crmId,
+        [FromQuery] string? method = null,
+        [FromQuery] string[]? elements = null)
+    {
+        var result = await _optimizationService.GetCrmPreviewAsync(crmId, method, elements);
+        return Ok(new { succeeded = true, data = result });
+    }
+
+    /// <summary>
     /// Saves per-row CRM selections for a project.
     /// </summary>
     [HttpPost("{projectId:guid}/crm-selections")]

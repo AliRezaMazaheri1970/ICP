@@ -58,6 +58,16 @@ public interface IOptimizationService
     Task<Result<CrmSelectionOptionsResult>> GetCrmSelectionOptionsAsync(Guid projectId);
 
     /// <summary>
+    /// Returns a small pivot preview for debugging (row order + selected element values).
+    /// </summary>
+    Task<object> GetPivotPreviewAsync(Guid projectId, int take, IEnumerable<string>? elements);
+
+    /// <summary>
+    /// Returns CRM reference values for a CRM id + method, limited to requested elements.
+    /// </summary>
+    Task<object> GetCrmPreviewAsync(string crmId, string? method, IEnumerable<string>? elements);
+
+    /// <summary>
     /// Saves per-row CRM selections for a project.
     /// </summary>
     Task<Result<bool>> SaveCrmSelectionsAsync(CrmSelectionSaveRequest request, string? selectedBy);
