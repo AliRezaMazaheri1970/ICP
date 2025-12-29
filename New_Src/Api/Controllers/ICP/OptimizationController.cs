@@ -175,6 +175,32 @@ public class OptimizationController : ControllerBase
     }
 
     /// <summary>
+    /// Returns best-blank debug info (candidates + selected) for requested elements.
+    /// </summary>
+    [HttpGet("{projectId:guid}/blank-preview")]
+    public async Task<ActionResult> GetBlankPreview(
+        Guid projectId,
+        [FromQuery] string[]? elements = null,
+        [FromQuery] decimal rangeLow = 2m,
+        [FromQuery] decimal rangeMid = 20m,
+        [FromQuery] decimal rangeHigh1 = 10m,
+        [FromQuery] decimal rangeHigh2 = 8m,
+        [FromQuery] decimal rangeHigh3 = 5m,
+        [FromQuery] decimal rangeHigh4 = 3m)
+    {
+        var result = await _optimizationService.GetBlankPreviewAsync(
+            projectId,
+            elements,
+            rangeLow,
+            rangeMid,
+            rangeHigh1,
+            rangeHigh2,
+            rangeHigh3,
+            rangeHigh4);
+        return Ok(new { succeeded = true, data = result });
+    }
+
+    /// <summary>
     /// Saves per-row CRM selections for a project.
     /// </summary>
     [HttpPost("{projectId:guid}/crm-selections")]

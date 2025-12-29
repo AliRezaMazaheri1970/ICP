@@ -68,6 +68,11 @@ public interface IOptimizationService
     Task<object> GetCrmPreviewAsync(string crmId, string? method, IEnumerable<string>? elements);
 
     /// <summary>
+    /// Returns best-blank debug info (candidates + selected) for requested elements.
+    /// </summary>
+    Task<object> GetBlankPreviewAsync(Guid projectId, IEnumerable<string>? elements, decimal rangeLow, decimal rangeMid, decimal rangeHigh1, decimal rangeHigh2, decimal rangeHigh3, decimal rangeHigh4);
+
+    /// <summary>
     /// Saves per-row CRM selections for a project.
     /// </summary>
     Task<Result<bool>> SaveCrmSelectionsAsync(CrmSelectionSaveRequest request, string? selectedBy);

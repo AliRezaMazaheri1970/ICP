@@ -13,8 +13,8 @@ namespace Infrastructure.Services;
 
 /// <summary>
 /// Blank & Scale optimization service (Python-aligned).
-/// Optimization uses blank rows to compute blank adjustment, but exposed Blank values are the
-/// effective blanks to subtract: corrected = (original - effectiveBlank) * scale.
+/// Optimization uses blank rows to compute blank adjustment; exposed Blank values are the
+/// blank_adjust term used in: corrected = (original - blank_val + blank_adjust) * scale.
 ///
 /// Key fixes:
 /// - CRM duplicate-safe (CrmId duplicates won't crash)
@@ -34,9 +34,12 @@ public class OptimizationService : IOptimizationService
         @"(?i)(?:CRM\s*)?(?:BLANK|BLNK|Blank|blnk|blank)(?:\s+.*)?",
         RegexOptions.Compiled);
 
-    private const double DefaultCR = 0.7;     // scipy-like default crossover
-    private const double Tolerance = 0.01;    // convergence tolerance
-    private const int ConvergenceWindow = 10; // generations without improvement
+    private const double DefaultCR = 0.7;        // scipy default recombination
+    private const double DefaultMutationMin = 0.5;
+    private const double DefaultMutationMax = 1.0;
+    private const int DefaultPopSizeMultiplier = 15;
+    private const int DefaultMaxIterations = 1000;
+    private const double Tolerance = 0.01;       // scipy default tol
 
     public OptimizationService(IsatisDbContext db, ILogger<OptimizationService> logger)
     {
@@ -187,11 +190,10 @@ public class OptimizationService : IOptimizationService
                     request.ScaleRangeMax,
                     request.ScaleAbove50Only);
                 var baseBlank = GetBaseBlankValue(matchedData, element);
-                var effectiveBlank = baseBlank - optimalBlank;
-
+                var recommendedBlank = baseBlank - optimalBlank;
                 elementOptimizations[element] = new ElementOptimization(
                     element,
-                    effectiveBlank,
+                    recommendedBlank,
                     optimalScale,
                     passedBefore,
                     passedAfter,
@@ -736,23 +738,29 @@ public class OptimizationService : IOptimizationService
             var preferred = crmMaps.PreferredKeysByNumber.TryGetValue(crmId, out var pref) && pref.Count > 0
                 ? pref
                 : allKeys;
+            var preferredOrdered = preferred.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+            var allOrdered = allKeys.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
 
             var rowKey = BuildRowKey(row.SolutionLabel, row.RowIndex);
             if (added.Contains(rowKey))
                 continue;
 
             selections.TryGetValue(rowKey, out var selectedKey);
-            if (string.IsNullOrWhiteSpace(selectedKey) && preferred.Count > 0)
+            if (preferredOrdered.Count > 0)
             {
-                selectedKey = preferred[0];
+                if (string.IsNullOrWhiteSpace(selectedKey) ||
+                    !preferredOrdered.Contains(selectedKey, StringComparer.OrdinalIgnoreCase))
+                {
+                    selectedKey = preferredOrdered[^1];
+                }
             }
 
             result.Add(new CrmSelectionRowDto(
                 row.SolutionLabel,
                 row.RowIndex,
                 crmId,
-                preferred.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
-                allKeys.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
+                preferredOrdered,
+                allOrdered,
                 selectedKey));
 
             added.Add(rowKey);
@@ -908,6 +916,174 @@ public class OptimizationService : IOptimizationService
             crmId = crm.CrmId,
             method = crm.AnalysisMethod,
             values = selected
+        };
+    }
+
+    public async Task<object> GetBlankPreviewAsync(
+        Guid projectId,
+        IEnumerable<string>? elements,
+        decimal rangeLow,
+        decimal rangeMid,
+        decimal rangeHigh1,
+        decimal rangeHigh2,
+        decimal rangeHigh3,
+        decimal rangeHigh4)
+    {
+        var pivotRows = await LoadPivotRowsAsync(projectId);
+        if (pivotRows.Count == 0)
+        {
+            return new { found = false, message = "No pivot rows found." };
+        }
+
+        var crmMaps = await GetCrmDataMapsAsync();
+        if (crmMaps.ByKey.Count == 0)
+        {
+            return new { found = false, message = "No CRM data found." };
+        }
+
+        var elementList = elements?
+            .Where(e => !string.IsNullOrWhiteSpace(e))
+            .Select(e => e!.Trim())
+            .DistinctBy(e => e, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (elementList == null || elementList.Count == 0)
+        {
+            var discovered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var row in pivotRows)
+            {
+                foreach (var key in row.Values.Keys)
+                    discovered.Add(key);
+
+                if (discovered.Count >= 8)
+                    break;
+            }
+            elementList = discovered.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        var blankCandidates = new Dictionary<string, List<decimal>>(StringComparer.OrdinalIgnoreCase);
+        var blankDetails = new Dictionary<string, List<object>>(StringComparer.OrdinalIgnoreCase);
+        var crmSamples = new Dictionary<string, List<(decimal SampleValue, decimal CrmValue)>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var row in pivotRows)
+        {
+            if (string.IsNullOrWhiteSpace(row.SolutionLabel))
+                continue;
+
+            if (BlankPattern.IsMatch(row.SolutionLabel))
+            {
+                foreach (var kvp in row.Values)
+                {
+                    if (!kvp.Value.HasValue)
+                        continue;
+
+                    if (!blankCandidates.TryGetValue(kvp.Key, out var list))
+                    {
+                        list = new List<decimal>();
+                        blankCandidates[kvp.Key] = list;
+                    }
+                    list.Add(kvp.Value.Value);
+
+                    if (!blankDetails.TryGetValue(kvp.Key, out var detailList))
+                    {
+                        detailList = new List<object>();
+                        blankDetails[kvp.Key] = detailList;
+                    }
+                    detailList.Add(new { rowIndex = row.RowIndex, label = row.SolutionLabel, value = kvp.Value.Value });
+                }
+                continue;
+            }
+
+            var crmId = ExtractCrmId(row.SolutionLabel);
+            if (crmId == null)
+                continue;
+
+            crmMaps.DefaultKeyByNumber.TryGetValue(crmId, out var selectedKey);
+            if (string.IsNullOrWhiteSpace(selectedKey) || !crmMaps.ByKey.TryGetValue(selectedKey!, out var crmValues))
+                continue;
+
+            foreach (var kvp in row.Values)
+            {
+                if (!kvp.Value.HasValue)
+                    continue;
+
+                var symbol = ExtractElementSymbol(kvp.Key);
+                if (!crmValues.TryGetValue(symbol, out var crmValue))
+                    continue;
+
+                if (!crmSamples.TryGetValue(kvp.Key, out var list))
+                {
+                    list = new List<(decimal SampleValue, decimal CrmValue)>();
+                    crmSamples[kvp.Key] = list;
+                }
+                list.Add((kvp.Value.Value, crmValue));
+            }
+        }
+
+        var results = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var element in elementList)
+        {
+            if (!blankCandidates.TryGetValue(element, out var candidates))
+            {
+                results[element] = new { bestBlank = 0m, candidates = Array.Empty<decimal>() };
+                continue;
+            }
+
+            var sampleList = crmSamples.TryGetValue(element, out var samples) ? samples : new List<(decimal, decimal)>();
+            var bestBlank = 0m;
+            var minDistance = decimal.MaxValue;
+            var inRangeFound = false;
+
+            foreach (var candidate in candidates)
+            {
+                foreach (var (sampleValue, crmValue) in sampleList)
+                {
+                    var corrected = sampleValue - candidate;
+                    var range = CalculateDynamicRange(
+                        crmValue,
+                        rangeLow,
+                        rangeMid,
+                        rangeHigh1,
+                        rangeHigh2,
+                        rangeHigh3,
+                        rangeHigh4);
+                    var lower = crmValue - range;
+                    var upper = crmValue + range;
+
+                    if (corrected >= lower && corrected <= upper)
+                    {
+                        bestBlank = candidate;
+                        inRangeFound = true;
+                        break;
+                    }
+
+                    var distance = Math.Abs(corrected - crmValue);
+                    if (distance < minDistance)
+                    {
+                        minDistance = distance;
+                        bestBlank = candidate;
+                    }
+                }
+
+                if (inRangeFound)
+                    break;
+            }
+
+            results[element] = new
+            {
+                bestBlank,
+                candidateOrder = candidates.ToList(),
+                candidates = candidates.Distinct().OrderBy(x => x).ToList(),
+                candidateDetails = blankDetails.TryGetValue(element, out var details) ? details : new List<object>(),
+                sampleCount = sampleList.Count
+            };
+        }
+
+        return new
+        {
+            found = true,
+            elements = results
         };
     }
 
@@ -1594,12 +1770,15 @@ public class OptimizationService : IOptimizationService
     /// </summary>
     private async Task<CrmDataMaps> GetCrmDataMapsAsync(Dictionary<string, string>? crmSelections = null)
     {
-        var crmRecords = await _db.CrmData.AsNoTracking().ToListAsync();
+        var crmRecords = await _db.CrmData.AsNoTracking()
+            .OrderBy(c => c.Id)
+            .ToListAsync();
         var preferredMethods = new[] { "4-Acid Digestion", "Aqua Regia Digestion" };
 
         var byKey = new Dictionary<string, Dictionary<string, decimal>>(StringComparer.OrdinalIgnoreCase);
         var allKeysByNumber = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         var preferredKeysByNumber = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        var methodOrderByNumber = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         var keyToMethod = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var crm in crmRecords)
@@ -1636,6 +1815,17 @@ public class OptimizationService : IOptimizationService
             }
             allList.Add(key);
 
+            if (!methodOrderByNumber.TryGetValue(number, out var methodList))
+            {
+                methodList = new List<string>();
+                methodOrderByNumber[number] = methodList;
+            }
+            if (!string.IsNullOrWhiteSpace(crm.AnalysisMethod) &&
+                !methodList.Contains(crm.AnalysisMethod, StringComparer.OrdinalIgnoreCase))
+            {
+                methodList.Add(crm.AnalysisMethod);
+            }
+
             if (!string.IsNullOrWhiteSpace(crm.AnalysisMethod) &&
                 preferredMethods.Any(m => string.Equals(m, crm.AnalysisMethod, StringComparison.OrdinalIgnoreCase)))
             {
@@ -1657,6 +1847,9 @@ public class OptimizationService : IOptimizationService
             var prefKeys = preferredKeysByNumber.TryGetValue(number, out var pref)
                 ? pref.OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToList()
                 : new List<string>();
+            var methodOrder = methodOrderByNumber.TryGetValue(number, out var methods)
+                ? methods
+                : new List<string>();
 
             string? selected = null;
             if (crmSelections != null && crmSelections.TryGetValue(number, out var selectedMethod))
@@ -1665,7 +1858,26 @@ public class OptimizationService : IOptimizationService
                     string.Equals(keyToMethod.GetValueOrDefault(k), selectedMethod, StringComparison.OrdinalIgnoreCase));
             }
 
-            selected ??= prefKeys.FirstOrDefault() ?? allKeys.FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(selected))
+            {
+                string? chosenMethod = null;
+                if (methodOrder.Count > 0)
+                {
+                    chosenMethod = methodOrder.FirstOrDefault(m =>
+                        preferredMethods.Any(p => string.Equals(p, m, StringComparison.OrdinalIgnoreCase)))
+                        ?? methodOrder[0];
+                }
+
+                if (!string.IsNullOrWhiteSpace(chosenMethod))
+                {
+                    var matches = allKeys
+                        .Where(k => string.Equals(keyToMethod.GetValueOrDefault(k), chosenMethod, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    selected = matches.LastOrDefault();
+                }
+            }
+
+            selected ??= allKeys.LastOrDefault();
 
             if (!string.IsNullOrWhiteSpace(selected))
                 defaultKeyByNumber[number] = selected!;
@@ -2127,18 +2339,16 @@ public class OptimizationService : IOptimizationService
             rangeHigh3,
             rangeHigh4);
 
-        var modelADistance = modelA.Scale == 1m ? (double?)null : modelB.AvgDistance;
-
         var candidates = new List<ModelCandidate>
         {
-            new("A", modelA.Blank, modelA.Scale, modelA.Passed, modelADistance),
+            new("A", modelA.Blank, modelA.Scale, modelA.Passed, double.PositiveInfinity),
             new("B", modelB.Blank, modelB.Scale, modelB.Passed, modelB.AvgDistance),
             new("C", modelC.Blank, modelC.Scale, modelC.Passed, modelC.AvgDistance)
         };
 
         var best = candidates
             .OrderByDescending(c => c.Passed)
-            .ThenByDescending(c => c.Distance.HasValue ? -c.Distance.Value : double.PositiveInfinity)
+            .ThenBy(c => c.Distance ?? double.PositiveInfinity)
             .First();
 
         return (best.Blank, best.Scale, best.Passed, best.Model);
@@ -2622,7 +2832,10 @@ public class OptimizationService : IOptimizationService
         int maxIterations,
         int populationSize)
     {
-        var size = Math.Max(populationSize, 6);
+        var dimensions = 2;
+        var popMultiplier = populationSize > 0 ? Math.Max(populationSize, DefaultPopSizeMultiplier) : DefaultPopSizeMultiplier;
+        var size = Math.Max(popMultiplier * dimensions, 6);
+        var iterations = maxIterations > 0 ? Math.Max(maxIterations, DefaultMaxIterations) : DefaultMaxIterations;
         var population = new List<(double Blank, double Scale)>(size);
 
         for (int i = 0; i < size; i++)
@@ -2636,17 +2849,14 @@ public class OptimizationService : IOptimizationService
             .Select(p => -objective(p.Blank, p.Scale))
             .ToList();
 
-        double previousBest = fitness.Max();
-        int stagnant = 0;
-
-        for (int iter = 0; iter < maxIterations; iter++)
+        for (int iter = 0; iter < iterations; iter++)
         {
             int bestIdx = fitness.IndexOf(fitness.Max());
             var best = population[bestIdx];
 
             for (int i = 0; i < size; i++)
             {
-                double F = 0.5 + _random.NextDouble() * 0.5;
+                double F = DefaultMutationMin + _random.NextDouble() * (DefaultMutationMax - DefaultMutationMin);
                 double CR = DefaultCR;
 
                 var candidates = Enumerable.Range(0, size)
@@ -2674,17 +2884,6 @@ public class OptimizationService : IOptimizationService
                     fitness[i] = trialFitness;
                 }
             }
-
-            var currentBest = fitness.Max();
-            if (Math.Abs(currentBest - previousBest) < Tolerance)
-                stagnant++;
-            else
-                stagnant = 0;
-
-            if (stagnant >= ConvergenceWindow)
-                break;
-
-            previousBest = currentBest;
         }
 
         int finalBestIdx = fitness.IndexOf(fitness.Max());
