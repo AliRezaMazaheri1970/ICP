@@ -35,7 +35,6 @@ namespace WebUI.Pages.Process
         private HashSet<string> _includedCrmIds = new(StringComparer.OrdinalIgnoreCase);
         private string _excludedLabelsInput = string.Empty;
         private List<CrmSelectionRowDto> _crmSelectionRows = new();
-        private Dictionary<string, bool> _showAllMethods = new(StringComparer.OrdinalIgnoreCase);
 
         // Scale Application Range (Python feature)
         private decimal? _scaleRangeMin;
@@ -108,11 +107,6 @@ namespace WebUI.Pages.Process
             if (result.Succeeded && result.Data != null)
             {
                 _crmSelectionRows = result.Data.Items;
-                _showAllMethods.Clear();
-                foreach (var row in _crmSelectionRows)
-                {
-                    _showAllMethods[GetRowKey(row)] = false;
-                }
             }
             else if (!string.IsNullOrWhiteSpace(result.Message))
             {
@@ -120,36 +114,32 @@ namespace WebUI.Pages.Process
             }
         }
 
-        private static string GetRowKey(CrmSelectionRowDto row)
-            => $"{row.SolutionLabel}::{row.RowIndex}";
-
         private List<string> GetRowOptions(CrmSelectionRowDto row)
         {
-            var key = GetRowKey(row);
-            if (_showAllMethods.TryGetValue(key, out var showAll) && showAll)
-                return row.AllOptions;
+            var options = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            return row.PreferredOptions.Count > 0 ? row.PreferredOptions : row.AllOptions;
-        }
+            foreach (var opt in row.PreferredOptions)
+            {
+                if (seen.Add(opt))
+                    options.Add(opt);
+            }
 
-        private bool GetShowAll(CrmSelectionRowDto row)
-        {
-            return _showAllMethods.TryGetValue(GetRowKey(row), out var showAll) && showAll;
-        }
+            foreach (var opt in row.AllOptions)
+            {
+                if (seen.Add(opt))
+                    options.Add(opt);
+            }
 
-        private EventCallback<bool> GetShowAllChangedHandler(CrmSelectionRowDto row)
-        {
-            return EventCallback.Factory.Create<bool>(this, v => ToggleShowAll(row, v));
+            if (!string.IsNullOrWhiteSpace(row.SelectedOption) && seen.Add(row.SelectedOption))
+                options.Insert(0, row.SelectedOption);
+
+            return options;
         }
 
         private EventCallback<string> GetRowSelectionChangedHandler(CrmSelectionRowDto row)
         {
             return EventCallback.Factory.Create<string>(this, v => SaveRowSelectionAsync(row, v));
-        }
-
-        private void ToggleShowAll(CrmSelectionRowDto row, bool value)
-        {
-            _showAllMethods[GetRowKey(row)] = value;
         }
 
         private async Task SaveRowSelectionAsync(CrmSelectionRowDto row, string? selected)

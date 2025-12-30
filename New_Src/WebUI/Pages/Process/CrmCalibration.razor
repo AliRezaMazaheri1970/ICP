@@ -130,7 +130,6 @@
                                 <MudTh>Label</MudTh>
                                 <MudTh>Row</MudTh>
                                 <MudTh>Selection</MudTh>
-                                <MudTh>More</MudTh>
                             </HeaderContent>
                             <RowTemplate>
                                 <MudTd>@context.SolutionLabel</MudTd>
@@ -146,13 +145,6 @@
                                             <MudSelectItem Value="@opt">@opt</MudSelectItem>
                                         }
                                     </MudSelect>
-                                </MudTd>
-                                <MudTd>
-                                    <MudCheckBox T="bool"
-                                                 Checked="@GetShowAll(context)"
-                                                 CheckedChanged="@GetShowAllChangedHandler(context)"
-                                                 Label="More"
-                                                 Dense="true" />
                                 </MudTd>
                             </RowTemplate>
                         </MudTable>
