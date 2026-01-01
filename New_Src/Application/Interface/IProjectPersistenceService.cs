@@ -32,7 +32,10 @@ public record ProjectLoadDto(
     DateTime LastModifiedAt,
     string? Owner,
     List<RawDataDto> RawRows,
-    string? LatestStateJson
+    string? LatestStateJson,
+    string? Device = null,
+    string? FileType = null,
+    string? Description = null
 );
 
 /// <summary>
@@ -50,7 +53,9 @@ public record ProjectListItemDto(
     DateTime CreatedAt,
     DateTime LastModifiedAt,
     string? Owner,
-    int RawRowsCount
+    int RawRowsCount,
+    string? Device = null,
+    string? FileType = null
 );
 
 /// <summary>

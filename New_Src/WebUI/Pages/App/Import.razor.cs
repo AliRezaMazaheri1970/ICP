@@ -4,11 +4,19 @@ using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.AspNetCore.Components.Routing;
 using MudBlazor;
 using WebUI.Services;
+using WebUI.Models;
+using WebUI.Shared;
 
 namespace WebUI.Pages.App
 {
     public partial class Import
     {
+        // کنترل نمایش پنجره دو تبی (وقتی یک فایل انتخاب شد)
+        private bool isWindowOpen = false;
+
+        // بعد از آپلود موفق: دکمه آپلود غیرفعال بماند
+        private bool uploadCompleted = false;
+
         // ============================================
         // متغیرهای بخش آپلود (Tab 1)
         // ============================================
@@ -39,9 +47,9 @@ namespace WebUI.Pages.App
         // متغیرهای بخش مدیریت فایل‌ها (Tab 2)
         // ============================================
         private string filterContract = "";
-
-        // ✅ تغییر مهم: استفاده از کلاس UI Model به جای Entity اصلی
         private List<ProjectUiModel> existingFiles = new();
+        private ProjectUiModel? selectedItem;
+        private bool isItemSelected => selectedItem != null;
 
         // ============================================
         // متدها
@@ -60,12 +68,12 @@ namespace WebUI.Pages.App
             selectedDevice = deviceOptions.FirstOrDefault() ?? "";
             selectedFileType = fileTypeOptions.FirstOrDefault() ?? "";
 
-            // ✅ مقداردهی دیتای دامی برای جدول (بدون خطا)
+            // demo data
             existingFiles = new List<ProjectUiModel>
             {
                 new ProjectUiModel
                 {
-                    Id = 1,
+                    Id = Guid.NewGuid(),
                     ProjectName = "1404-08-26 oes RET 1713 1745 1748 22009",
                     CreatedBy = "Device Operator",
                     Created = DateTime.Now.AddDays(-1),
@@ -73,7 +81,7 @@ namespace WebUI.Pages.App
                 },
                 new ProjectUiModel
                 {
-                    Id = 2,
+                    Id = Guid.NewGuid(),
                     ProjectName = "1404-09-01 oes RET 1714 (test file)",
                     CreatedBy = "Admin",
                     Created = DateTime.Now,
@@ -110,6 +118,10 @@ namespace WebUI.Pages.App
                 fileContent = ms.ToArray();
 
                 await DoPreview();
+                // باز نگه داشتن پنجره دو تب بعد از پردازش فایل
+                isWindowOpen = true;
+                // Load existing projects for Manage tab
+                await LoadExistingFilesAsync();
             }
             catch (Exception ex)
             {
@@ -122,6 +134,11 @@ namespace WebUI.Pages.App
             }
         }
 
+        private async Task ReselectFile(InputFileChangeEventArgs e)
+        {
+            await OnInputFileChangeStandard(e);
+        }
+
         private void ClearFile()
         {
             selectedFile = null;
@@ -132,6 +149,11 @@ namespace WebUI.Pages.App
             fileSizeBytes = 0;
             analysisData = null;
             description = "";
+            // بستن پنجره دو تب وقتی کاربر Close یا X را می‌زند
+            isWindowOpen = false;
+            // ریست وضعیت آپلود
+            uploadCompleted = false;
+            selectedItem = null;
         }
 
         private async Task DoPreview()
@@ -156,11 +178,6 @@ namespace WebUI.Pages.App
             {
                 Snackbar.Add($"Error: {ex.Message}", Severity.Error);
             }
-        }
-
-        private async Task ReselectFile(InputFileChangeEventArgs e)
-        {
-            await OnInputFileChangeStandard(e);
         }
 
         private async Task ImportFile()
@@ -199,8 +216,10 @@ namespace WebUI.Pages.App
                 if (result.Succeeded)
                 {
                     Snackbar.Add($"Project '{finalProjectName}' imported successfully!", Severity.Success);
-                    ClearFile();
-                    // اینجا می‌توانید بعد از آپلود موفق، لیست existingFiles را رفرش کنید
+                    // علامت می‌زنیم که عملیات آپلود کامل شده تا دکمه Upload غیرفعال بماند
+                    uploadCompleted = true;
+                    // رفرش لیست پروژه‌های موجود از سرور/دیتابیس
+                    await LoadExistingFilesAsync();
                 }
                 else
                 {
@@ -216,6 +235,142 @@ namespace WebUI.Pages.App
             {
                 isLoading = false;
             }
+        }
+
+        private async Task LoadExistingFilesAsync()
+        {
+            try
+            {
+                var res = await ProjectService.GetProjectsAsync();
+                if (res.Succeeded && res.Data != null)
+                {
+                    existingFiles = res.Data.Select(p => new ProjectUiModel
+                    {
+                        Id = p.ProjectId,
+                        ProjectName = p.ProjectName,
+                        CreatedBy = p.Owner ?? "",
+                        Created = p.CreatedAt,
+                        Device = p.Device ?? string.Empty,
+                        FileType = p.FileType ?? string.Empty,
+                        Description = p.Description ?? string.Empty
+                    }).ToList();
+                }
+                else
+                {
+                    Snackbar.Add(res.Message ?? "Failed to load projects", Severity.Warning);
+                }
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Error loading projects: {ex.Message}", Severity.Error);
+            }
+            StateHasChanged();
+        }
+
+        private void OnRowClicked(TableRowClickEventArgs<ProjectUiModel> args)
+        {
+            selectedItem = args.Item;
+            StateHasChanged();
+        }
+
+        private string? RowClassFunc(ProjectUiModel item) => item == selectedItem ? "selected" : null;
+
+        private async Task ConfirmDelete()
+        {
+            if (selectedItem == null) return;
+
+            var parameters = new MudBlazor.DialogParameters { ["ProjectName"] = selectedItem.ProjectName };
+            var options = new MudBlazor.DialogOptions { CloseButton = false };
+            var dialog = await DialogService.ShowAsync<ConfirmDeleteDialog>("Are you sure?", parameters, options);
+            var res = await dialog.Result;
+            if (res != null && !res.Canceled)
+            {
+                // Check admin role
+                var user = AuthService.GetCurrentUser();
+                if (user != null && string.Equals(user.Position, "Admin", StringComparison.OrdinalIgnoreCase))
+                {
+                    var serverRes = await ProjectService.DeleteProjectAsync(selectedItem.Id);
+                    if (serverRes.Succeeded)
+                    {
+                        Snackbar.Add("Project deleted.", Severity.Success);
+                        await LoadExistingFilesAsync();
+                        selectedItem = null;
+                    }
+                    else
+                    {
+                        Snackbar.Add(serverRes.Message ?? "Failed to delete project.", Severity.Error);
+                    }
+                }
+                else
+                {
+                    Snackbar.Add("You do not have permission to delete projects.", Severity.Error);
+                }
+            }
+        }
+
+        private async Task OpenEditDialog()
+        {
+            if (selectedItem == null) return;
+            // Fetch latest project details from server to prefill dialog
+            var projRes = await ProjectService.GetProjectAsync(selectedItem.Id);
+            if (!projRes.Succeeded || projRes.Data == null)
+            {
+                Snackbar.Add(projRes.Message ?? "Failed to load project details.", Severity.Error);
+                return;
+            }
+
+            var info = projRes.Data;
+
+            // Ensure the options lists contain the current values so MudSelect can display them
+            var deviceOpts = new List<string>(deviceOptions);
+            var fileTypeOpts = new List<string>(fileTypeOptions);
+            if (!string.IsNullOrWhiteSpace(info.Device) && !deviceOpts.Contains(info.Device))
+                deviceOpts.Insert(0, info.Device);
+            if (!string.IsNullOrWhiteSpace(info.FileType) && !fileTypeOpts.Contains(info.FileType))
+                fileTypeOpts.Insert(0, info.FileType);
+
+            var parameters = new MudBlazor.DialogParameters
+            {
+                ["Item"] = new ProjectUiModel
+                {
+                    Id = info.ProjectId,
+                    ProjectName = info.ProjectName ?? string.Empty,
+                    CreatedBy = info.Owner ?? string.Empty,
+                    Created = info.CreatedAt,
+                    Device = info.Device ?? string.Empty,
+                    FileType = info.FileType ?? string.Empty,
+                    Description = info.Description ?? string.Empty
+                },
+                ["DeviceOptions"] = deviceOpts,
+                ["FileTypeOptions"] = fileTypeOpts
+            };
+
+            var dialog = await DialogService.ShowAsync<EditProjectDialog>("Edit Project", parameters);
+            var res = await dialog.Result;
+            if (res != null && !res.Canceled)
+            {
+                var updated = res.Data as ProjectUiModel;
+                if (updated != null)
+                {
+                    var serverRes = await ProjectService.UpdateProjectAsync(updated.Id, updated.ProjectName, updated.Device, updated.FileType, updated.Description);
+                    if (serverRes.Succeeded)
+                    {
+                        Snackbar.Add("Project updated successfully.", Severity.Success);
+                        // refresh from server to ensure DB state is shown
+                        await LoadExistingFilesAsync();
+                        selectedItem = existingFiles.FirstOrDefault(x => x.Id == updated.Id);
+                    }
+                    else
+                    {
+                        Snackbar.Add(serverRes.Message ?? "Failed to update project.", Severity.Error);
+                    }
+                }
+            }
+        }
+
+        private async Task RefreshList()
+        {
+            await LoadExistingFilesAsync();
         }
 
         // Helpers
@@ -243,24 +398,12 @@ namespace WebUI.Pages.App
                           && !string.IsNullOrWhiteSpace(displayFileName)
                           && !string.IsNullOrWhiteSpace(selectedDevice)
                           && !isLoading
-                          && !isViewer;
+                          && !isViewer
+                          && !uploadCompleted;
 
         private async Task OnBeforeNavigation(LocationChangingContext context)
         {
             if (isLoading) context.PreventNavigation();
-        }
-
-        // =========================================================
-        // ✅ کلاس مدل داخلی برای رفع خطا (DTO)
-        // =========================================================
-        public class ProjectUiModel
-        {
-            public int Id { get; set; }
-            public string ProjectName { get; set; } = "";
-            public string CreatedBy { get; set; } = "";
-            public DateTime Created { get; set; }
-            public string Device { get; set; } = "";
-            public bool Status { get; set; } = true;
         }
     }
 }

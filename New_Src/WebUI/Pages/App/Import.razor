@@ -5,6 +5,8 @@
 @using Application.Services
 @inject AuthService AuthService
 @inject IImportService ImportService
+@inject ProjectService ProjectService
+@inject MudBlazor.IDialogService DialogService
 @inject NavigationManager NavManager
 @inject ISnackbar Snackbar
 
@@ -24,7 +26,7 @@
 
 <MudContainer MaxWidth="MaxWidth.False" Class="mt-6 px-6">
 
-    @if (fileContent == null)
+    @if (!isWindowOpen)
     {
               @if (!isViewer)
             {
@@ -175,7 +177,7 @@
                     </MudGrid>
 
                     <div class="d-flex justify-center mt-6 mb-2">
-                        <MudButton Variant="Variant.Filled" OnClick="ImportFile" Disabled="@(!CanImport)" Class="upload-btn" Style="width: 100%; height: 40px; background-color: #e0e0e0; color: black; border: 1px solid #ccc; font-weight: bold;">
+                        <MudButton Variant="Variant.Filled" OnClick="ImportFile" Disabled="@(!CanImport || uploadCompleted)" Class="upload-btn" Style="width: 100%; height: 40px; background-color: #e0e0e0; color: black; border: 1px solid #ccc; font-weight: bold;">
                             @if (isLoading)
                             {
                                 <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
@@ -194,7 +196,7 @@
 
                     <div style="height: 600px; overflow-y: auto;">
 
-                        <MudGrid Class="mb-4 pa-2 border rounded" Style="background-color: #f9f9f9;">
+                        <MudGrid Class="mb-4 pa-2 border rounded" Style="background-color: #f9f9f9; position: relative; z-index: 3;">
                             <MudItem xs="12" md="4">
                                 <MudTextField @bind-Value="filterContract" Label="Contract" Variant="Variant.Outlined" Margin="Margin.Dense" Class="white-bg" />
                             </MudItem>
@@ -206,7 +208,8 @@
                             </MudItem>
                         </MudGrid>
 
-                        <MudTable Items="@existingFiles" Hover="true" Dense="true" Striped="true" Bordered="true" Elevation="0">
+                        <div class="table-scroll">
+                            <MudTable Items="@existingFiles" @bind-SelectedItem="selectedItem" Hover="true" Dense="true" Striped="true" Bordered="true" Elevation="0" RowClick="OnRowClicked" RowClass="RowClassFunc" FixedHeader="true" Height="420px">
                             <HeaderContent>
                                 <MudTh>Row</MudTh>
                                 <MudTh>File Name</MudTh>
@@ -217,23 +220,23 @@
                                 <MudTh>Content Preview</MudTh>
                             </HeaderContent>
                             <RowTemplate>
-                                <MudTd DataLabel="Row">@context.Id</MudTd>
+                                <MudTd DataLabel="Row">@(existingFiles.IndexOf(context) + 1)</MudTd>
                                 <MudTd DataLabel="File Name">@context.ProjectName</MudTd>
                                 <MudTd DataLabel="Uploaded By">@context.CreatedBy</MudTd>
-                                <MudTd DataLabel="Device">Mass elan9000 1</MudTd>
+                                <MudTd DataLabel="Device">@context.Device</MudTd>
                                 <MudTd DataLabel="Upload Date">@context.Created</MudTd>
-                                <MudTd DataLabel="Status">Active</MudTd>
+                                <MudTd DataLabel="Status">@(context.Status ? "Active" : "Inactive")</MudTd>
                                 <MudTd DataLabel="Content Preview" Style="font-size: 0.8rem; color: #666;">
-
                                     1713 with varieties...
                                 </MudTd>
                             </RowTemplate>
-                        </MudTable>
+                            </MudTable>
+                        </div>
 
-                        <div class="d-flex justify-end mt-4 gap-2">
-                            <MudButton Variant="Variant.Outlined" Size="Size.Small">Edit</MudButton>
-                            <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Error">Delete</MudButton>
-                            <MudButton Variant="Variant.Outlined" Size="Size.Small">Refresh</MudButton>
+                        <div class="table-footer d-flex justify-end mt-2 gap-2">
+                            <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="@(selectedItem == null)" OnClick="@OpenEditDialog">Edit</MudButton>
+                            <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Error" Disabled="@(selectedItem == null)" OnClick="@ConfirmDelete">Delete</MudButton>
+                            <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="@RefreshList">Refresh</MudButton>
                         </div>
                     </div>
 
@@ -362,5 +365,32 @@
         /* background-color: #f0f0f0; */
         border-bottom: 2px solid #1976d2;
         color: #1976d2;
+    }
+
+    /* Table scrolling with sticky header */
+    .table-scroll {
+        height: 420px; /* kept for outer container */
+        overflow-y: hidden; /* inner table will handle scrolling when FixedHeader is used */
+    }
+
+    .table-footer {
+        position: sticky;
+        bottom: 0;
+        padding-top: 8px;
+        background: transparent;
+        z-index: 6;
+    }
+
+    /* highlight selected row - stronger blue and white text for clarity */
+    .selected-row,
+    .mud-table-row.selected {
+        background-color: #1976d2 !important;
+        color: #ffffff !important;
+    }
+
+    .selected-row td,
+    .mud-table-row.selected td {
+        background-color: #1976d2 !important;
+        color: #ffffff !important;
     }
 </style>

@@ -125,7 +125,10 @@ public class ProjectPersistenceService : IProjectPersistenceService
                     p.ProjectName,
                     p.CreatedAt,
                     p.LastModifiedAt,
-                    p.Owner
+                    p.Owner,
+                    p.Device,
+                    p.FileType,
+                    p.Description
                 })
                 .FirstOrDefaultAsync();
 
@@ -151,7 +154,7 @@ public class ProjectPersistenceService : IProjectPersistenceService
                 latestState = stateResult.Data;
             }
 
-            var dto = new ProjectLoadDto(project.ProjectId, project.ProjectName, project.CreatedAt, project.LastModifiedAt, project.Owner, rawRows, latestState);
+            var dto = new ProjectLoadDto(project.ProjectId, project.ProjectName, project.CreatedAt, project.LastModifiedAt, project.Owner, rawRows, latestState, project.Device, project.FileType, project.Description);
 
             return Result<ProjectLoadDto>.Success(dto);
         }
@@ -308,7 +311,9 @@ public class ProjectPersistenceService : IProjectPersistenceService
                     p.CreatedAt,
                     p.LastModifiedAt,
                     p.Owner,
-                    p.RawDataRows.Count
+                    p.RawDataRows.Count,
+                    p.Device,
+                    p.FileType
                 ))
                 .ToListAsync();
 
