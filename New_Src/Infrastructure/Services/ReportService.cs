@@ -245,6 +245,7 @@ public class ReportService : IReportService
         {
             var pivotResult = await _pivotService.GetPivotTableAsync(new PivotRequest(
                 projectId,
+                DecimalPlaces: 6,
                 PageSize: int.MaxValue
             ));
 

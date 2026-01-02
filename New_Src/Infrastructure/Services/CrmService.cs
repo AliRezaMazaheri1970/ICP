@@ -542,6 +542,7 @@ public class CrmService : ICrmService
     }
 
     private sealed record CrmOption(
+        int Id,
         string Key,
         string CrmId,
         string AnalysisMethod,
@@ -981,7 +982,7 @@ public class CrmService : ICrmService
                 normalized[symbol] = kvp.Value;
             }
 
-            var option = new CrmOption(key, row.CrmId, method, normalized);
+            var option = new CrmOption(row.Id, key, row.CrmId, method, normalized);
             all.Add(option);
             if (allowedMethods.Contains(method))
                 preferred.Add(option);
@@ -1004,18 +1005,28 @@ public class CrmService : ICrmService
             return selected;
         }
 
-        if (options.Preferred.Count > 0)
-        {
-            if (options.Preferred.Count == 1)
-                return options.Preferred[0].Key;
+        var candidates = options.Preferred.Count > 0 ? options.Preferred : options.All;
+        if (candidates.Count == 0)
+            return null;
 
-            return options.Preferred
-                .OrderBy(o => o.Key, StringComparer.OrdinalIgnoreCase)
-                .First()
-                .Key;
+        var method = candidates
+            .Select(o => o.AnalysisMethod ?? string.Empty)
+            .Where(m => !string.IsNullOrWhiteSpace(m))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(m => m, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+
+        if (!string.IsNullOrWhiteSpace(method))
+        {
+            var byMethod = candidates
+                .Where(o => string.Equals(o.AnalysisMethod, method, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(o => o.Id)
+                .FirstOrDefault();
+            if (byMethod != null)
+                return byMethod.Key;
         }
 
-        return options.All.Count > 0 ? options.All[0].Key : null;
+        return candidates.OrderBy(o => o.Id).First().Key;
     }
 
     private static string BuildRowKey(string solutionLabel, int rowIndex)
