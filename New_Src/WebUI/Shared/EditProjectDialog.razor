@@ -1,0 +1,64 @@
+@using MudBlazor
+@using Microsoft.AspNetCore.Components
+@using WebUI.Models
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance? MudDialog { get; set; }
+    [Parameter] public ProjectUiModel? Item { get; set; }
+    [Parameter] public List<string>? DeviceOptions { get; set; }
+    [Parameter] public List<string>? FileTypeOptions { get; set; }
+
+    private ProjectUiModel editModel = new ProjectUiModel();
+
+    protected override void OnInitialized()
+    {
+        if (Item != null)
+        {
+            editModel = new ProjectUiModel
+            {
+                Id = Item.Id,
+                ProjectName = Item.ProjectName,
+                CreatedBy = Item.CreatedBy,
+                Created = Item.Created,
+                Device = Item.Device,
+                FileType = Item.FileType,
+                Description = Item.Description,
+                Status = Item.Status
+            };
+        }
+    }
+
+    private void Cancel() => MudDialog?.Cancel();
+    private void Save() => MudDialog?.Close(DialogResult.Ok(editModel));
+}
+
+<MudPaper Class="pa-4" Style="min-width: 420px;">
+    <MudText Typo="Typo.h6">Edit Project</MudText>
+
+    <MudTextField @bind-Value="editModel.ProjectName" Label="Project Name" Variant="Variant.Outlined" Class="mt-3" />
+    <MudSelect @bind-Value="editModel.Device" Label="Device" Variant="Variant.Outlined" Class="mt-3" T="string" Dense="true">
+        @if (DeviceOptions != null)
+        {
+            foreach (var d in DeviceOptions)
+            {
+                <MudSelectItem Value="@d">@d</MudSelectItem>
+            }
+        }
+    </MudSelect>
+    <MudSelect @bind-Value="editModel.FileType" Label="File Type" Variant="Variant.Outlined" Class="mt-3" T="string" Dense="true">
+        @if (FileTypeOptions != null)
+        {
+            foreach (var ft in FileTypeOptions)
+            {
+                <MudSelectItem Value="@ft">@ft</MudSelectItem>
+            }
+        }
+    </MudSelect>
+    <MudTextField @bind-Value="editModel.Description" Label="Description" Variant="Variant.Outlined" Class="mt-3" />
+
+    <div class="d-flex justify-end mt-4">
+        <MudButton Variant="Variant.Text" OnClick="@(()=>Cancel())">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(()=>Save())" Class="ms-2">Save</MudButton>
+    </div>
+</MudPaper>

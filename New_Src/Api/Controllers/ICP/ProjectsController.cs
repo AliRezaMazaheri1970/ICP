@@ -28,6 +28,8 @@ public class ProjectsController : ControllerBase
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    public record ProjectUpdateRequest(string? ProjectName, string? Device, string? FileType, string? Description);
+
     /// <summary>
     /// Retrieves a paginated list of all projects.
     /// </summary>
@@ -167,6 +169,32 @@ public class ProjectsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to delete project {ProjectId}", projectId);
+            return StatusCode(StatusCodes.Status500InternalServerError, new ApiResponse<object>(false, null, new[] { ex.Message }));
+        }
+    }
+
+    /// <summary>
+    /// Update project metadata (name, device, file type, description)
+    /// </summary>
+    [HttpPut("{projectId:guid}")]
+    public async Task<IActionResult> UpdateProject([FromRoute] Guid projectId, [FromBody] ProjectUpdateRequest req)
+    {
+        if (projectId == Guid.Empty)
+            return BadRequest(new ApiResponse<object>(false, null, new[] { "projectId is required" }));
+
+        try
+        {
+            var owner = HttpContext?.User?.Identity?.Name;
+            var saveRes = await _persistence.SaveProjectAsync(projectId, req.ProjectName ?? string.Empty, owner, null, null, req.Device, req.FileType, req.Description);
+            if (saveRes.Succeeded)
+            {
+                return Ok(new ApiResponse<object>(true, new { updated = true }, Array.Empty<string>()));
+            }
+            return StatusCode(StatusCodes.Status500InternalServerError, new ApiResponse<object>(false, null, saveRes.Messages?.ToArray() ?? new[] { "Failed to update project" }));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update project {ProjectId}", projectId);
             return StatusCode(StatusCodes.Status500InternalServerError, new ApiResponse<object>(false, null, new[] { ex.Message }));
         }
     }
