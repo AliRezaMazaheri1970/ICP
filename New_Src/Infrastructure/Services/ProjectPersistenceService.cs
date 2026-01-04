@@ -64,13 +64,36 @@ public class ProjectPersistenceService : IProjectPersistenceService
                 }
                 else
                 {
-                    project.ProjectName = projectName;
+                    //project.ProjectName = projectName;
+                    //project.LastModifiedAt = now;
+                    //project.Owner = owner;
+                    //if (!string.IsNullOrEmpty(device)) project.Device = device;
+                    //if (!string.IsNullOrEmpty(fileType)) project.FileType = fileType;
+
+                    //if (description != null) project.Description = description;
+                    //_db.Projects.Update(project);
+
+
+
+                    if (!string.IsNullOrEmpty(projectName))
+                        project.ProjectName = projectName;
+
                     project.LastModifiedAt = now;
-                    project.Owner = owner;
-                    if (!string.IsNullOrEmpty(device)) project.Device = device;
-                    if (!string.IsNullOrEmpty(fileType)) project.FileType = fileType;
-                   
-                    if (description != null) project.Description = description;
+
+                    // Owner رو فقط وقتی آپدیت کن که مقدار داشته باشه
+                    if (!string.IsNullOrEmpty(owner))
+                        project.Owner = owner;
+
+                    // Device و FileType رو حتی اگه خالی باشن آپدیت کن (کاربر ممکنه بخواد پاک کنه)
+                    if (device != null)
+                        project.Device = device;
+
+                    if (fileType != null)
+                        project.FileType = fileType;
+
+                    if (description != null)
+                        project.Description = description;
+
                     _db.Projects.Update(project);
                 }
 
@@ -112,38 +135,81 @@ public class ProjectPersistenceService : IProjectPersistenceService
     }
 
     /// <inheritdoc/>
+    //public async Task<Result<ProjectLoadDto>> LoadProjectAsync(Guid projectId, bool includeRawRows = false, bool includeLatestState = false)
+    //{
+    //    try
+    //    {
+    //        var project = await _db.Projects
+    //            .AsNoTracking()
+    //            .Where(p => p.ProjectId == projectId)
+    //            .Select(p => new
+    //            {
+    //                p.ProjectId,
+    //                p.ProjectName,
+    //                p.CreatedAt,
+    //                p.LastModifiedAt,
+    //                p.Owner,
+    //                p.Device,
+    //                p.FileType,
+    //                p.Description
+    //            })
+    //            .FirstOrDefaultAsync();
+
+    //        if (project == null)
+    //            return Result<ProjectLoadDto>.Fail("Project not found.");
+
+    //        var rawRows = includeRawRows
+    //            ? await _db.RawDataRows
+    //                .AsNoTracking()
+    //                .Where(r => r.ProjectId == projectId)
+    //                .OrderBy(r => r.DataId)
+    //                .Select(r => new RawDataDto(r.ColumnData, r.SampleId))
+    //                .ToListAsync()
+    //            : new List<RawDataDto>();
+
+    //        string? latestState = null;
+    //        if (includeLatestState)
+    //        {
+    //            var stateResult = await GetLatestProjectStateJsonAsync(projectId);
+    //            if (!stateResult.Succeeded)
+    //                return Result<ProjectLoadDto>.Fail(stateResult.Messages?.FirstOrDefault() ?? "Failed to load latest state.");
+
+    //            latestState = stateResult.Data;
+    //        }
+
+    //        var dto = new ProjectLoadDto(project.ProjectId, project.ProjectName, project.CreatedAt, project.LastModifiedAt, project.Owner, rawRows, latestState, project.Device, project.FileType, project.Description);
+
+    //        return Result<ProjectLoadDto>.Success(dto);
+    //    }
+    //    catch (Exception ex)
+    //    {
+    //        return Result<ProjectLoadDto>.Fail($"Load failed: {ex.Message}");
+    //    }
+    //}
+
+
+
+
     public async Task<Result<ProjectLoadDto>> LoadProjectAsync(Guid projectId, bool includeRawRows = false, bool includeLatestState = false)
     {
         try
         {
-            var project = await _db.Projects
-                .AsNoTracking()
-                .Where(p => p.ProjectId == projectId)
-                .Select(p => new
-                {
-                    p.ProjectId,
-                    p.ProjectName,
-                    p.CreatedAt,
-                    p.LastModifiedAt,
-                    p.Owner,
-                    p.Device,
-                    p.FileType,
-                    p.Description
-                })
-                .FirstOrDefaultAsync();
+            // 1. دریافت پروژه از دیتابیس
+            var query = _db.Projects.AsNoTracking().Where(p => p.ProjectId == projectId);
 
+            // (Include کردن ردیف‌های خام در صورت نیاز)
+            if (includeRawRows)
+            {
+                query = query.Include(p => p.RawDataRows);
+            }
+
+            var project = await query.FirstOrDefaultAsync();
             if (project == null)
-                return Result<ProjectLoadDto>.Fail("Project not found.");
+            {
+                return Result<ProjectLoadDto>.Fail("Project not found");
+            }
 
-            var rawRows = includeRawRows
-                ? await _db.RawDataRows
-                    .AsNoTracking()
-                    .Where(r => r.ProjectId == projectId)
-                    .OrderBy(r => r.DataId)
-                    .Select(r => new RawDataDto(r.ColumnData, r.SampleId))
-                    .ToListAsync()
-                : new List<RawDataDto>();
-
+            // 2. مدیریت State (کد قبلی شما)
             string? latestState = null;
             if (includeLatestState)
             {
@@ -154,7 +220,22 @@ public class ProjectPersistenceService : IProjectPersistenceService
                 latestState = stateResult.Data;
             }
 
-            var dto = new ProjectLoadDto(project.ProjectId, project.ProjectName, project.CreatedAt, project.LastModifiedAt, project.Owner, rawRows, latestState, project.Device, project.FileType, project.Description);
+            // 3. نگاشت (Mapping) نهایی - بخش مهم تغییر اینجاست:
+            var dto = new ProjectLoadDto(
+                project.ProjectId,
+                project.ProjectName,
+                project.CreatedAt,
+                project.LastModifiedAt,
+                project.Owner,
+                // تبدیل لیست ردیف‌ها به DTO
+                project.RawDataRows?.Select(r => new RawDataDto(r.ColumnData, r.SampleId)).ToList() ?? new List<RawDataDto>(),
+                latestState,
+
+                // *** خطوط زیر را حتماً اضافه کنید ***
+                project.Device,       // پاس دادن مقدار واقعی دیتابیس
+                project.FileType,     // پاس دادن مقدار واقعی دیتابیس
+                project.Description   // پاس دادن مقدار واقعی دیتابیس
+            );
 
             return Result<ProjectLoadDto>.Success(dto);
         }
@@ -163,7 +244,6 @@ public class ProjectPersistenceService : IProjectPersistenceService
             return Result<ProjectLoadDto>.Fail($"Load failed: {ex.Message}");
         }
     }
-
     /// <inheritdoc/>
     public async Task<Result<List<RawDataDto>>> GetRawDataRowsAsync(Guid projectId, int skip = 0, int take = DefaultRawPageSize)
     {
@@ -291,13 +371,48 @@ public class ProjectPersistenceService : IProjectPersistenceService
     }
 
     /// <inheritdoc/>
+    //public async Task<Result<List<ProjectListItemDto>>> ListProjectsAsync(int page = 1, int pageSize = 20)
+    //{
+    //    try
+    //    {
+    //        if (page <= 0) page = 1;
+    //        if (pageSize <= 0) pageSize = 20;
+
+    //        var skip = (page - 1) * pageSize;
+
+    //        var items = await _db.Projects
+    //            .AsNoTracking()
+    //            .OrderByDescending(p => p.CreatedAt)
+    //            .Skip(skip)
+    //            .Take(pageSize)
+    //            .Select(p => new ProjectListItemDto(
+    //                p.ProjectId,
+    //                p.ProjectName,
+    //                p.CreatedAt,
+    //                p.LastModifiedAt,
+    //                p.Owner,
+    //                p.RawDataRows.Count,
+    //                p.Device,
+    //                p.FileType
+    //            ))
+    //            .ToListAsync();
+
+    //        return Result<List<ProjectListItemDto>>.Success(items);
+    //    }
+    //    catch (Exception ex)
+    //    {
+    //        return Result<List<ProjectListItemDto>>.Fail($"List failed: {ex.Message}");
+    //    }
+    //}
+
+
+
     public async Task<Result<List<ProjectListItemDto>>> ListProjectsAsync(int page = 1, int pageSize = 20)
     {
         try
         {
             if (page <= 0) page = 1;
             if (pageSize <= 0) pageSize = 20;
-
             var skip = (page - 1) * pageSize;
 
             var items = await _db.Projects
@@ -312,8 +427,10 @@ public class ProjectPersistenceService : IProjectPersistenceService
                     p.LastModifiedAt,
                     p.Owner,
                     p.RawDataRows.Count,
-                    p.Device,
-                    p.FileType
+
+                    // *** این دو خط باید حتما باشند ***
+                    p.Device,    // نگاشت به Device
+                    p.FileType   // نگاشت به FileType
                 ))
                 .ToListAsync();
 
@@ -324,7 +441,6 @@ public class ProjectPersistenceService : IProjectPersistenceService
             return Result<List<ProjectListItemDto>>.Fail($"List failed: {ex.Message}");
         }
     }
-
     /// <inheritdoc/>
     public async Task<Result<bool>> DeleteProjectAsync(Guid projectId)
     {

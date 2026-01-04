@@ -2,14 +2,62 @@
 @using Microsoft.AspNetCore.Components
 @using WebUI.Models
 
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Edit Project</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.caption" Color="Color.Warning">
+            Debug: Device='@editModel.Device' | FileType='@editModel.FileType'
+        </MudText>
+        <MudTextField @bind-Value="editModel.ProjectName" Label="Project Name"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" />
+
+        <MudSelect @bind-Value="editModel.Device" T="string" Label="Device"
+                   Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3">
+            @if (DeviceOptions != null)
+            {
+                @foreach (var device in DeviceOptions)
+                {
+                    <MudSelectItem Value="@device">@device</MudSelectItem>
+                }
+            }
+        </MudSelect>
+
+        <MudSelect @bind-Value="editModel.FileType" T="string" Label="File Type"
+                   Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3">
+            @if (FileTypeOptions != null)
+            {
+                @foreach (var type in FileTypeOptions)
+                {
+                    <MudSelectItem Value="@type">@type</MudSelectItem>
+                }
+            }
+        </MudSelect>
+
+        <MudTextField @bind-Value="editModel.Description" Label="Description"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">CANCEL</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save">SAVE</MudButton>
+    </DialogActions>
+</MudDialog>
+
 @code {
     [CascadingParameter]
     private IMudDialogInstance? MudDialog { get; set; }
-    [Parameter] public ProjectUiModel? Item { get; set; }
-    [Parameter] public List<string>? DeviceOptions { get; set; }
-    [Parameter] public List<string>? FileTypeOptions { get; set; }
 
-    private ProjectUiModel editModel = new ProjectUiModel();
+    [Parameter]
+    public ProjectUiModel? Item { get; set; }
+
+    [Parameter]
+    public List<string>? DeviceOptions { get; set; }
+
+    [Parameter]
+    public List<string>? FileTypeOptions { get; set; }
+
+    private ProjectUiModel editModel = new();
 
     protected override void OnInitialized()
     {
@@ -30,35 +78,6 @@
     }
 
     private void Cancel() => MudDialog?.Cancel();
+
     private void Save() => MudDialog?.Close(DialogResult.Ok(editModel));
 }
-
-<MudPaper Class="pa-4" Style="min-width: 420px;">
-    <MudText Typo="Typo.h6">Edit Project</MudText>
-
-    <MudTextField @bind-Value="editModel.ProjectName" Label="Project Name" Variant="Variant.Outlined" Class="mt-3" />
-    <MudSelect @bind-Value="editModel.Device" Label="Device" Variant="Variant.Outlined" Class="mt-3" T="string" Dense="true">
-        @if (DeviceOptions != null)
-        {
-            foreach (var d in DeviceOptions)
-            {
-                <MudSelectItem Value="@d">@d</MudSelectItem>
-            }
-        }
-    </MudSelect>
-    <MudSelect @bind-Value="editModel.FileType" Label="File Type" Variant="Variant.Outlined" Class="mt-3" T="string" Dense="true">
-        @if (FileTypeOptions != null)
-        {
-            foreach (var ft in FileTypeOptions)
-            {
-                <MudSelectItem Value="@ft">@ft</MudSelectItem>
-            }
-        }
-    </MudSelect>
-    <MudTextField @bind-Value="editModel.Description" Label="Description" Variant="Variant.Outlined" Class="mt-3" />
-
-    <div class="d-flex justify-end mt-4">
-        <MudButton Variant="Variant.Text" OnClick="@(()=>Cancel())">Cancel</MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(()=>Save())" Class="ms-2">Save</MudButton>
-    </div>
-</MudPaper>

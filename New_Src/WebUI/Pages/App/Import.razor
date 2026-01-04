@@ -1,5 +1,6 @@
 ﻿@page "/import"
 @using MudBlazor
+@using WebUI.Models
 @using WebUI.Services
 @using Microsoft.AspNetCore.Components.Forms
 @using Application.Services
@@ -209,7 +210,10 @@
                         </MudGrid>
 
                         <div class="table-scroll">
-                            <MudTable Items="@existingFiles" @bind-SelectedItem="selectedItem" Hover="true" Dense="true" Striped="true" Bordered="true" Elevation="0" RowClick="OnRowClicked" RowClass="RowClassFunc" FixedHeader="true" Height="420px">
+                            <MudTable Items="@existingFiles" @bind-SelectedItem="selectedItem" Hover="true" Dense="true" Striped="true" Bordered="true" Elevation="0"
+                                      RowClick="@OnRowClicked"
+                                      RowClassFunc="@RowClassFunc"
+                                      FixedHeader="true" Height="420px">
                             <HeaderContent>
                                 <MudTh>Row</MudTh>
                                 <MudTh>File Name</MudTh>
@@ -381,16 +385,18 @@
         z-index: 6;
     }
 
-    /* highlight selected row - stronger blue and white text for clarity */
-    .selected-row,
-    .mud-table-row.selected {
+    .mud-table-row.selected-row {
         background-color: #1976d2 !important;
-        color: #ffffff !important;
     }
 
-    .selected-row td,
-    .mud-table-row.selected td {
-        background-color: #1976d2 !important;
-        color: #ffffff !important;
-    }
+        .mud-table-row.selected-row td,
+        .mud-table-row.selected-row .mud-table-cell {
+            background-color: #1976d2 !important;
+            color: #ffffff !important;
+        }
+
+        /* هم برای حالت striped */
+        .mud-table-row.selected-row.mud-table-row-stripes {
+            background-color: #1976d2 !important;
+        }
 </style>

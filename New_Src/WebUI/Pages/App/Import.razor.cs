@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.AspNetCore.Components.Routing;
 using MudBlazor;
 using WebUI.Services;
+using System.Text.Json;
 using WebUI.Models;
 using WebUI.Shared;
 
@@ -202,7 +203,11 @@ namespace WebUI.Pages.App
                 var finalProjectName = string.IsNullOrWhiteSpace(displayFileName)
                                      ? fileName
                                      : displayFileName;
-
+                if (string.IsNullOrEmpty(selectedDevice) || string.IsNullOrEmpty(selectedFileType))
+                {
+                    Snackbar.Add("Please select Device and File Type before uploading.", Severity.Warning);
+                    return;
+                }
                 var request = new AdvancedImportRequest(finalProjectName, user?.Name)
                 {
                     SkipLastRow = skipLastRow,
@@ -244,15 +249,31 @@ namespace WebUI.Pages.App
                 var res = await ProjectService.GetProjectsAsync();
                 if (res.Succeeded && res.Data != null)
                 {
-                    existingFiles = res.Data.Select(p => new ProjectUiModel
+                    existingFiles = res.Data.Select(p =>
                     {
-                        Id = p.ProjectId,
-                        ProjectName = p.ProjectName,
-                        CreatedBy = p.Owner ?? "",
-                        Created = p.CreatedAt,
-                        Device = p.Device ?? string.Empty,
-                        FileType = p.FileType ?? string.Empty,
-                        Description = p.Description ?? string.Empty
+                        // 1. دریافت مقادیر از دیتابیس
+                        string finalDevice = p.Device;
+                        string finalFileType = p.FileType;
+
+                        // 2. اگر دیتابیس خالی بود، از روی نام پروژه حدس بزن (برای نمایش در جدول)
+                        if (string.IsNullOrWhiteSpace(finalDevice) || string.IsNullOrWhiteSpace(finalFileType))
+                        {
+                            var inferred = InferDeviceAndFileTypeFromName(p.ProjectName ?? "");
+
+                            if (string.IsNullOrWhiteSpace(finalDevice)) finalDevice = inferred.device;
+                            if (string.IsNullOrWhiteSpace(finalFileType)) finalFileType = inferred.fileType;
+                        }
+
+                        return new ProjectUiModel
+                        {
+                            Id = p.ProjectId,
+                            ProjectName = p.ProjectName,
+                            CreatedBy = p.Owner ?? "",
+                            Created = p.CreatedAt,
+                            Device = finalDevice,   // مقدار یا از دیتابیس است یا حدس زده شده
+                            FileType = finalFileType, // مقدار یا از دیتابیس است یا حدس زده شده
+                            Description = p.Description ?? ""
+                        };
                     }).ToList();
                 }
                 else
@@ -273,7 +294,39 @@ namespace WebUI.Pages.App
             StateHasChanged();
         }
 
-        private string? RowClassFunc(ProjectUiModel item) => item == selectedItem ? "selected" : null;
+        private string RowClassFunc(ProjectUiModel item, int rowNumber) =>
+     item == selectedItem ? "selected-row" : string.Empty;
+
+        // Try to infer device and file type from project name using known options
+        private (string device, string fileType) InferDeviceAndFileTypeFromName(string projectName)
+        {
+            if (string.IsNullOrWhiteSpace(projectName)) return (string.Empty, string.Empty);
+            var name = projectName.ToLowerInvariant();
+            string foundDevice = string.Empty;
+            string foundFileType = string.Empty;
+
+            foreach (var d in deviceOptions)
+            {
+                if (string.IsNullOrWhiteSpace(d)) continue;
+                if (name.Contains(d.ToLowerInvariant().Split(' ')[0]))
+                {
+                    foundDevice = d;
+                    break;
+                }
+            }
+
+            foreach (var ft in fileTypeOptions)
+            {
+                if (string.IsNullOrWhiteSpace(ft)) continue;
+                if (name.Contains(ft.ToLowerInvariant().Split(' ')[0]))
+                {
+                    foundFileType = ft;
+                    break;
+                }
+            }
+
+            return (foundDevice, foundFileType);
+        }
 
         private async Task ConfirmDelete()
         {
@@ -311,54 +364,95 @@ namespace WebUI.Pages.App
         private async Task OpenEditDialog()
         {
             if (selectedItem == null) return;
-            // Fetch latest project details from server to prefill dialog
+
+            // 1. ابتدا سعی می‌کنیم آخرین وضعیت را از سرور بگیریم
             var projRes = await ProjectService.GetProjectAsync(selectedItem.Id);
-            if (!projRes.Succeeded || projRes.Data == null)
+
+            // مدلی که قرار است به فرم ارسال شود
+            ProjectUiModel dialogModel = new ProjectUiModel
             {
-                Snackbar.Add(projRes.Message ?? "Failed to load project details.", Severity.Error);
-                return;
+                Id = selectedItem.Id,
+                ProjectName = selectedItem.ProjectName,
+                Description = selectedItem.Description
+            };
+
+            // مقادیر پیش‌فرض را از آیتم انتخاب شده در جدول می‌گیریم (که ممکن است حدس زده شده باشند)
+            string deviceToUse = selectedItem.Device;
+            string fileTypeToUse = selectedItem.FileType;
+
+            // 2. بررسی پاسخ سرور
+            if (projRes.Succeeded && projRes.Data != null)
+            {
+                var dbData = projRes.Data;
+                dialogModel.ProjectName = dbData.ProjectName;
+                dialogModel.Description = dbData.Description ?? ""; // دیسکریپشن اختیاری است
+
+                // اگر در دیتابیس مقدار واقعی ذخیره شده بود، آن ارجحیت دارد
+                if (!string.IsNullOrWhiteSpace(dbData.Device))
+                {
+                    deviceToUse = dbData.Device;
+                }
+
+                if (!string.IsNullOrWhiteSpace(dbData.FileType))
+                {
+                    fileTypeToUse = dbData.FileType;
+                }
+            }
+            else
+            {
+                // اگر نتوانستیم از سرور بگیریم، هشدار می‌دهیم اما کار را با دیتای جدول ادامه می‌دهیم
+                Console.WriteLine("Could not fetch fresh data from DB, using grid data.");
             }
 
-            var info = projRes.Data;
+            // مقداردهی نهایی به مدل دیالوگ
+            dialogModel.Device = deviceToUse;
+            dialogModel.FileType = fileTypeToUse;
 
-            // Ensure the options lists contain the current values so MudSelect can display them
-            var deviceOpts = new List<string>(deviceOptions);
-            var fileTypeOpts = new List<string>(fileTypeOptions);
-            if (!string.IsNullOrWhiteSpace(info.Device) && !deviceOpts.Contains(info.Device))
-                deviceOpts.Insert(0, info.Device);
-            if (!string.IsNullOrWhiteSpace(info.FileType) && !fileTypeOpts.Contains(info.FileType))
-                fileTypeOpts.Insert(0, info.FileType);
+            // 3. مدیریت لیست‌های دراپ‌داون (بسیار مهم برای نمایش صحیح)
+            // اگر مقداری که داریم در لیست آپشن‌ها نباشد، موقتاً اضافه می‌کنیم تا فرم خالی نشان ندهد
+            var currentDeviceOptions = new List<string>(deviceOptions);
+            if (!string.IsNullOrEmpty(dialogModel.Device) && !currentDeviceOptions.Contains(dialogModel.Device))
+            {
+                currentDeviceOptions.Insert(0, dialogModel.Device);
+            }
 
+            var currentFileTypeOptions = new List<string>(fileTypeOptions);
+            if (!string.IsNullOrEmpty(dialogModel.FileType) && !currentFileTypeOptions.Contains(dialogModel.FileType))
+            {
+                currentFileTypeOptions.Insert(0, dialogModel.FileType);
+            }
+
+            // 4. باز کردن دیالوگ
             var parameters = new MudBlazor.DialogParameters
             {
-                ["Item"] = new ProjectUiModel
-                {
-                    Id = info.ProjectId,
-                    ProjectName = info.ProjectName ?? string.Empty,
-                    CreatedBy = info.Owner ?? string.Empty,
-                    Created = info.CreatedAt,
-                    Device = info.Device ?? string.Empty,
-                    FileType = info.FileType ?? string.Empty,
-                    Description = info.Description ?? string.Empty
-                },
-                ["DeviceOptions"] = deviceOpts,
-                ["FileTypeOptions"] = fileTypeOpts
+                ["Item"] = dialogModel,
+                ["DeviceOptions"] = currentDeviceOptions,
+                ["FileTypeOptions"] = currentFileTypeOptions
             };
 
             var dialog = await DialogService.ShowAsync<EditProjectDialog>("Edit Project", parameters);
             var res = await dialog.Result;
+
+            // 5. ذخیره تغییرات در سرور
             if (res != null && !res.Canceled)
             {
                 var updated = res.Data as ProjectUiModel;
                 if (updated != null)
                 {
-                    var serverRes = await ProjectService.UpdateProjectAsync(updated.Id, updated.ProjectName, updated.Device, updated.FileType, updated.Description);
+                    // اینجا وقتی Save زده شود، دیتای حدس زده شده یا تغییر کرده در دیتابیس ثبت می‌شود
+                    // و مشکل نال بودن برای همیشه حل می‌شود
+                    var serverRes = await ProjectService.UpdateProjectAsync(
+                        updated.Id,
+                        updated.ProjectName,
+                        updated.Device,
+                        updated.FileType,
+                        updated.Description
+                    );
+
                     if (serverRes.Succeeded)
                     {
                         Snackbar.Add("Project updated successfully.", Severity.Success);
-                        // refresh from server to ensure DB state is shown
-                        await LoadExistingFilesAsync();
-                        selectedItem = existingFiles.FirstOrDefault(x => x.Id == updated.Id);
+                        await LoadExistingFilesAsync(); // رفرش لیست
                     }
                     else
                     {

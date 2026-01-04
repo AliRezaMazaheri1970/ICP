@@ -273,4 +273,72 @@ public class ProjectsController : ControllerBase
     {
         return await GetProject(projectId);
     }
+
+    /// <summary>
+    /// Backfill missing Device/FileType metadata by attempting to infer from project names.
+    /// This is a one-off maintenance endpoint to populate historical projects that lack metadata.
+    /// </summary>
+    [HttpPost("backfill-metadata")]
+    public async Task<IActionResult> BackfillMetadata()
+    {
+        try
+        {
+            // Load a large page of projects (caller can re-run if DB is large)
+            var listRes = await _persistence.ListProjectsAsync(1, 10000);
+            if (!listRes.Succeeded || listRes.Data == null)
+                return StatusCode(StatusCodes.Status500InternalServerError, new ApiResponse<object>(false, null, listRes.Messages?.ToArray() ?? new[] { "Failed to load projects for backfill" }));
+
+            var updated = 0;
+            foreach (var p in listRes.Data)
+            {
+                var needsDevice = string.IsNullOrWhiteSpace(p.Device);
+                var needsFileType = string.IsNullOrWhiteSpace(p.FileType);
+                if (!needsDevice && !needsFileType) continue;
+
+                var (device, fileType) = InferDeviceAndFileTypeFromName(p.ProjectName ?? string.Empty);
+
+                // Only save if we inferred at least one value
+                if (string.IsNullOrWhiteSpace(device) && string.IsNullOrWhiteSpace(fileType))
+                    continue;
+
+                // Use existing owner when saving
+                var owner = p.Owner;
+                var saveRes = await _persistence.SaveProjectAsync(p.ProjectId, null, owner, null, null,
+                    device == string.Empty ? null : device,
+                    fileType == string.Empty ? null : fileType,
+                    null);
+
+                if (saveRes.Succeeded) updated++;
+            }
+
+            return Ok(new ApiResponse<object>(true, new { updated }, Array.Empty<string>()));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Backfill failed");
+            return StatusCode(StatusCodes.Status500InternalServerError, new ApiResponse<object>(false, null, new[] { ex.Message }));
+        }
+    }
+
+    // Simple inference helper used by the backfill endpoint
+    private static (string device, string fileType) InferDeviceAndFileTypeFromName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return (string.Empty, string.Empty);
+        var n = name.ToLowerInvariant();
+
+        string device = string.Empty;
+        string fileType = string.Empty;
+
+        if (n.Contains("elan")) device = "Mass elan9000 1";
+        else if (n.Contains("oes 735")) device = "OES 735 1";
+        else if (n.Contains("oes 715")) device = "OES 715";
+        else if (n.Contains("oes")) device = "OES";
+
+        if (n.Contains("4cc")) fileType = "oes 4cc";
+        else if (n.Contains("6cc")) fileType = "oes 6cc";
+        else if (n.Contains(".txt") || n.Contains(" txt") || n.Contains("txt format")) fileType = "txt format";
+        else if (n.Contains(".xls") || n.Contains(".xlsx") || n.Contains("xlsx format")) fileType = "xlsx format";
+
+        return (device, fileType);
+    }
 }
