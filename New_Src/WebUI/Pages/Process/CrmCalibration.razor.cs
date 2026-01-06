@@ -70,7 +70,7 @@ namespace WebUI.Pages.Process
             await LoadElements();
             await LoadCrmOptions();
             await LoadCrmSelections();
-            await GetCurrentStats();
+            //await GetCurrentStats();
         }
 
         private async Task LoadCrmOptions()
@@ -522,6 +522,21 @@ namespace WebUI.Pages.Process
             _rangeHigh2 = 8.0m;
             _rangeHigh3 = 5.0m;
             _rangeHigh4 = 3.0m;
+        }
+
+
+        private string GetSampleDetailsTitle()
+        {
+            if (_manualRows.Any())
+                return "Manual Preview Details";
+            return "Optimized Sample Details";
+        }
+
+        private string GetImprovementCardClass()
+        {
+            var baseClass = "summary-card";
+            var statusClass = _result?.ImprovementPercent >= 0 ? "success" : "error";
+            return $"{baseClass} {statusClass}";
         }
     }
 }

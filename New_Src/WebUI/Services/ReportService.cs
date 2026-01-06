@@ -77,6 +77,7 @@ public class ReportService
     public ReportService(IHttpClientFactory clientFactory, ILogger<ReportService> logger, AuthService authService)
     {
         _httpClient = clientFactory.CreateClient("Api");
+        _httpClient.Timeout = TimeSpan.FromMinutes(10);
         _logger = logger;
         _authService = authService;
     }

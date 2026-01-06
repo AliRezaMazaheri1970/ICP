@@ -275,7 +275,7 @@ public class OptimizationService
     public OptimizationService(IHttpClientFactory clientFactory, ILogger<OptimizationService> logger, AuthService authService)
     {
         _httpClient = clientFactory.CreateClient("Api");
-        //_httpClient.Timeout = TimeSpan.FromMinutes(10);
+        _httpClient.Timeout = TimeSpan.FromMinutes(10);
         _logger = logger;
         _authService = authService;
     }
