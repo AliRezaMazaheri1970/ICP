@@ -18,6 +18,15 @@
         </MudPaper>
     </div>
 }
+@if (_isExport)
+{
+    <div class="loading-overlay">
+        <MudPaper Elevation="4" Class="pa-6 d-flex flex-column align-center">
+            <MudProgressCircular Color="Color.Primary" Size="Size.Large" Indeterminate="true" />
+            <MudText Typo="Typo.h6" Class="mt-4">Is Export Data...</MudText>
+        </MudPaper>
+    </div>
+}
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
     @* Header *@
     <MudPaper Elevation="0" Class="pa-4 mb-4 custom-card-all">
@@ -47,7 +56,7 @@
                            StartIcon="@Icons.Material.Filled.Download"
                            OnClick="ExportData"
                            Class="btn-pivot"
-                           Disabled="@(_pivotData == null)">
+                           Disabled="@(_pivotData == null || _isExport)">
                     Export
                 </MudButton>
             </div>

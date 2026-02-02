@@ -24,6 +24,7 @@ namespace WebUI.Pages
         private bool _mergeRepeats = false;
         // Merge repeated elements
         private bool _isLoading = true;
+        private bool _isExport = false;
         // Start with loading state
         private int _currentPage = 1;
         private int _pageSize = 10;
@@ -141,6 +142,7 @@ namespace WebUI.Pages
         private async Task ExportData()
         {
             if (_projectId == null || _pivotData == null) return;
+            _isExport = true;
             var request = new PivotRequest
             {
                 ProjectId = _projectId.Value,
@@ -153,10 +155,12 @@ namespace WebUI.Pages
                 var fileName = $"{_projectName ?? "export"}_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
                 await DownloadFile(result.Data, fileName, "text/csv");
                 Snackbar.Add("Data exported successfully", Severity.Success);
+                _isExport = false;
             }
             else
             {
                 Snackbar.Add(result.Message ?? "Export failed", Severity.Error);
+                _isExport = false;
             }
         }
 
