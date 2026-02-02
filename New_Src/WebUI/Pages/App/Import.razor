@@ -217,8 +217,9 @@
                             <HeaderContent>
                                 <MudTh>Row</MudTh>
                                 <MudTh>File Name</MudTh>
-                                <MudTh>Uploaded By</MudTh>
+                                @* <MudTh>Uploaded By</MudTh> *@
                                 <MudTh>Device</MudTh>
+                                <MudTh>File Type</MudTh>
                                 <MudTh>Upload Date</MudTh>
                                 <MudTh>Status</MudTh>
                                 <MudTh>Content Preview</MudTh>
@@ -226,8 +227,9 @@
                             <RowTemplate>
                                 <MudTd DataLabel="Row">@(existingFiles.IndexOf(context) + 1)</MudTd>
                                 <MudTd DataLabel="File Name">@context.ProjectName</MudTd>
-                                <MudTd DataLabel="Uploaded By">@context.CreatedBy</MudTd>
+                                @* <MudTd DataLabel="Uploaded By">@context.CreatedBy</MudTd> *@
                                 <MudTd DataLabel="Device">@context.Device</MudTd>
+                                <MudTd DataLabel="File Type">@context.FileType</MudTd>
                                 <MudTd DataLabel="Upload Date">@context.Created</MudTd>
                                 <MudTd DataLabel="Status">@(context.Status ? "Active" : "Inactive")</MudTd>
                                 <MudTd DataLabel="Content Preview" Style="font-size: 0.8rem; color: #666;">
