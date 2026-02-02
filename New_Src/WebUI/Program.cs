@@ -88,7 +88,7 @@ builder.Services.AddScoped<WebUI.Services.UserManagementService>();
 // ============================================
 // 6. HttpClient (Optional / Context dependent)
 // ============================================
-var apiBaseUrl = builder.Configuration.GetValue<string>("ApiSettings:BaseUrl") ?? "http://192.168.0.103:5000/api/";
+var apiBaseUrl = builder.Configuration.GetValue<string>("ApiSettings:BaseUrl") ?? "http://127.0.0.1:5001/api/";
 builder.Services.AddHttpClient("Api", client =>
 {
     client.BaseAddress = new Uri(apiBaseUrl);
