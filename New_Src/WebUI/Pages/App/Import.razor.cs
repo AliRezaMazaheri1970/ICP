@@ -288,10 +288,11 @@ namespace WebUI.Pages.App
             StateHasChanged();
         }
 
-        private void OnRowClicked(TableRowClickEventArgs<ProjectUiModel> args)
+        private Task OnRowClicked(TableRowClickEventArgs<ProjectUiModel> args)
         {
             selectedItem = args.Item;
             StateHasChanged();
+            return Task.CompletedTask;
         }
 
         private string RowClassFunc(ProjectUiModel item, int rowNumber) =>
