@@ -87,7 +87,7 @@ namespace WebUI.Pages.Process
             DiffAfter
         }
 
-    
+
         private enum PivotRowType
         {
             Sample,      // CRM 258 A
@@ -272,7 +272,7 @@ namespace WebUI.Pages.Process
         private async Task OnResultsTabChanged(int newTabIndex)
         {
             _resultsTabIndex = newTabIndex;
-            
+
             // If Tab2 (index 1) is selected and we have results, re-render charts
             if (newTabIndex == 1 && _result != null)
             {
@@ -303,7 +303,7 @@ namespace WebUI.Pages.Process
             RebuildPivot();
         }
 
-        private void SetFocusElement(string? element)
+        private async Task SetFocusElement(string? element)
         {
             if (string.IsNullOrWhiteSpace(element))
                 return;
@@ -318,6 +318,15 @@ namespace WebUI.Pages.Process
                 _pivotSelectedElements.Add(_focusElement);
                 RebuildPivot();
             }
+
+            // Ensure UI updates and then refresh charts that depend on focus element
+            StateHasChanged();
+            await Task.Delay(50);
+
+            // Re-render the calibration scatter and update the element improvement metric
+            await RefreshCalibrationAsync();
+            await UpdateElementImprovementChartAsync();
+            StateHasChanged();
         }
 
         protected override async Task OnInitializedAsync()
@@ -538,15 +547,15 @@ namespace WebUI.Pages.Process
             {
                 _result = result.Data;
                 UpdateOptimizedRows();
-                
+
                 // تغییر به Tab2 برای نمایش نمودارها
                 _resultsTabIndex = 1;
-                
+
                 StateHasChanged(); // Ensure UI updates before rendering charts
                 await Task.Delay(250); // Wait for tab animation and DOM to update
                 await RenderChartsAsync();
                 StateHasChanged(); // Refresh UI after charts are rendered
-                
+
                 Snackbar.Add($"Calibration Complete! Improvement: {_result.ImprovementPercent:F1}%", Severity.Success);
             }
             else
@@ -736,24 +745,24 @@ namespace WebUI.Pages.Process
         //    UpdateManualRows();
         //}
 
-        private void PrevElement()
+        private async Task PrevElement()
         {
             if (_allElements.Count == 0 || string.IsNullOrWhiteSpace(_focusElement))
                 return;
 
             var idx = _allElements.IndexOf(_focusElement);
             if (idx > 0)
-                SetFocusElement(_allElements[idx - 1]);
+                await SetFocusElement(_allElements[idx - 1]);
         }
 
-        private void NextElement()
+        private async Task NextElement()
         {
             if (_allElements.Count == 0 || string.IsNullOrWhiteSpace(_focusElement))
                 return;
 
             var idx = _allElements.IndexOf(_focusElement);
             if (idx < _allElements.Count - 1)
-                SetFocusElement(_allElements[idx + 1]);
+                await SetFocusElement(_allElements[idx + 1]);
         }
 
         //private void UpdateOptimizedRows()
@@ -915,7 +924,7 @@ namespace WebUI.Pages.Process
             try
             {
                 var chartData = GetPassFailChartData();
-                
+
                 var chartConfig = new
                 {
                     type = "bar",
@@ -1286,7 +1295,7 @@ namespace WebUI.Pages.Process
             StateHasChanged();
         }
 
-       
+
         private decimal GetToleranceValue(decimal crmValue)
         {
             var absVal = Math.Abs(crmValue);
