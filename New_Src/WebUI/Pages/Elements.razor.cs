@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.Json;
 using Microsoft.AspNetCore.Components;
 using MudBlazor;
 using WebUI.Services;
@@ -10,65 +12,77 @@ namespace WebUI.Pages
         public Guid? projectId { get; set; }
 
         private Guid? _projectId;
-        private List<ElementConfig> _elements = new();
-        private ElementConfig? _selectedElement;
-        private bool _isLoading = false;
-        private bool _isSaving = false;
-        private string _calcElement = "";
-        private string _calcOxide = "";
-        private decimal? _calculatedFactor;
-        private List<OxideReference> _commonOxides = new();
+        private bool _isLoading;
+        private string? _selectedElement;
+        private string _selectedWavelength = "All Wavelengths";
+        private List<string> _elementButtons = new();
+        private List<string> _availableWavelengths = new() { "All Wavelengths" };
+        private readonly List<RawElementRow> _rawRows = new();
+        private readonly List<ElementDetailRow> _detailRows = new();
 
-        protected override async Task OnInitializedAsync()
+        protected override async Task OnParametersSetAsync()
         {
-            _projectId = projectId ?? ProjectService.CurrentProjectId;
-            InitializeCommonOxides();
+            var nextProjectId = projectId ?? ProjectService.CurrentProjectId;
+            if (nextProjectId == _projectId)
+            {
+                return;
+            }
+
+            _projectId = nextProjectId;
+            _rawRows.Clear();
+            _detailRows.Clear();
+            _elementButtons = new List<string>();
+            _availableWavelengths = new List<string> { "All Wavelengths" };
+            _selectedElement = null;
+            _selectedWavelength = "All Wavelengths";
+
             if (_projectId.HasValue)
             {
-                await LoadElements();
+                await LoadRawRowsAsync();
+                BuildElementButtons();
+                if (_elementButtons.Count > 0)
+                {
+                    SelectElement(_elementButtons[0]);
+                }
             }
         }
 
-        private void InitializeCommonOxides()
-        {
-            _commonOxides = new List<OxideReference>
-        {
-            new("SiO2", 2.1393m),
-            new("Al2O3", 1.8895m),
-            new("Fe2O3", 1.4297m),
-            new("FeO", 1.2865m),
-            new("CaO", 1.3992m),
-            new("MgO", 1.6583m),
-            new("Na2O", 1.3480m),
-            new("K2O", 1.2046m),
-            new("TiO2", 1.6681m),
-            new("P2O5", 2.2914m),
-            new("MnO", 1.2912m),
-            new("Cr2O3", 1.4615m)
-        };
-        }
-
-        private async Task LoadElements()
+        private async Task LoadRawRowsAsync()
         {
             _isLoading = true;
             StateHasChanged();
 
             try
             {
-                var result = await PivotService.GetElementsAsync(_projectId!.Value);
-                if (result.Succeeded && result.Data != null)
+                var allRows = new List<RawDataDto>();
+                const int pageSize = 2000;
+                var skip = 0;
+
+                while (true)
                 {
-                    _elements = result.Data.Select(e => new ElementConfig
+                    var result = await ProjectService.GetProjectRawRowsAsync(_projectId!.Value, skip, pageSize);
+                    if (!result.Succeeded || result.Data == null)
                     {
-                        Name = e,
-                        Symbol = e.Replace("2O3", "").Replace("O2", "").Replace("O", "").Replace("2", "").Replace("3", "").Replace("5", ""),
-                        Unit = "%",
-                        OxideFactor = GetDefaultOxideFactor(e),
-                        MinRange = 0.01m,
-                        MaxRange = 100m,
-                        DiffThreshold = 10m,
-                        IsActive = true
-                    }).ToList();
+                        Snackbar.Add(result.Message ?? "Failed to load raw rows", Severity.Error);
+                        break;
+                    }
+
+                    allRows.AddRange(result.Data);
+                    if (result.Data.Count < pageSize)
+                    {
+                        break;
+                    }
+
+                    skip += result.Data.Count;
+                }
+
+                foreach (var row in allRows)
+                {
+                    var parsed = ParseRawRow(row.ColumnData);
+                    if (parsed != null)
+                    {
+                        _rawRows.Add(parsed);
+                    }
                 }
             }
             finally
@@ -77,104 +91,299 @@ namespace WebUI.Pages
             }
         }
 
-        private decimal GetDefaultOxideFactor(string element)
+        private void BuildElementButtons()
         {
-            var oxide = _commonOxides.FirstOrDefault(o => o.Oxide.Equals(element, StringComparison.OrdinalIgnoreCase));
-            return oxide?.Factor ?? 1.0m;
-        }
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            _elementButtons = new List<string>();
 
-        private async Task SaveChanges()
-        {
-            _isSaving = true;
-            StateHasChanged();
+            foreach (var row in _rawRows)
+            {
+                if (!IsBlankRow(row))
+                {
+                    continue;
+                }
 
-            try
-            {
-                // Save to API
-                await Task.Delay(500); // Simulate API call
-                Snackbar.Add("Element settings saved successfully", Severity.Success);
-            }
-            finally
-            {
-                _isSaving = false;
-            }
-        }
+                var baseElement = ExtractBaseElement(row.Element);
+                if (string.IsNullOrWhiteSpace(baseElement))
+                {
+                    continue;
+                }
 
-        private void ResetElement()
-        {
-            if (_selectedElement != null)
-            {
-                _selectedElement.OxideFactor = GetDefaultOxideFactor(_selectedElement.Name);
-                _selectedElement.MinRange = 0.01m;
-                _selectedElement.MaxRange = 100m;
-                _selectedElement.DiffThreshold = 10m;
-                Snackbar.Add("Element reset to default values", Severity.Info);
+                if (seen.Add(baseElement))
+                {
+                    _elementButtons.Add(baseElement);
+                }
             }
         }
 
-        private void CalculateOxideFactor()
+        private void SelectElement(string element)
         {
-            if (string.IsNullOrWhiteSpace(_calcElement) || string.IsNullOrWhiteSpace(_calcOxide))
+            _selectedElement = element;
+            BuildWavelengthOptions();
+            _selectedWavelength = "All Wavelengths";
+            UpdateDetailsRows();
+        }
+
+        private Task OnWavelengthChanged(string value)
+        {
+            _selectedWavelength = value;
+            UpdateDetailsRows();
+            return Task.CompletedTask;
+        }
+
+        private void BuildWavelengthOptions()
+        {
+            _availableWavelengths = new List<string> { "All Wavelengths" };
+            if (string.IsNullOrWhiteSpace(_selectedElement))
             {
-                Snackbar.Add("Please enter both element and oxide formula", Severity.Warning);
                 return;
             }
 
-            // Simple oxide factor calculation based on atomic masses
-            var atomicMasses = new Dictionary<string, decimal>
-        {
-            { "Si", 28.0855m },
-            { "Al", 26.9815m },
-            { "Fe", 55.8450m },
-            { "Ca", 40.0780m },
-            { "Mg", 24.3050m },
-            { "Na", 22.9898m },
-            { "K", 39.0983m },
-            { "Ti", 47.8670m },
-            { "P", 30.9738m },
-            { "Mn", 54.9380m },
-            { "O", 15.9994m },
-            { "Cr", 51.9961m },
-            { "Zn", 65.3800m },
-            { "Cu", 63.5460m },
-            { "Pb", 207.2000m },
-            { "Ba", 137.3270m },
-            { "Sr", 87.6200m }
-        };
+            var wavelengths = _rawRows
+                .Where(row => IsStdRow(row) && ElementMatchesBase(row.Element, _selectedElement))
+                .Select(row => ExtractWavelength(row.Element, _selectedElement))
+                .Where(wl => !string.IsNullOrWhiteSpace(wl))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(wl => wl)
+                .ToList();
 
-            if (!atomicMasses.TryGetValue(_calcElement, out var elementMass))
+            _availableWavelengths.AddRange(wavelengths);
+        }
+
+        private void UpdateDetailsRows()
+        {
+            _detailRows.Clear();
+            if (string.IsNullOrWhiteSpace(_selectedElement))
             {
-                Snackbar.Add($"Unknown element: {_calcElement}", Severity.Error);
                 return;
             }
 
-            // Parse oxide formula and calculate molecular mass
-            // Simple parsing - this is a simplified version
-            var oxide = _commonOxides.FirstOrDefault(o => o.Oxide.Equals(_calcOxide, StringComparison.OrdinalIgnoreCase));
-            if (oxide != null)
+            IEnumerable<RawElementRow> stdRows;
+            if (string.Equals(_selectedWavelength, "All Wavelengths", StringComparison.OrdinalIgnoreCase))
             {
-                _calculatedFactor = oxide.Factor;
+                stdRows = _rawRows.Where(row => IsStdRow(row) && ElementMatchesBase(row.Element, _selectedElement));
             }
             else
             {
-                // Fallback calculation
-                _calculatedFactor = 1.0m;
-                Snackbar.Add("Could not calculate factor. Using default.", Severity.Warning);
+                var fullElement = $"{_selectedElement} {_selectedWavelength}".Trim();
+                stdRows = _rawRows.Where(row =>
+                    IsStdRow(row) && string.Equals(row.Element, fullElement, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (!stdRows.Any())
+            {
+                var message = string.Equals(_selectedWavelength, "All Wavelengths", StringComparison.OrdinalIgnoreCase)
+                    ? "No STD data found"
+                    : $"No data for {_selectedWavelength}";
+                _detailRows.Add(ElementDetailRow.Message(message));
+                return;
+            }
+
+            foreach (var row in stdRows)
+            {
+                var solnConc = row.SolnConc ?? row.CorrCon;
+                var wavelength = ExtractWavelength(row.Element, _selectedElement);
+
+                _detailRows.Add(new ElementDetailRow
+                {
+                    SolutionLabel = row.SolutionLabel,
+                    Element = _selectedElement,
+                    SolnConc = solnConc,
+                    Intensity = row.Intensity,
+                    Wavelength = wavelength
+                });
             }
         }
 
-        public class ElementConfig
+        private static bool IsStdRow(RawElementRow row)
+            => string.Equals(row.Type, "Std", StringComparison.OrdinalIgnoreCase);
+
+        private static bool IsBlankRow(RawElementRow row)
         {
-            public string Name { get; set; } = "";
-            public string Symbol { get; set; } = "";
-            public string Unit { get; set; } = "%";
-            public decimal OxideFactor { get; set; } = 1.0m;
-            public decimal MinRange { get; set; }
-            public decimal MaxRange { get; set; }
-            public decimal DiffThreshold { get; set; } = 10m;
-            public bool IsActive { get; set; } = true;
+            if (string.Equals(row.Type, "Blk", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return row.SolutionLabel?.Contains("BLANK", StringComparison.OrdinalIgnoreCase) == true;
         }
 
-        public record OxideReference(string Oxide, decimal Factor);
+        private static string ExtractBaseElement(string elementText)
+        {
+            if (string.IsNullOrWhiteSpace(elementText))
+            {
+                return string.Empty;
+            }
+
+            var parts = elementText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return parts.Length > 0 ? parts[0].Trim() : string.Empty;
+        }
+
+        private static bool ElementMatchesBase(string elementText, string baseElement)
+        {
+            if (string.IsNullOrWhiteSpace(elementText) || string.IsNullOrWhiteSpace(baseElement))
+            {
+                return false;
+            }
+
+            return elementText.Equals(baseElement, StringComparison.OrdinalIgnoreCase)
+                   || elementText.StartsWith($"{baseElement} ", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ExtractWavelength(string elementText, string baseElement)
+        {
+            if (string.IsNullOrWhiteSpace(elementText) || string.IsNullOrWhiteSpace(baseElement))
+            {
+                return string.Empty;
+            }
+
+            if (elementText.StartsWith($"{baseElement} ", StringComparison.OrdinalIgnoreCase))
+            {
+                return elementText.Substring(baseElement.Length).Trim();
+            }
+
+            return string.Empty;
+        }
+
+        private static RawElementRow? ParseRawRow(string columnData)
+        {
+            if (string.IsNullOrWhiteSpace(columnData))
+            {
+                return null;
+            }
+
+            try
+            {
+                using var doc = JsonDocument.Parse(columnData);
+                if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                {
+                    return null;
+                }
+
+                var map = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+                foreach (var prop in doc.RootElement.EnumerateObject())
+                {
+                    map[prop.Name] = prop.Value;
+                }
+
+                var type = GetString(map, "Type") ?? string.Empty;
+                var element = GetString(map, "Element") ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(element))
+                {
+                    return null;
+                }
+
+                var solutionLabel = GetString(map, "Solution Label", "SolutionLabel", "Sample ID", "SampleId", "Sample", "Label", "Name") ?? string.Empty;
+                var solnConc = GetDecimal(map, "Soln Conc", "SolnConc");
+                var corrCon = GetDecimal(map, "Corr Con", "CorrCon", "Concentration", "Conc", "Calibrated Conc", "Result");
+                var intensity = GetDecimal(map, "Int", "Intensity", "Net Intensity", "CPS", "Counts", "Signal");
+
+                return new RawElementRow
+                {
+                    Type = type.Trim(),
+                    Element = element.Trim(),
+                    SolutionLabel = solutionLabel.Trim(),
+                    SolnConc = solnConc,
+                    CorrCon = corrCon,
+                    Intensity = intensity
+                };
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string? GetString(Dictionary<string, JsonElement> map, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (map.TryGetValue(key, out var value))
+                {
+                    if (value.ValueKind == JsonValueKind.String)
+                    {
+                        return value.GetString();
+                    }
+
+                    if (value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var num))
+                    {
+                        return num.ToString(CultureInfo.InvariantCulture);
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static decimal? GetDecimal(Dictionary<string, JsonElement> map, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!map.TryGetValue(key, out var value))
+                {
+                    continue;
+                }
+
+                if (value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var num))
+                {
+                    return num;
+                }
+
+                if (value.ValueKind == JsonValueKind.String)
+                {
+                    var str = value.GetString();
+                    if (decimal.TryParse(str, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed))
+                    {
+                        return parsed;
+                    }
+
+                    if (decimal.TryParse(str, NumberStyles.Any, CultureInfo.CurrentCulture, out parsed))
+                    {
+                        return parsed;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private sealed class RawElementRow
+        {
+            public string Type { get; set; } = "";
+            public string Element { get; set; } = "";
+            public string SolutionLabel { get; set; } = "";
+            public decimal? SolnConc { get; set; }
+            public decimal? CorrCon { get; set; }
+            public decimal? Intensity { get; set; }
+        }
+
+        public sealed class ElementDetailRow
+        {
+            public string SolutionLabel { get; set; } = "";
+            public string Element { get; set; } = "";
+            public decimal? SolnConc { get; set; }
+            public decimal? Intensity { get; set; }
+            public string Wavelength { get; set; } = "";
+            public bool IsMessage { get; set; }
+
+            public decimal SortSolnConc => SolnConc ?? -1m;
+            public decimal SortInt => Intensity ?? -1m;
+
+            public string SolnConcDisplay => SolnConc.HasValue ? SolnConc.Value.ToString("F2") : "---";
+            public string IntDisplay => Intensity.HasValue ? Intensity.Value.ToString("F2") : "---";
+
+            public static ElementDetailRow Message(string message)
+            {
+                return new ElementDetailRow
+                {
+                    SolutionLabel = message,
+                    Element = string.Empty,
+                    SolnConc = null,
+                    Intensity = null,
+                    Wavelength = string.Empty,
+                    IsMessage = true
+                };
+            }
+        }
     }
 }

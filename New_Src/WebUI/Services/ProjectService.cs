@@ -70,6 +70,15 @@ public class ProjectInfoDto
     public string? Description { get; set; }
 }
 
+public class RawDataDto
+{
+    [JsonPropertyName("columnData")]
+    public string ColumnData { get; set; } = "";
+
+    [JsonPropertyName("sampleId")]
+    public string? SampleId { get; set; }
+}
+
 public class ProjectDto
 {
     // From import jobs response
@@ -301,6 +310,40 @@ public class ProjectService
         {
             _logger.LogError(ex, "Error loading project {ProjectId}", projectId);
             return ServiceResult<ProjectInfoDto>.Fail($"Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Get raw data rows for a project (paged)
+    /// </summary>
+    public async Task<ServiceResult<List<RawDataDto>>> GetProjectRawRowsAsync(Guid projectId, int skip = 0, int take = 1000)
+    {
+        try
+        {
+            SetAuthHeader();
+
+            var response = await _httpClient.GetAsync($"projects/{projectId}/raw?skip={skip}&take={take}");
+            var content = await response.Content.ReadAsStringAsync();
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = JsonSerializer.Deserialize<ApiResult<List<RawDataDto>>>(content,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                if (result?.Succeeded == true && result.Data != null)
+                {
+                    return ServiceResult<List<RawDataDto>>.Success(result.Data);
+                }
+
+                return ServiceResult<List<RawDataDto>>.Fail(result?.Message ?? "Failed to load raw rows");
+            }
+
+            return ServiceResult<List<RawDataDto>>.Fail($"Server error: {response.StatusCode}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error loading raw rows for project {ProjectId}", projectId);
+            return ServiceResult<List<RawDataDto>>.Fail($"Error: {ex.Message}");
         }
     }
 

@@ -1,32 +1,100 @@
-﻿/* ===================================
+/* ===================================
    ICP - Elements Page Styles
    =================================== */
 
+.elements-page {
+    background: #f5f6f5;
+    padding-bottom: 24px;
+}
 
+.elements-subtab {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: #e8f6f3;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px 6px 0 0;
+}
+
+.elements-filter-label {
+    color: #333333;
+}
+
+.elements-filter-select {
+    width: 160px;
+}
+
+.elements-indicator {
+    height: 3px;
+    background: #2e8b57;
+    border-radius: 0 0 6px 6px;
+    margin-bottom: 10px;
+}
+
+.elements-buttons,
+.elements-details {
+    background: #ffffff;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 10px;
+    margin-bottom: 12px;
+}
+
+.elements-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.elements-chip {
+    min-width: 70px;
+    height: 34px;
+    border-radius: 4px;
+    padding: 0 10px;
+    font-weight: 600;
+    text-transform: none;
+    line-height: 1;
+}
+
+.elements-chip .mud-button-label {
+    font-size: 12px;
+}
+
+.elements-loading {
+    min-height: 160px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.elements-empty {
+    color: #666666;
+}
+
+.elements-msg {
+    color: #757575;
+    font-style: italic;
+}
+
+.elements-details .mud-table-head {
+    background: #f0f0f0;
+}
+
+.elements-details .mud-table-row {
+    height: 30px;
+}
 
 /* Responsive */
-@media (min-width: 960px) and (max-width: 1445px) {
- 
-}
-
 @media (max-width: 960px) {
-    
-
-
-
-}
-
-@media (max-width: 768px) {
-   
-
-
-
+    .elements-grid {
+        gap: 6px;
+    }
 }
 
 @media (max-width: 600px) {
-  
-}
-
-@media (max-width: 380px) {
-    
+    .elements-subtab {
+        flex-direction: column;
+        align-items: flex-start;
+    }
 }
