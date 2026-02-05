@@ -55,9 +55,14 @@
                                         <MudSelectItem Value="@el">@el</MudSelectItem>
                                     }
                                 </MudSelect>
-                                <MudIconButton OnClick="PrevElement" Icon="@Icons.Material.Filled.ChevronLeft" Variant="Variant.Outlined" Size="Size.Small" />
-                                <MudIconButton OnClick="NextElement" Icon="@Icons.Material.Filled.ChevronRight" Variant="Variant.Outlined" Size="Size.Small" />
+                              
                             </MudStack>
+
+                            <MudButtonGroup Variant="Variant.Outlined" Size="Size.Small" Class="d-flex">
+                                <MudButton OnClick="PrevElement" StartIcon="@Icons.Material.Filled.ChevronLeft" Class="flex-grow-1">Prev</MudButton>
+                                <MudButton OnClick="NextElement" EndIcon="@Icons.Material.Filled.ChevronRight" Class="flex-grow-1">Next</MudButton>
+                            </MudButtonGroup>
+
                         </div>
 
                         @* TABS *@
@@ -157,28 +162,28 @@
                         <div class="pa-3 bg-gray-50">
                             <MudStack Spacing="2">
                                 @* Manual Actions *@
-                                <MudGrid Spacing="1">
-                                    <MudItem xs="6"><MudButton OnClick="PreviewManualAsync" Variant="Variant.Outlined" Color="Color.Info" FullWidth="true" Size="Size.Small">Preview</MudButton></MudItem>
-                                    <MudItem xs="6"><MudButton OnClick="ApplyManualAsync" Variant="Variant.Filled" Color="Color.Success" FullWidth="true" Size="Size.Small">Apply</MudButton></MudItem>
-                                    <MudItem xs="6"><MudButton OnClick="ResetPreview" Variant="Variant.Text" Color="Color.Default" FullWidth="true" Size="Size.Small">Reset</MudButton></MudItem>
-                                    <MudItem xs="6"><MudButton OnClick="UndoManualAsync" Variant="Variant.Text" Color="Color.Error" FullWidth="true" Size="Size.Small">Undo</MudButton></MudItem>
+                                <MudGrid Spacing="2">
+                                    @* <MudItem xs="6"><MudButton OnClick="PreviewManualAsync" Variant="Variant.Outlined" Color="Color.Info" FullWidth="true" Size="Size.Small">Preview</MudButton></MudItem> *@
+                                    <MudItem xs="12"><MudButton OnClick="ApplyManualAsync" Variant="Variant.Filled" Color="Color.Success" FullWidth="true" Size="Size.Small">Apply</MudButton></MudItem>
+                                    <MudItem xs="6"><MudButton OnClick="ResetPreview" Variant="Variant.Outlined" Color="Color.Default" FullWidth="true" Size="Size.Small">Reset</MudButton></MudItem>
+                                    <MudItem xs="6"><MudButton OnClick="UndoManualAsync" Variant="Variant.Outlined" Color="Color.Error" FullWidth="true" Size="Size.Small">Undo</MudButton></MudItem>
                                 </MudGrid>
 
                                 <MudDivider />
 
                                 @* Global Actions *@
                                 <MudGrid Spacing="1">
-                                    <MudItem xs="6">
+                                    <MudItem xs="12">
                                         <MudButton OnClick="RunCalibration" Variant="Variant.Outlined" Color="Color.Primary" FullWidth="true" Size="Size.Small">Calibration</MudButton>
                                     </MudItem>
-                                    <MudItem xs="6">
+                                    @* <MudItem xs="6">
                                         <MudButton OnClick="GetCurrentStats" Variant="Variant.Outlined" Color="Color.Primary" FullWidth="true" Size="Size.Small">Stats</MudButton>
-                                    </MudItem>
+                                    </MudItem> *@
                                 </MudGrid>
 
-                                <MudButton OnClick="RunOptimization" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" StartIcon="@Icons.Material.Filled.AutoFixHigh">
+                                @* <MudButton OnClick="RunOptimization" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" StartIcon="@Icons.Material.Filled.AutoFixHigh">
                                     @( _isLoading ? "Optimizing..." : "Run Optimization" )
-                                </MudButton>
+                                </MudButton> *@
                             </MudStack>
                         </div>
                     </MudCardContent>
