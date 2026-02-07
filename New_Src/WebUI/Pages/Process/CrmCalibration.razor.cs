@@ -2,8 +2,11 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Routing;
 using Microsoft.JSInterop;
 using MudBlazor;
-using WebUI.Services;
 using System;
+using System.Globalization;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using WebUI.Services;
 
 namespace WebUI.Pages.Process
 {
@@ -15,14 +18,9 @@ namespace WebUI.Pages.Process
         [Inject]
         private IJSRuntime JSRuntime { get; set; } = default!;
 
-        // Chart render guards (FIX)
-        private bool _chartsRendered = false;
-        private bool _isRenderingCharts = false;
-
         // Chart references
-        private ElementReference chart1Canvas;
         private ElementReference chart2Canvas;
-        private IJSObjectReference? chartModule;
+        private bool _chartsRendered = false;
 
         private Guid? _projectId;
         private decimal _minDiff = -10m;
@@ -30,13 +28,24 @@ namespace WebUI.Pages.Process
         private int _maxIterations = 100;
         private int _populationSize = 50;
         private bool _useMultiModel = true;
-        private bool _detailsExpanded = true;
         private IEnumerable<string> _selectedElements = new HashSet<string>();
         private List<string> _allElements = new();
         private string? _focusElement;
         private decimal _previewBlank = 0m;
         private double _previewScale = 1.0;
         private string _sampleFilter = "";
+
+        // فیلدهای مربوط به نمودار پایین (Index vs Value)
+        private List<AdvancedPivotRowDto> _secondaryRows = new();
+        private List<string> _blankLabelLines = new();
+        private string _calibrationRange = "[0 to 0]";
+        private HashSet<string> _excludedLabels = new(StringComparer.OrdinalIgnoreCase);
+        private List<ExcludeLabelRow> _excludeLabelRows = new();
+        private Dictionary<string, CrmListItemDto> _crmReference = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly Regex CrmIdRegex = new(
+            @"(?i)(?:\bCRM\b|\bOREAS\b)?[\s-]*(\d+[a-zA-Z]?)[\s-]*(?:\bpar\b)?",
+            RegexOptions.Compiled);
+
         private BlankScaleOptimizationResult? _result;
         private ManualBlankScaleResult? _manualResult;
         private List<OptimizedSampleRow> _optimizedRows = new();
@@ -46,13 +55,12 @@ namespace WebUI.Pages.Process
         private List<CrmMethodOptionDto> _crmOptions = new();
         private Dictionary<string, string> _crmSelections = new(StringComparer.OrdinalIgnoreCase);
         private HashSet<string> _includedCrmIds = new(StringComparer.OrdinalIgnoreCase);
+        private HashSet<string> _includedCrmLabels = new(StringComparer.OrdinalIgnoreCase);
         private string _excludedLabelsInput = string.Empty;
         private List<CrmSelectionRowDto> _crmSelectionRows = new();
 
         // UI toggles to match Python controls
         private bool _showCertified = true;
-        private bool _showCrm = true;
-        private bool _showVerification = true;
         private bool _showAcceptableRange = true;
 
         // Scale Application Range (Python feature)
@@ -81,7 +89,17 @@ namespace WebUI.Pages.Process
         private HashSet<string> _pivotSelectedElements = new(StringComparer.OrdinalIgnoreCase);
         private List<PivotRowVm> _pivotRows = new();
 
-        private bool _showAllDataInPivot = false;
+        // Dialog visibility flags
+        private bool _selectVerificationsDialogVisible = false;
+        private bool _excludeDialogVisible = false;
+        private bool _reportDialogVisible = false;
+
+        // Report values
+        private decimal _reportBlank = 0m;
+        private decimal _reportScale = 1m;
+
+        // CRM label options for selection
+        private List<string> _crmLabelOptions = new();
 
         private enum PivotValueMode
         {
@@ -91,6 +109,13 @@ namespace WebUI.Pages.Process
             DiffAfter
         }
 
+        private int FocusElementIndex => string.IsNullOrWhiteSpace(_focusElement) ? -1 : _allElements.IndexOf(_focusElement);
+        private bool CanPrev => FocusElementIndex > 0;
+        private bool CanNext => FocusElementIndex >= 0 && FocusElementIndex < _allElements.Count - 1;
+        private string ScaleRangeDisplay =>
+            _scaleRangeMin.HasValue && _scaleRangeMax.HasValue
+                ? $"Scale Range: {_scaleRangeMin.Value:0.###} to {_scaleRangeMax.Value:0.###}"
+                : "Scale Range: Not Set";
 
         private enum PivotRowType
         {
@@ -108,6 +133,33 @@ namespace WebUI.Pages.Process
             public Dictionary<string, decimal?> Values { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         }
 
+        // کلاس‌های کمکی برای نمودار پایین
+        private sealed class ExcludeLabelRow
+        {
+            public string SolutionLabel { get; set; } = "";
+            public decimal? Value { get; set; }
+            public string ValueDisplay => Value.HasValue ? Value.Value.ToString("0.####") : "---";
+        }
+
+        private sealed class CalibrationRow
+        {
+            public string SolutionLabel { get; set; } = "";
+            public string CrmId { get; set; } = "";
+            public decimal? OriginalValue { get; set; }
+            public decimal? CrmValue { get; set; }
+        }
+
+        private sealed record OptimizedSampleRow(
+            string SolutionLabel,
+            string CrmId,
+            string Element,
+            decimal? OriginalValue,
+            decimal? OptimizedValue,
+            decimal? CrmValue,
+            decimal DiffBefore,
+            decimal DiffAfter,
+            bool IsPassed);
+
         private void ToggleDetailsMaximize()
         {
             _detailsMaximized = !_detailsMaximized;
@@ -120,18 +172,14 @@ namespace WebUI.Pages.Process
         private static string FormatDec(decimal? v)
         {
             if (v == null) return "-";
-            // اگر می‌خواهی تعداد اعشار دقیق‌تر باشد، اینجا تنظیم کن
             return v.Value.ToString("0.####");
         }
 
         private IEnumerable<string> PivotColumns()
         {
-            // اگر کاربر چیزی انتخاب نکرد، حداقل FocusElement را نشان بده
             if (_pivotSelectedElements.Count == 0 && !string.IsNullOrWhiteSpace(_focusElement))
                 return new[] { _focusElement! };
 
-            // تعداد ستون‌ها را برای UX محدود کن (مثلاً 12)
-            //return _pivotSelectedElements.Take(12);
             return _pivotSelectedElements;
         }
 
@@ -143,19 +191,18 @@ namespace WebUI.Pages.Process
 
             try
             {
-                // لود کل دیتای پروژه (854 ردیف) از سرویس اصلی پیوت
                 var request = new AdvancedPivotRequest(
                     ProjectId: _projectId.Value,
                     SearchText: _sampleFilter,
-                    SelectedElements: _allElements.ToList(), // Argument 4
-                    NumberFilters: null,                    // Argument 5
-                    UseOxide: false,                        // Argument 6
-                    UseInt: false,                          // Argument 7
-                    DecimalPlaces: 4,                       // Argument 8
-                    Page: 1,                                // Argument 9
-                    PageSize: 2000,                         // لود کامل برای اسکرول (Argument 10)
-                    MergeRepeats: false,                    // Argument 11
-                    Aggregation: "First"                    // Argument 12
+                    SelectedElements: _allElements.ToList(),
+                    NumberFilters: null,
+                    UseOxide: false,
+                    UseInt: false,
+                    DecimalPlaces: 4,
+                    Page: 1,
+                    PageSize: 2000,
+                    MergeRepeats: false,
+                    Aggregation: "First"
                 );
 
                 var result = await PivotService.GetAdvancedPivotTableAsync(request);
@@ -166,12 +213,10 @@ namespace WebUI.Pages.Process
                     var rows = new List<PivotRowVm>();
                     int order = 0;
 
-                    // دسترسی به دیتای محدود شده CRMها
                     var optimizedData = _manualResult?.OptimizedData ?? _result?.OptimizedData;
 
                     foreach (var s in result.Data.Rows)
                     {
-                        // 1. اضافه کردن ردیف اصلی نمونه (برای همه 854 ردیف)
                         rows.Add(new PivotRowVm
                         {
                             Order = order++,
@@ -180,11 +225,9 @@ namespace WebUI.Pages.Process
                             Values = s.Values
                         });
 
-                        // 2. اگر این ردیف جزو CRMهای کالیبراسیون بود، ردیف‌های مرجع و Diff را تزریق کن
                         var crmMatch = optimizedData?.FirstOrDefault(x => x.SolutionLabel == s.SolutionLabel);
                         if (crmMatch != null && !string.IsNullOrEmpty(crmMatch.CrmId))
                         {
-                            // ردیف زرد (Reference)
                             rows.Add(new PivotRowVm
                             {
                                 Order = order++,
@@ -193,7 +236,6 @@ namespace WebUI.Pages.Process
                                 Values = BuildDictValues(crmMatch.CrmValues, cols)
                             });
 
-                            // ردیف صورتی (Diff %)
                             rows.Add(new PivotRowVm
                             {
                                 Order = order++,
@@ -224,9 +266,6 @@ namespace WebUI.Pages.Process
             foreach (var el in cols)
             {
                 decimal? v = null;
-
-                // اینجا تعیین می‌کنیم Sample Row مقدار Original باشد یا Optimized
-                // (پیشنهاد: فقط Original/Optimized را برای _pivotMode نگه دار)
                 if (_pivotMode == PivotValueMode.Original)
                     s.OriginalValues.TryGetValue(el, out v);
                 else
@@ -277,9 +316,9 @@ namespace WebUI.Pages.Process
         {
             _resultsTabIndex = newTabIndex;
 
-            if (newTabIndex == 1 && _result != null && !_chartsRendered)
+            if (newTabIndex == 1 && _result != null)
             {
-                await Task.Yield();
+                await Task.Delay(100);
                 await RenderChartsAsync();
             }
         }
@@ -292,7 +331,6 @@ namespace WebUI.Pages.Process
 
             RebuildPivot();
         }
-
 
         private void UpdateOptimizedRows()
         {
@@ -315,20 +353,17 @@ namespace WebUI.Pages.Process
             UpdateOptimizedRows();
             UpdateManualRows();
 
-            // اگر user هنوز ستون انتخاب نکرده بود، focus رو ستون اول کن
             if (_pivotSelectedElements.Count == 0)
             {
                 _pivotSelectedElements.Add(_focusElement);
                 RebuildPivot();
             }
 
-            // Ensure UI updates and then refresh charts that depend on focus element
             StateHasChanged();
             await Task.Delay(50);
 
-            // Re-render the calibration scatter and update the element improvement metric
-            await RefreshCalibrationAsync();
-            await UpdateElementImprovementChartAsync();
+            await LoadSecondaryPlotRowsAsync();
+            await RefreshChartsAsync();
             StateHasChanged();
         }
 
@@ -350,8 +385,11 @@ namespace WebUI.Pages.Process
 
             await LoadElements();
             await LoadCrmOptions();
+            await LoadCrmReferenceAsync();
             await LoadCrmSelections();
-            //await GetCurrentStats();
+            LoadExcludedLabelsFromInput();
+            await LoadSecondaryPlotRowsAsync();
+            await GetCurrentStats();
         }
 
         private async Task LoadCrmOptions()
@@ -377,6 +415,18 @@ namespace WebUI.Pages.Process
             else if (!string.IsNullOrWhiteSpace(result.Message))
             {
                 Snackbar.Add(result.Message, Severity.Warning);
+            }
+        }
+
+        private async Task LoadCrmReferenceAsync()
+        {
+            var result = await CrmService.GetCrmListAsync(pageSize: 0);
+            if (result.Succeeded && result.Data != null)
+            {
+                _crmReference = result.Data.Items
+                    .Where(x => !string.IsNullOrWhiteSpace(x.CrmId))
+                    .GroupBy(x => x.CrmId, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
             }
         }
 
@@ -467,16 +517,21 @@ namespace WebUI.Pages.Process
             _crmSelections[crmId] = method;
         }
 
-        private void ToggleIncludedCrmId(string crmId, bool isIncluded)
+        private async Task ToggleIncludedCrmId(string label, bool isIncluded)
         {
             if (isIncluded)
-                _includedCrmIds.Add(crmId);
+                _includedCrmLabels.Add(label);
             else
-                _includedCrmIds.Remove(crmId);
+                _includedCrmLabels.Remove(label);
+
+            await RenderCalibrationChartAsync();
         }
 
         private List<string> ParseExcludedLabels()
         {
+            if (_excludedLabels.Count > 0)
+                return _excludedLabels.ToList();
+
             if (string.IsNullOrWhiteSpace(_excludedLabelsInput))
                 return new List<string>();
 
@@ -486,6 +541,26 @@ namespace WebUI.Pages.Process
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
+        }
+
+        private void LoadExcludedLabelsFromInput()
+        {
+            if (string.IsNullOrWhiteSpace(_excludedLabelsInput))
+                return;
+
+            _excludedLabels = new HashSet<string>(
+                _excludedLabelsInput
+                    .Split(new[] { ',', ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(x => x.Trim())
+                    .Where(x => !string.IsNullOrWhiteSpace(x)),
+                StringComparer.OrdinalIgnoreCase);
+        }
+
+        private void SyncExcludedLabelsInput()
+        {
+            _excludedLabelsInput = _excludedLabels.Count == 0
+                ? string.Empty
+                : string.Join(", ", _excludedLabels.OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
         }
 
         private async Task LoadElements()
@@ -505,6 +580,215 @@ namespace WebUI.Pages.Process
             }
         }
 
+        private async Task LoadSecondaryPlotRowsAsync()
+        {
+            if (_projectId == null || string.IsNullOrWhiteSpace(_focusElement))
+            {
+                _secondaryRows.Clear();
+                _blankLabelLines.Clear();
+                _excludeLabelRows.Clear();
+                await RenderSecondaryChartAsync();
+                return;
+            }
+
+            var rows = new List<AdvancedPivotRowDto>();
+            var page = 1;
+            const int pageSize = 2000;
+
+            while (true)
+            {
+                var request = new AdvancedPivotRequest(
+                    ProjectId: _projectId.Value,
+                    SearchText: null,
+                    SelectedSolutionLabels: null,
+                    SelectedElements: new List<string> { _focusElement },
+                    NumberFilters: null,
+                    UseOxide: false,
+                    UseInt: false,
+                    DecimalPlaces: 4,
+                    Page: page,
+                    PageSize: pageSize,
+                    Aggregation: "First",
+                    MergeRepeats: false);
+
+                var result = await PivotService.GetAdvancedPivotTableAsync(request);
+                if (!result.Succeeded || result.Data == null)
+                {
+                    if (!string.IsNullOrWhiteSpace(result.Message))
+                    {
+                        Snackbar.Add(result.Message, Severity.Warning);
+                    }
+                    break;
+                }
+
+                rows.AddRange(result.Data.Rows);
+
+                if (result.Data.Rows.Count < pageSize)
+                    break;
+
+                page++;
+            }
+
+            _secondaryRows = rows
+                .OrderBy(r => r.OriginalIndex)
+                .ThenBy(r => r.SolutionLabel, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            UpdateBlankLabels();
+            UpdateExcludeLabelRows();
+            UpdateCrmLabelOptionsFromRows();
+            await RenderSecondaryChartAsync();
+        }
+
+        private void UpdateCrmLabelOptionsFromRows()
+        {
+            var calibrationRows = BuildCalibrationRows();
+            if (calibrationRows.Count == 0)
+                return;
+
+            var labels = calibrationRows
+                .Select(r => r.SolutionLabel)
+                .Where(label => !string.IsNullOrWhiteSpace(label))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(label => label, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            _crmLabelOptions = labels;
+
+            if (_includedCrmLabels.Count == 0)
+            {
+                foreach (var label in labels)
+                    _includedCrmLabels.Add(label);
+            }
+        }
+
+        private void UpdateBlankLabels()
+        {
+            _blankLabelLines.Clear();
+            if (string.IsNullOrWhiteSpace(_focusElement) || !_secondaryRows.Any())
+                return;
+
+            foreach (var row in _secondaryRows)
+            {
+                if (!IsBlankLabel(row.SolutionLabel))
+                    continue;
+
+                row.Values.TryGetValue(_focusElement, out var value);
+                var display = value.HasValue ? value.Value.ToString("0.####") : "---";
+                _blankLabelLines.Add($"{row.SolutionLabel}: {display}");
+            }
+        }
+
+        private void UpdateExcludeLabelRows()
+        {
+            _excludeLabelRows = _secondaryRows
+                .Select(row =>
+                {
+                    row.Values.TryGetValue(_focusElement ?? string.Empty, out var value);
+                    return new ExcludeLabelRow
+                    {
+                        SolutionLabel = row.SolutionLabel,
+                        Value = value
+                    };
+                })
+                .OrderBy(row => row.SolutionLabel, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static bool IsBlankLabel(string label)
+        {
+            if (string.IsNullOrWhiteSpace(label))
+                return false;
+
+            return label.Contains("BLANK", StringComparison.OrdinalIgnoreCase) ||
+                   label.Contains("BLNK", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsCrmLabel(string label)
+        {
+            if (string.IsNullOrWhiteSpace(label))
+                return false;
+
+            return label.Contains("CRM", StringComparison.OrdinalIgnoreCase) ||
+                   label.Contains("OREAS", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ExtractCrmIdFromLabel(string label)
+        {
+            if (string.IsNullOrWhiteSpace(label))
+                return string.Empty;
+
+            var match = CrmIdRegex.Match(label);
+            return match.Success ? match.Groups[1].Value : string.Empty;
+        }
+
+        private List<CalibrationRow> BuildCalibrationRows()
+        {
+            var rows = new List<CalibrationRow>();
+            var dataSource = _manualResult?.OptimizedData ?? _result?.OptimizedData;
+
+            if (dataSource != null && dataSource.Any())
+            {
+                foreach (var sample in dataSource)
+                {
+                    if (string.IsNullOrWhiteSpace(sample.CrmId))
+                        continue;
+                    if (!IsCrmLabel(sample.SolutionLabel))
+                        continue;
+
+                    if (!sample.CrmValues.TryGetValue(_focusElement!, out var crmValue) || !crmValue.HasValue)
+                        continue;
+
+                    sample.OriginalValues.TryGetValue(_focusElement!, out var originalValue);
+                    sample.OptimizedValues.TryGetValue(_focusElement!, out var optimizedValue);
+                    var displayValue = originalValue ?? optimizedValue;
+                    if (!displayValue.HasValue)
+                        continue;
+
+                    rows.Add(new CalibrationRow
+                    {
+                        SolutionLabel = sample.SolutionLabel,
+                        CrmId = sample.CrmId,
+                        OriginalValue = displayValue,
+                        CrmValue = crmValue
+                    });
+                }
+
+                return rows;
+            }
+
+            if (_secondaryRows.Count == 0 || _crmReference.Count == 0)
+                return rows;
+
+            foreach (var row in _secondaryRows)
+            {
+                if (!IsCrmLabel(row.SolutionLabel))
+                    continue;
+                if (!row.Values.TryGetValue(_focusElement!, out var rawValue) || !rawValue.HasValue)
+                    continue;
+
+                var crmId = ExtractCrmIdFromLabel(row.SolutionLabel);
+                if (string.IsNullOrWhiteSpace(crmId))
+                    continue;
+
+                if (!_crmReference.TryGetValue(crmId, out var crmItem))
+                    continue;
+
+                if (!crmItem.Elements.TryGetValue(_focusElement!, out var certValue))
+                    continue;
+
+                rows.Add(new CalibrationRow
+                {
+                    SolutionLabel = row.SolutionLabel,
+                    CrmId = crmId,
+                    OriginalValue = rawValue.Value,
+                    CrmValue = certValue
+                });
+            }
+
+            return rows;
+        }
+
         private async Task GetCurrentStats()
         {
             if (_projectId == null) return;
@@ -518,10 +802,10 @@ namespace WebUI.Pages.Process
             {
                 _result = result.Data;
                 UpdateOptimizedRows();
-                StateHasChanged(); // Ensure UI updates before rendering charts
-                await Task.Delay(150); // Wait for DOM to update
+                StateHasChanged();
+                await Task.Delay(150);
                 await RenderChartsAsync();
-                StateHasChanged(); // Refresh UI after charts are rendered
+                StateHasChanged();
             }
             else
             {
@@ -532,9 +816,6 @@ namespace WebUI.Pages.Process
             StateHasChanged();
         }
 
-        /// <summary>
-        /// دکمه Calibration - برای کالیبریشن فوری و نمایش نمودارها
-        /// </summary>
         private async Task RunCalibration()
         {
             if (_projectId == null) return;
@@ -550,14 +831,12 @@ namespace WebUI.Pages.Process
             {
                 _result = result.Data;
                 UpdateOptimizedRows();
-
-                // تغییر به Tab2 برای نمایش نمودارها
                 _resultsTabIndex = 1;
 
-                StateHasChanged(); // Ensure UI updates before rendering charts
-                await Task.Delay(250); // Wait for tab animation and DOM to update
+                StateHasChanged();
+                await Task.Delay(250);
                 await RenderChartsAsync();
-                StateHasChanged(); // Refresh UI after charts are rendered
+                StateHasChanged();
 
                 Snackbar.Add($"Calibration Complete! Improvement: {_result.ImprovementPercent:F1}%", Severity.Success);
             }
@@ -593,14 +872,12 @@ namespace WebUI.Pages.Process
                 PopulationSize = _populationSize,
                 UseMultiModel = _useMultiModel,
                 Elements = _selectedElements.Any() ? _selectedElements.ToList() : null,
-                // Acceptable Ranges (Python: calculate_dynamic_range)
                 RangeLow = _rangeLow,
                 RangeMid = _rangeMid,
                 RangeHigh1 = _rangeHigh1,
                 RangeHigh2 = _rangeHigh2,
                 RangeHigh3 = _rangeHigh3,
                 RangeHigh4 = _rangeHigh4,
-                // Scale Application Range
                 ScaleRangeMin = _scaleRangeMin,
                 ScaleRangeMax = _scaleRangeMax,
                 ScaleAbove50Only = _scaleAbove50Only,
@@ -615,10 +892,10 @@ namespace WebUI.Pages.Process
             {
                 _result = result.Data;
                 UpdateOptimizedRows();
-                StateHasChanged(); // Ensure UI updates before rendering charts
-                await Task.Delay(150); // Wait for DOM to update
+                StateHasChanged();
+                await Task.Delay(150);
                 await RenderChartsAsync();
-                StateHasChanged(); // Refresh UI after charts are rendered
+                StateHasChanged();
                 Snackbar.Add($"Optimization complete! Improvement: {_result.ImprovementPercent:F1}%", Severity.Success);
             }
             else
@@ -629,7 +906,6 @@ namespace WebUI.Pages.Process
             _isLoading = false;
             StateHasChanged();
         }
-
 
         private async Task OnBeforeNavigation(LocationChangingContext context)
         {
@@ -661,10 +937,7 @@ namespace WebUI.Pages.Process
                 if (result.Succeeded && result.Data != null)
                 {
                     _manualResult = result.Data;
-                    UpdateManualRows(); // این متد لیست _manualRows را پر می‌کند
-
-                    _detailsExpanded = true; // اجبار به باز شدن پنل
-                    _result = _result ?? new BlankScaleOptimizationResult(); // یک مقدار غیر نال موقت برای عبور از شرط نمایش
+                    UpdateManualRows();
                 }
                 else
                 {
@@ -678,7 +951,7 @@ namespace WebUI.Pages.Process
             finally
             {
                 _isLoading = false;
-                StateHasChanged(); // رندر مجدد صفحه
+                StateHasChanged();
             }
         }
 
@@ -701,6 +974,8 @@ namespace WebUI.Pages.Process
                 _manualResult = result.Data;
                 UpdateManualRows();
                 Snackbar.Add("Manual blank/scale applied.", Severity.Success);
+                await RenderCalibrationChartAsync();
+                await RenderSecondaryChartAsync();
             }
             else
             {
@@ -722,6 +997,8 @@ namespace WebUI.Pages.Process
             if (result.Succeeded)
             {
                 Snackbar.Add("Undo applied.", Severity.Success);
+                _previewBlank = 0m;
+                _previewScale = 1.0;
                 await GetCurrentStats();
             }
             else
@@ -737,16 +1014,6 @@ namespace WebUI.Pages.Process
             _previewBlank = 0m;
             _previewScale = 1.0;
         }
-
-        //private void SetFocusElement(string? element)
-        //{
-        //    if (string.IsNullOrWhiteSpace(element))
-        //        return;
-
-        //    _focusElement = element;
-        //    UpdateOptimizedRows();
-        //    UpdateManualRows();
-        //}
 
         private async Task PrevElement()
         {
@@ -767,16 +1034,6 @@ namespace WebUI.Pages.Process
             if (idx < _allElements.Count - 1)
                 await SetFocusElement(_allElements[idx + 1]);
         }
-
-        //private void UpdateOptimizedRows()
-        //{
-        //    _optimizedRows = BuildRows(_result?.OptimizedData, _focusElement);
-        //}
-
-        //private void UpdateManualRows()
-        //{
-        //    _manualRows = BuildRows(_manualResult?.OptimizedData, _focusElement);
-        //}
 
         private List<OptimizedSampleRow> BuildRows(IEnumerable<OptimizedSampleDto>? data, string? element)
         {
@@ -820,46 +1077,23 @@ namespace WebUI.Pages.Process
                 r.SolutionLabel.Contains(_sampleFilter, StringComparison.OrdinalIgnoreCase));
         }
 
-        private sealed record OptimizedSampleRow(
-            string SolutionLabel,
-            string CrmId,
-            string Element,
-            decimal? OriginalValue,
-            decimal? OptimizedValue,
-            decimal? CrmValue,
-            decimal DiffBefore,
-            decimal DiffAfter,
-            bool IsPassed);
-
-        /// <summary>
-        /// Opens the Acceptable Ranges dialog (matches Python's open_range_dialog)
-        /// </summary>
         private void OpenRangesDialog()
         {
             _rangesDialogVisible = true;
         }
 
-        /// <summary>
-        /// Closes the Acceptable Ranges dialog
-        /// </summary>
         private void CloseRangesDialog()
         {
             _rangesDialogVisible = false;
         }
 
-        /// <summary>
-        /// Applies the ranges and refreshes statistics
-        /// </summary>
         private async Task ApplyRangesAsync()
         {
             _rangesDialogVisible = false;
-            await GetCurrentStats();
+            await RenderCalibrationChartAsync();
             Snackbar.Add("Acceptable ranges updated", Severity.Success);
         }
 
-        /// <summary>
-        /// Resets the ranges to default values
-        /// </summary>
         private void ResetRanges()
         {
             _rangeLow = 2.0m;
@@ -870,7 +1104,6 @@ namespace WebUI.Pages.Process
             _rangeHigh4 = 3.0m;
         }
 
-
         private string GetSampleDetailsTitle()
         {
             if (_manualRows.Any())
@@ -878,86 +1111,45 @@ namespace WebUI.Pages.Process
             return "Optimized Sample Details";
         }
 
-        private string GetImprovementCardClass()
-        {
-            var baseClass = "summary-card";
-            var statusClass = _result?.ImprovementPercent >= 0 ? "success" : "error";
-            return $"{baseClass} {statusClass}";
-        }
-
         // ==========================================
-        // Chart Rendering Methods for Tab2
+        // Chart Rendering Methods
         // ==========================================
 
         /// <summary>
-        /// Renders both charts on Tab2
+        /// Renders all charts
         /// </summary>
         private async Task RenderChartsAsync()
         {
-            if (_result == null) return;
-            if (_isRenderingCharts) return;
-
-            _isRenderingCharts = true;
             try
             {
-                await JSRuntime.InvokeVoidAsync("destroyChart", "elementChart");
                 await JSRuntime.InvokeVoidAsync("destroyChart", "calibrationChart");
+                await JSRuntime.InvokeVoidAsync("destroyChart", "secondaryChart");
+                await JSRuntime.InvokeVoidAsync("destroyChart", "elementChart");
 
-                await InvokeAsync(StateHasChanged);
-                await Task.Yield();
+                await Task.Delay(150);
 
-                await RenderElementImprovementChartAsync();
-                await RenderCalibrationChartAsync();
+                if (_result != null)
+                {
+                    await RenderCalibrationChartAsync();
+                    await RenderElementImprovementChartAsync();
+                }
+
+                await RenderSecondaryChartAsync();
 
                 _chartsRendered = true;
             }
-            finally
+            catch (Exception ex)
             {
-                _isRenderingCharts = false;
+                Console.WriteLine($"Error rendering charts: {ex.Message}");
             }
         }
 
-        /// <summary>
-        /// Renders the Pass/Fail statistics chart
-        /// </summary>
-        private async Task RenderPassFailChartAsync()
+        private async Task RefreshChartsAsync()
         {
-            try
-            {
-                var chartData = GetPassFailChartData();
-
-                var chartConfig = new
-                {
-                    type = "bar",
-                    data = chartData,
-                    options = new
-                    {
-                        responsive = true,
-                        maintainAspectRatio = false,
-                        animation = new
-                        {
-                            duration = 750,
-                            easing = "easeInOutQuart"
-                        },
-                        plugins = new
-                        {
-                            legend = new { display = true, position = "top" },
-                            tooltip = new { backgroundColor = "rgba(0,0,0,0.7)" }
-                        },
-                        scales = new
-                        {
-                            y = new { beginAtZero = true }
-                        }
-                    }
-                };
-
-                // Create chart via JS interop
-                await JSRuntime.InvokeVoidAsync("createChart", "passFailChart", chartConfig);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error rendering pass/fail chart: {ex.Message}");
-            }
+            await Task.Delay(10);
+            await RenderCalibrationChartAsync();
+            await RenderSecondaryChartAsync();
+            StateHasChanged();
         }
 
         /// <summary>
@@ -991,15 +1183,12 @@ namespace WebUI.Pages.Process
                         {
                             y = new
                             {
-                                // اصلاح مهم: حذف max = 100 و ticks ثابت
-                                // این کار باعث می‌شود نمودار مثل پایتون بر اساس داده‌ها اسکیل شود
                                 beginAtZero = true
                             }
                         }
                     }
                 };
 
-                // Create chart via JS interop
                 await JSRuntime.InvokeVoidAsync("createChart", "elementChart", chartConfig);
             }
             catch (Exception ex)
@@ -1007,59 +1196,7 @@ namespace WebUI.Pages.Process
                 Console.WriteLine($"Error rendering element improvement chart: {ex.Message}");
             }
         }
-        // ==========================================
-        // Chart Data Methods for Tab2
-        // ==========================================
 
-        /// <summary>
-        /// Gets chart data for Pass/Fail statistics per Element (Chart 1)
-        /// FIXED: Uses ElementOptimizations instead of global PassedBefore/After
-        /// </summary>
-        public object GetPassFailChartData()
-        {
-            if (_result?.ElementOptimizations == null || !_result.ElementOptimizations.Any())
-                return new { labels = Array.Empty<string>(), datasets = Array.Empty<object>() };
-
-            var elements = _result.ElementOptimizations.Keys.OrderBy(x => x).ToList();
-            var passedBeforeList = new List<int>();
-            var passedAfterList = new List<int>();
-
-            foreach (var element in elements)
-            {
-                var opt = _result.ElementOptimizations[element];
-                passedBeforeList.Add(opt.PassedBefore);
-                passedAfterList.Add(opt.PassedAfter);
-            }
-
-            return new
-            {
-                labels = elements.ToArray(),
-                datasets = new object[]
-                {
-                    new
-                    {
-                        label = "Passed Before",
-                        data = passedBeforeList.ToArray(),
-                        backgroundColor = "#ff9800",
-                        borderColor = "#e65100",
-                        borderWidth = 1
-                    },
-                    new
-                    {
-                        label = "Passed After",
-                        data = passedAfterList.ToArray(),
-                        backgroundColor = "#4caf50",
-                        borderColor = "#2e7d32",
-                        borderWidth = 1
-                    }
-                }
-            };
-        }
-
-        /// <summary>
-        /// Gets chart data for Element-wise Average Diff % (Chart 2)
-        /// FIXED: Uses MeanDiffBefore/After instead of Pass Rate %
-        /// </summary>
         public object GetElementImprovementChartData()
         {
             if (_result?.ElementOptimizations == null || !_result.ElementOptimizations.Any())
@@ -1105,30 +1242,30 @@ namespace WebUI.Pages.Process
             };
         }
 
-        /// <summary>
-        /// Builds chart data for the Calibration scatter similar to Python's plot_calib
-        /// </summary>
         public object GetCalibrationChartData()
         {
-            var dataSource = _manualResult?.OptimizedData ?? _result?.OptimizedData;
-            if (dataSource == null || string.IsNullOrWhiteSpace(_focusElement))
+            if (string.IsNullOrWhiteSpace(_focusElement))
                 return new { labels = Array.Empty<string>(), datasets = Array.Empty<object>() };
 
-            // فیلتر کردن داده‌ها برای عنصر انتخاب شده
-            var rows = BuildRows(dataSource, _focusElement).ToList();
+            var excludedLabels = new HashSet<string>(ParseExcludedLabels(), StringComparer.OrdinalIgnoreCase);
+            var calibrationRows = BuildCalibrationRows();
+            if (_crmLabelOptions.Count > 0)
+            {
+                calibrationRows = calibrationRows
+                    .Where(r => _includedCrmLabels.Contains(r.SolutionLabel))
+                    .ToList();
+            }
 
-            // حذف موارد Exclude شده (مشابه پایتون)
-            var excludedLabels = ParseExcludedLabels();
-            if (excludedLabels.Any())
-                rows = rows.Where(r => !excludedLabels.Contains(r.SolutionLabel, StringComparer.OrdinalIgnoreCase)).ToList();
-
-            var crmRows = rows.Where(r => !string.IsNullOrWhiteSpace(r.CrmId)).ToList();
-            if (!crmRows.Any())
+            if (!calibrationRows.Any())
                 return new { labels = Array.Empty<string>(), datasets = Array.Empty<object>() };
 
-            // گروه‌بندی بر اساس CRM ID برای محور X
-            var crmIds = crmRows.Select(r => r.CrmId).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToList();
-            var crmToIndex = crmIds.Select((id, i) => new { id, i }).ToDictionary(x => x.id, x => x.i, StringComparer.OrdinalIgnoreCase);
+            var crmIds = calibrationRows.Select(r => r.CrmId)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(x => x)
+                .ToList();
+
+            var crmToIndex = crmIds.Select((id, i) => new { id, i })
+                .ToDictionary(x => x.id, x => x.i, StringComparer.OrdinalIgnoreCase);
 
             var datasets = new List<object>();
 
@@ -1138,8 +1275,7 @@ namespace WebUI.Pages.Process
 
                 foreach (var crm in crmIds)
                 {
-                    // پیدا کردن مقدار Certified برای این CRM
-                    var refRow = crmRows.FirstOrDefault(r => r.CrmId == crm && r.CrmValue.HasValue);
+                    var refRow = calibrationRows.FirstOrDefault(r => r.CrmId == crm && r.CrmValue.HasValue);
                     if (refRow == null) continue;
 
                     var certVal = refRow.CrmValue.Value;
@@ -1149,15 +1285,13 @@ namespace WebUI.Pages.Process
                     var upper = (double)(certVal + tol);
                     var x = crmToIndex[crm];
 
-                    // خط پایین
                     rangePoints.Add(new { x = x - 0.25, y = lower });
                     rangePoints.Add(new { x = x + 0.25, y = lower });
-                    rangePoints.Add(new { x = (double?)null, y = (double?)null }); // قطع اتصال
+                    rangePoints.Add(new { x = (double?)null, y = (double?)null });
 
-                    // خط بالا
                     rangePoints.Add(new { x = x - 0.25, y = upper });
                     rangePoints.Add(new { x = x + 0.25, y = upper });
-                    rangePoints.Add(new { x = (double?)null, y = (double?)null }); // قطع اتصال
+                    rangePoints.Add(new { x = (double?)null, y = (double?)null });
                 }
 
                 if (rangePoints.Count > 0)
@@ -1165,7 +1299,7 @@ namespace WebUI.Pages.Process
                     datasets.Add(new
                     {
                         type = "line",
-                        label = "Acceptable Range",   // فقط یک Legend
+                        label = "Acceptable Range",
                         data = rangePoints,
                         borderColor = "#FF0000",
                         borderWidth = 2,
@@ -1177,13 +1311,12 @@ namespace WebUI.Pages.Process
                 }
             }
 
-            // --- 2. رسم مقادیر سرتیفاید (Green Circles) ---
             if (_showCertified)
             {
                 var certPoints = new List<object>();
                 foreach (var crm in crmIds)
                 {
-                    var refRow = crmRows.FirstOrDefault(r => r.CrmId == crm && r.CrmValue.HasValue);
+                    var refRow = calibrationRows.FirstOrDefault(r => r.CrmId == crm && r.CrmValue.HasValue);
                     if (refRow != null)
                     {
                         certPoints.Add(new { x = crmToIndex[crm], y = (double)refRow.CrmValue.Value });
@@ -1195,7 +1328,7 @@ namespace WebUI.Pages.Process
                     {
                         label = "Certificate Value",
                         data = certPoints,
-                        backgroundColor = "green", // سبز مشابه پایتون
+                        backgroundColor = "green",
                         borderColor = "green",
                         pointStyle = "circle",
                         pointRadius = 8,
@@ -1204,24 +1337,19 @@ namespace WebUI.Pages.Process
                 }
             }
 
-            // --- 3. رسم مقادیر نمونه (Blue Triangles) ---
-            // در پایتون، نمونه‌ها (Corrected) با مثلث آبی نمایش داده می‌شوند
             var samplePoints = new List<object>();
-            var outlierPoints = new List<object>(); // اگر بخواهید Outlierها را جدا کنید (نارنجی)
-
-            foreach (var r in crmRows)
+            foreach (var r in calibrationRows)
             {
-                // در پایتون وریفیکیشن‌ها مهم هستند، اینجا همه نمونه‌های CRM را رسم می‌کنیم
-                decimal valToUse = r.OriginalValue ?? r.OptimizedValue ?? 0;
+                if (!r.OriginalValue.HasValue)
+                    continue;
 
-                // محاسبه مقدار با تنظیمات Preview
-                var displayVal = (double)GetPreviewValue(valToUse);
+                var displayVal = excludedLabels.Contains(r.SolutionLabel)
+                    ? (double)r.OriginalValue.Value
+                    : (double)GetPreviewValue(r.OriginalValue.Value);
 
-                // تشخیص Outlier (اختیاری: اگر خارج از بازه بود رنگش فرق کند)
-                // فعلا همه را آبی رسم می‌کنیم مگر اینکه منطق Outlier را داشته باشید
                 samplePoints.Add(new
                 {
-                    x = crmToIndex[r.CrmId] + ((new Random().NextDouble() - 0.5) * 0.1), // کمی Jitter برای جلوگیری از همپوشانی
+                    x = crmToIndex[r.CrmId],
                     y = displayVal,
                     label = r.SolutionLabel
                 });
@@ -1233,25 +1361,24 @@ namespace WebUI.Pages.Process
                 {
                     label = "Sample Value",
                     data = samplePoints,
-                    backgroundColor = "blue", // آبی مشابه پایتون
+                    backgroundColor = "blue",
                     borderColor = "blue",
-                    pointStyle = "triangle", // مثلث
+                    pointStyle = "triangle",
                     pointRadius = 8,
                     rotation = 0,
                     showLine = false
                 });
             }
 
+            var labels = crmIds.Select(id => $"V {id}").ToArray();
+
             return new
             {
-                labels = crmIds.ToArray(),
+                labels = labels,
                 datasets = datasets.ToArray()
             };
         }
 
-        /// <summary>
-        /// Renders the calibration scatter chart by invoking the JS helper
-        /// </summary>
         private async Task RenderCalibrationChartAsync()
         {
             try
@@ -1266,7 +1393,7 @@ namespace WebUI.Pages.Process
                     {
                         responsive = true,
                         maintainAspectRatio = false,
-                        xLabels = ((dynamic)chartData).labels, // used by client-side helper to map ticks
+                        xLabels = ((dynamic)chartData).labels,
                         plugins = new
                         {
                             legend = new { display = true, position = "top" },
@@ -1288,27 +1415,219 @@ namespace WebUI.Pages.Process
             }
         }
 
-        private async Task RefreshCalibrationAsync()
+        private object GetSecondaryChartData()
         {
-            if (!_chartsRendered) return;
+            if (string.IsNullOrWhiteSpace(_focusElement) || !_secondaryRows.Any())
+                return new { datasets = Array.Empty<object>() };
 
-            await JSRuntime.InvokeVoidAsync(
-                "updateChartData",
-                "calibrationChart",
-                GetCalibrationChartData()
-            );
+            var filter = _sampleFilter?.Trim();
+            var rows = string.IsNullOrWhiteSpace(filter)
+                ? _secondaryRows
+                : _secondaryRows.Where(r => r.SolutionLabel.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToList();
+
+            var originalPoints = new List<object>();
+            var correctedPoints = new List<object>();
+
+            for (var i = 0; i < rows.Count; i++)
+            {
+                var row = rows[i];
+                var value = 0m;
+                if (row.Values.TryGetValue(_focusElement, out var rawValue) && rawValue.HasValue)
+                {
+                    value = rawValue.Value;
+                }
+
+                var x = i;
+                var originalVal = (double)value;
+                var correctedVal = (double)((value - _previewBlank) * (decimal)_previewScale);
+
+                originalPoints.Add(new { x, y = originalVal, label = row.SolutionLabel });
+                correctedPoints.Add(new { x, y = correctedVal, label = row.SolutionLabel });
+            }
+
+            return new
+            {
+                datasets = new object[]
+                {
+                    new
+                    {
+                        label = "Original",
+                        data = originalPoints,
+                        backgroundColor = "#2196F3",
+                        borderColor = "#2196F3",
+                        pointStyle = "circle",
+                        pointRadius = 6,
+                        showLine = false
+                    },
+                    new
+                    {
+                        label = "Corrected",
+                        data = correctedPoints,
+                        backgroundColor = "#F44336",
+                        borderColor = "#F44336",
+                        pointStyle = "cross",
+                        pointRadius = 7,
+                        showLine = false
+                    }
+                }
+            };
         }
 
+        //private async Task RenderSecondaryChartAsync()
+        //{
+        //    try
+        //    {
+        //        var chartData = GetSecondaryChartData();
+        //        var chartConfig = new
+        //        {
+        //            type = "scatter",
+        //            data = chartData,
+        //            options = new
+        //            {
+        //                responsive = true,
+        //                maintainAspectRatio = false,
+        //                plugins = new
+        //                {
+        //                    legend = new { display = true, position = "top" },
+        //                    tooltip = new { backgroundColor = "rgba(0,0,0,0.7)" }
+        //                },
+        //                scales = new
+        //                {
+        //                    x = new
+        //                    {
+        //                        type = "linear",
+        //                        title = new { display = true, text = "Index" }
+        //                    },
+        //                    y = new
+        //                    {
+        //                        title = new { display = true, text = "Value" }
+        //                    }
+        //                }
+        //            }
+        //        };
+
+        //        await JSRuntime.InvokeVoidAsync("createChart", "secondaryChart", chartConfig);
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        Console.WriteLine($"Error rendering secondary chart: {ex.Message}");
+        //    }
+        //}
+        private async Task RenderSecondaryChartAsync()
+        {
+            try
+            {
+                // ابتدا chart موجود را پاک کن
+                await JSRuntime.InvokeVoidAsync("destroyChart", "secondaryChart");
+
+                await Task.Delay(50); // کمی تاخیر برای DOM
+
+                var chartData = GetSecondaryChartData();
+                var chartConfig = new
+                {
+                    type = "scatter",
+                    data = chartData,
+                    options = new
+                    {
+                        responsive = true,
+                        maintainAspectRatio = false, // مهم: aspect ratio را غیرفعال کن
+                        animation = new
+                        {
+                            duration = 0 // انیمیشن را برای رندر سریع‌تر غیرفعال کن
+                        },
+                        plugins = new
+                        {
+                            legend = new
+                            {
+                                display = true,
+                                position = "top",
+                                labels = new
+                                {
+                                    boxWidth = 12,
+                                    padding = 10
+                                }
+                            },
+                            tooltip = new
+                            {
+                                backgroundColor = "rgba(0,0,0,0.8)",
+                                titleFont = new { size = 12 },
+                                bodyFont = new { size = 12 },
+                                padding = 8
+                            }
+                        },
+                        scales = new
+                        {
+                            x = new
+                            {
+                                type = "linear",
+                                title = new
+                                {
+                                    display = true,
+                                    text = "Index",
+                                    font = new { size = 12 }
+                                },
+                                grid = new
+                                {
+                                    drawBorder = false,
+                                    color = "rgba(0,0,0,0.1)"
+                                },
+                                ticks = new
+                                {
+                                    font = new { size = 10 },
+                                    maxTicksLimit = 20
+                                }
+                            },
+                            y = new
+                            {
+                                title = new
+                                {
+                                    display = true,
+                                    text = "Value",
+                                    font = new { size = 12 }
+                                },
+                                grid = new
+                                {
+                                    drawBorder = false,
+                                    color = "rgba(0,0,0,0.1)"
+                                },
+                                ticks = new
+                                {
+                                    font = new { size = 10 },
+                                    maxTicksLimit = 10
+                                },
+                                beginAtZero = false
+                            }
+                        },
+                        elements = new
+                        {
+                            point = new
+                            {
+                                radius = 4, // نقطه‌ها را کوچک‌تر کن
+                                hoverRadius = 6
+                            }
+                        },
+                        interaction = new
+                        {
+                            intersect = false,
+                            mode = "nearest"
+                        }
+                    }
+                };
+
+                await JSRuntime.InvokeVoidAsync("createChart", "secondaryChart", chartConfig);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error rendering secondary chart: {ex.Message}");
+            }
+        }
 
         private decimal GetToleranceValue(decimal crmValue)
         {
             var absVal = Math.Abs(crmValue);
 
-            // طبق کد پایتون: if abs_value < 10: return self.w.range_low
-            // این یعنی برای اعداد کوچک، مقدار rangeLow یک عدد ثابت (Absolute) است، نه درصد.
             if (absVal < 10) return _rangeLow;
 
-            // برای سایر بازه‌ها، درصد محاسبه می‌شود
             decimal percentage = 0;
             if (absVal < 100) percentage = _rangeMid;
             else if (absVal < 1000) percentage = _rangeHigh1;
@@ -1321,50 +1640,24 @@ namespace WebUI.Pages.Process
 
         private decimal GetPreviewValue(decimal originalValue)
         {
-            // طبق لاجیک پایتون (خط 239 فایل ارسالی):
-            // شرط‌ها روی pivot_val (مقدار اصلی) چک می‌شوند.
+            if (_scaleRangeMin.HasValue && _scaleRangeMax.HasValue)
+            {
+                if (originalValue < _scaleRangeMin.Value || originalValue > _scaleRangeMax.Value)
+                    return originalValue;
+            }
 
-            // 1. بررسی شرط Min روی مقدار اصلی
-            if (_scaleRangeMin.HasValue && originalValue < _scaleRangeMin.Value)
-                return originalValue; // تغییر نمی‌کند
-
-            // 2. بررسی شرط Max روی مقدار اصلی
-            if (_scaleRangeMax.HasValue && originalValue > _scaleRangeMax.Value)
-                return originalValue; // تغییر نمی‌کند
-
-            // 3. بررسی شرط > 50 روی مقدار اصلی
             if (_scaleAbove50Only && originalValue <= 50)
-                return originalValue; // تغییر نمی‌کند
+                return originalValue;
 
-            // 4. اعمال فرمول: (Val - Blank) * Scale
             return (originalValue - _previewBlank) * (decimal)_previewScale;
-        }
-
-
-        private async Task UpdateElementImprovementChartAsync()
-        {
-            if (!_chartsRendered) return;
-
-            await JSRuntime.InvokeVoidAsync(
-                "updateChartData",
-                "elementChart",
-                GetElementImprovementChartData()
-            );
         }
 
         private async Task OnPreviewParamChanged()
         {
-            // جلوگیری از رفرش‌های خیلی سریع (اختیاری)
-            // await Task.Delay(50); 
-
-            // 1. آپدیت نمودار پایین (Calibration Plot)
             await RenderCalibrationChartAsync();
-
-            // 2. آپدیت نمودار بالا (Element Improvement)
-            await UpdateElementImprovementChartAsync();
+            await RenderSecondaryChartAsync();
         }
 
-        // هندلرهای اختصاصی برای بایندینگ
         private async Task OnPreviewScaleChanged(double newVal)
         {
             _previewScale = newVal;
@@ -1383,5 +1676,155 @@ namespace WebUI.Pages.Process
             await OnPreviewParamChanged();
         }
 
+        private async Task OnPreviewBlankChanged(decimal? newVal)
+        {
+            _previewBlank = newVal ?? 0m;
+            await OnPreviewParamChanged();
+        }
+
+        private async Task OnFilterChanged(string value)
+        {
+            _sampleFilter = value ?? string.Empty;
+            await RenderSecondaryChartAsync();
+        }
+
+        private async Task OnShowCertifiedChanged(bool value)
+        {
+            _showCertified = value;
+            await RenderCalibrationChartAsync();
+        }
+
+        private async Task OnShowRangeChanged(bool value)
+        {
+            _showAcceptableRange = value;
+            await RenderCalibrationChartAsync();
+        }
+
+        private async Task OnScaleAbove50Changed(bool value)
+        {
+            _scaleAbove50Only = value;
+            await OnPreviewParamChanged();
+        }
+
+        private void OpenSelectVerificationsDialog()
+        {
+            _selectVerificationsDialogVisible = true;
+        }
+
+        private void CloseSelectVerificationsDialog()
+        {
+            _selectVerificationsDialogVisible = false;
+        }
+
+        private async Task IncludeAllVerifications()
+        {
+            _includedCrmLabels.Clear();
+            foreach (var label in _crmLabelOptions)
+                _includedCrmLabels.Add(label);
+            await RenderCalibrationChartAsync();
+        }
+
+        private async Task ExcludeAllVerifications()
+        {
+            _includedCrmLabels.Clear();
+            await RenderCalibrationChartAsync();
+        }
+
+        private void OpenExcludeDialog()
+        {
+            UpdateExcludeLabelRows();
+            _excludeDialogVisible = true;
+        }
+
+        private void CloseExcludeDialog()
+        {
+            _excludeDialogVisible = false;
+        }
+
+        private async Task ToggleExcludedLabel(string label, bool isExcluded)
+        {
+            if (isExcluded)
+                _excludedLabels.Add(label);
+            else
+                _excludedLabels.Remove(label);
+
+            SyncExcludedLabelsInput();
+            await RenderCalibrationChartAsync();
+        }
+
+        private EventCallback<bool> GetIncludeCallback(string crmId)
+        {
+            return EventCallback.Factory.Create<bool>(this, (bool v) => ToggleIncludedCrmId(crmId, v));
+        }
+
+        private EventCallback<bool> GetExcludeCallback(string label)
+        {
+            return EventCallback.Factory.Create<bool>(this, (bool v) => ToggleExcludedLabel(label, v));
+        }
+
+        private async Task OpenReportDialog()
+        {
+            if (_result == null && _projectId.HasValue)
+            {
+                await GetCurrentStats();
+            }
+
+            if (TryGetRecommendedModel(out var blank, out var scale))
+            {
+                _reportBlank = blank;
+                _reportScale = scale;
+            }
+            else
+            {
+                _reportBlank = _previewBlank;
+                _reportScale = (decimal)_previewScale;
+            }
+
+            _reportDialogVisible = true;
+        }
+
+        private void CloseReportDialog()
+        {
+            _reportDialogVisible = false;
+        }
+
+        private async Task ApplyRecommendedModel()
+        {
+            if (!TryGetRecommendedModel(out var blank, out var scale))
+            {
+                Snackbar.Add("No model recommendation available.", Severity.Warning);
+                return;
+            }
+
+            _previewBlank = blank;
+            _previewScale = (double)scale;
+            _reportBlank = blank;
+            _reportScale = scale;
+            _reportDialogVisible = false;
+            await OnPreviewParamChanged();
+        }
+
+        private bool TryGetRecommendedModel(out decimal blank, out decimal scale)
+        {
+            blank = _previewBlank;
+            scale = (decimal)_previewScale;
+
+            if (_result == null || string.IsNullOrWhiteSpace(_focusElement))
+                return false;
+
+            if (!_result.ElementOptimizations.TryGetValue(_focusElement, out var opt))
+                return false;
+
+            blank = opt.Blank;
+            scale = opt.Scale;
+            return true;
+        }
+
+        private async Task ResetBlankAndScale()
+        {
+            _previewBlank = 0m;
+            _previewScale = 1.0;
+            await OnPreviewParamChanged();
+        }
     }
 }
