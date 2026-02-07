@@ -41,7 +41,7 @@
     }
     else
     {
-        <MudGrid>
+        <MudGrid Class="crm-layout">
             @* ================= LEFT PANEL: SETTINGS ================= *@
             <MudItem xs="12" md="4" lg="3">
                 <MudCard Elevation="2" Class="h-100">
@@ -192,7 +192,7 @@
             </MudItem>
 
             @* ================= RIGHT PANEL: RESULTS & CHARTS ================= *@
-            <MudItem xs="12" md="8" lg="9">
+            <MudItem xs="12" md="8" lg="9" Class="d-flex flex-column h-100">
                 <MudStack Spacing="3" Class="h-100">
 
                     @* 1. SUMMARY CARDS *@
@@ -379,11 +379,11 @@
                                     {
 
                                         @* Chart 2 *@
-                                        <MudPaper Class="flex-grow-1 d-flex flex-column pa-3" Elevation="1" Style="border-radius: 8px; background: white; min-height: 400px; max-height:420px; overflow: hidden;">
+                                        <MudPaper Class="flex-grow-1 d-flex flex-column pa-3 crm-chart-paper" Elevation="1" Style="border-radius: 8px; background: white; min-height: 250px;">
                                             <div class="d-flex justify-space-between mb-2">
                                                 <MudText Typo="Typo.h6"><b>Calibration Plot (@_focusElement)</b></MudText>
                                             </div>
-                                            <div class="flex-grow-1 position-relative">
+                                            <div class="flex-grow-1 position-relative" style="min-height: 0;">
                                                 <canvas id="calibrationChart" style="width:100%; height:100%"></canvas>
                                             </div>
                                         </MudPaper>
@@ -397,11 +397,11 @@
                                             </div>
                                         </MudPaper> *@
 
-                                        <MudPaper Class="flex-grow-1 d-flex flex-column pa-3" Elevation="1" Style="border-radius: 8px; background: white; min-height: 400px; max-height:420px; overflow: hidden;">
+                                        <MudPaper Class="flex-grow-1 d-flex flex-column pa-3 crm-chart-paper" Elevation="1" Style="border-radius: 8px; background: white; min-height: 250px;">
                                             <div class="d-flex justify-space-between mb-2">
                                                 <MudText Typo="Typo.h6"><b>Index vs Value (@_focusElement)</b></MudText>
                                             </div>
-                                            <div class="flex-grow-1 position-relative">
+                                            <div class="flex-grow-1 position-relative" style="min-height: 0;">
                                                 <canvas id="secondaryChart" style="width:100%; height:100%"></canvas>
                                             </div>
                                         </MudPaper>
@@ -438,3 +438,19 @@
         <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="ApplyRangesAsync">Apply</MudButton>
     </DialogActions>
 </MudDialog>
+
+<style>
+    .crm-layout {
+        height: calc(100vh - 150px);
+    }
+
+    .crm-chart-paper {
+        min-height: 0;
+    }
+
+    @@media (max-width: 960px) {
+        .crm-layout {
+            height: auto;
+        }
+    }
+</style>

@@ -27,56 +27,51 @@ function createChart(canvasId, config) {
 
         // --- Handle Scatter xLabels callback (کد قبلی شما) ---
         try {
-            if (config.type === 'scatter' && config.options && Array.isArray(config.options.xLabels)) {
+            const optionLabels = config.options && Array.isArray(config.options.xLabels) ? config.options.xLabels : null;
+            const dataLabels = config.data && Array.isArray(config.data.labels) ? config.data.labels : null;
+            const labels = optionLabels || dataLabels;
+
+            if (config.type === 'scatter' && config.options && Array.isArray(labels) && labels.length > 0) {
                 config.options.scales = config.options.scales || {};
                 config.options.scales.x = config.options.scales.x || {};
                 config.options.scales.x.ticks = config.options.scales.x.ticks || {};
-                const labels = config.options.xLabels;
                 config.options.scales.x.ticks.callback = function(value) {
+                    if (labels.length === 1) {
+                        return Math.abs(value) <= 0.51 ? labels[0] : '';
+                    }
                     const idx = Math.round(value);
-                    return labels[idx] ?? '';
+                    return (idx >= 0 && idx < labels.length) ? labels[idx] : '';
                 };
                 config.options.scales.x.type = 'linear';
-                config.options.scales.x.min = -0.5;
-                config.options.scales.x.max = labels.length - 0.5;
-                config.options.scales.x.ticks.stepSize = 1;
+                config.options.scales.x.display = true;
+                config.options.scales.x.ticks.autoSkip = false;
+                // Keep explicit bounds only when we have more than one label.
+                if (labels.length > 1) {
+                    config.options.scales.x.min = -0.5;
+                    config.options.scales.x.max = labels.length - 0.5;
+                    config.options.scales.x.ticks.stepSize = 1;
+                } else {
+                    // For single label, keep a symmetric window to guarantee visible x-axis tick text.
+                    config.options.scales.x.min = -0.5;
+                    config.options.scales.x.max = 0.5;
+                    config.options.scales.x.ticks.stepSize = 1;
+                }
             }
         } catch (e) {
             console.warn('[createChart] Failed to attach xLabels callback', e);
         }
 
-        // --- بخش جدید: اضافه کردن تنظیمات Zoom ---
+        // Keep chart axes stable: accidental mouse wheel over chart should not zoom/pan.
         config.options = config.options || {};
         config.options.plugins = config.options.plugins || {};
-
-        // تنظیمات استاندارد زوم و پن
         config.options.plugins.zoom = {
-            pan: {
-                enabled: true,
-                mode: 'xy', // اجازه جابجایی در هر دو جهت
-                modifierKey: null, // برای پن کردن نیاز به کلید خاصی نیست (یا مثلا 'ctrl')
-            },
+            pan: { enabled: false },
             zoom: {
-                wheel: {
-                    enabled: true, // فعال کردن زوم با اسکرول موس
-                    speed: 0.1,    // سرعت زوم
-                },
-                pinch: {
-                    enabled: true  // فعال کردن زوم با دو انگشت (تاچ)
-                },
-                mode: 'xy', // زوم در هر دو جهت (X و Y)
-                drag: {
-                    enabled: false, // اگر true باشد، با کشیدن موس کادر زوم ایجاد می‌شود
-                }
-            },
-            limits: {
-                y: { min: 'original', max: 'original' }, // جلوگیری از زوم‌اوت بیش از حد (اختیاری)
-                // x: {min: 'original', max: 'original'},
+                wheel: { enabled: false },
+                pinch: { enabled: false },
+                drag: { enabled: false }
             }
         };
-
-        // یک دکمه ریست هم اضافه میکنیم که با دوبار کلیک زوم ریست شود (اختیاری ولی کاربردی)
-        // برای این کار باید ایونت هندلر جدا بنویسیم، اما فعلا تنظیمات زوم کافیست.
 
         chartInstances[canvasId] = new Chart(ctx, config);
         console.log(`✓ Chart "${canvasId}" created successfully`);

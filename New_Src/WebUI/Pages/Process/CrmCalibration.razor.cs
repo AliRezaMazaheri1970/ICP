@@ -601,7 +601,8 @@ namespace WebUI.Pages.Process
                     ProjectId: _projectId.Value,
                     SearchText: null,
                     SelectedSolutionLabels: null,
-                    SelectedElements: new List<string> { _focusElement },
+                    // Load full row set; element-specific filtering is handled client-side via TryGetElementValue.
+                    SelectedElements: null,
                     NumberFilters: null,
                     UseOxide: false,
                     UseInt: false,
@@ -644,7 +645,11 @@ namespace WebUI.Pages.Process
         {
             var calibrationRows = BuildCalibrationRows();
             if (calibrationRows.Count == 0)
+            {
+                _crmLabelOptions.Clear();
+                _includedCrmLabels.Clear();
                 return;
+            }
 
             var labels = calibrationRows
                 .Select(r => r.SolutionLabel)
@@ -653,7 +658,17 @@ namespace WebUI.Pages.Process
                 .OrderBy(label => label, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
+            var previousIncluded = new HashSet<string>(_includedCrmLabels, StringComparer.OrdinalIgnoreCase);
+            var hadSelection = previousIncluded.Count > 0;
+            var labelSet = new HashSet<string>(labels, StringComparer.OrdinalIgnoreCase);
+
             _crmLabelOptions = labels;
+            _includedCrmLabels.RemoveWhere(label => !labelSet.Contains(label));
+            foreach (var label in labels)
+            {
+                if (!hadSelection || previousIncluded.Contains(label))
+                    _includedCrmLabels.Add(label);
+            }
 
             if (_includedCrmLabels.Count == 0)
             {
@@ -673,7 +688,7 @@ namespace WebUI.Pages.Process
                 if (!IsBlankLabel(row.SolutionLabel))
                     continue;
 
-                row.Values.TryGetValue(_focusElement, out var value);
+                TryGetElementValue(row.Values, _focusElement, out var value);
                 var display = value.HasValue ? value.Value.ToString("0.####") : "---";
                 _blankLabelLines.Add($"{row.SolutionLabel}: {display}");
             }
@@ -684,7 +699,7 @@ namespace WebUI.Pages.Process
             _excludeLabelRows = _secondaryRows
                 .Select(row =>
                 {
-                    row.Values.TryGetValue(_focusElement ?? string.Empty, out var value);
+                    TryGetElementValue(row.Values, _focusElement, out var value);
                     return new ExcludeLabelRow
                     {
                         SolutionLabel = row.SolutionLabel,
@@ -722,10 +737,46 @@ namespace WebUI.Pages.Process
             return match.Success ? match.Groups[1].Value : string.Empty;
         }
 
+        // Resolve values for focus element with a fallback on base element key (e.g., "Ag" vs "Ag 338.289").
+        private static bool TryGetElementValue(IReadOnlyDictionary<string, decimal?> values, string? element, out decimal? value)
+        {
+            value = null;
+            if (values == null || string.IsNullOrWhiteSpace(element))
+                return false;
+
+            if (values.TryGetValue(element, out value))
+                return true;
+
+            var trimmed = element.Trim();
+            if (!string.Equals(trimmed, element, StringComparison.Ordinal) && values.TryGetValue(trimmed, out value))
+                return true;
+
+            var baseElement = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(baseElement))
+                return false;
+
+            if (values.TryGetValue(baseElement, out value))
+                return true;
+
+            var prefix = baseElement + " ";
+            var match = values.FirstOrDefault(kvp => kvp.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(match.Key))
+            {
+                value = match.Value;
+                return true;
+            }
+
+            return false;
+        }
+
         private List<CalibrationRow> BuildCalibrationRows()
         {
             var rows = new List<CalibrationRow>();
-            var dataSource = _manualResult?.OptimizedData ?? _result?.OptimizedData;
+            // Keep calibration plot stable: prefer full optimization result rows when available.
+            // Manual result can be partial and may collapse the chart to a single CRM point.
+            var dataSource = (_result?.OptimizedData != null && _result.OptimizedData.Any())
+                ? _result.OptimizedData
+                : _manualResult?.OptimizedData;
 
             if (dataSource != null && dataSource.Any())
             {
@@ -733,14 +784,12 @@ namespace WebUI.Pages.Process
                 {
                     if (string.IsNullOrWhiteSpace(sample.CrmId))
                         continue;
-                    if (!IsCrmLabel(sample.SolutionLabel))
+
+                    if (!TryGetElementValue(sample.CrmValues, _focusElement, out var crmValue) || !crmValue.HasValue)
                         continue;
 
-                    if (!sample.CrmValues.TryGetValue(_focusElement!, out var crmValue) || !crmValue.HasValue)
-                        continue;
-
-                    sample.OriginalValues.TryGetValue(_focusElement!, out var originalValue);
-                    sample.OptimizedValues.TryGetValue(_focusElement!, out var optimizedValue);
+                    TryGetElementValue(sample.OriginalValues, _focusElement, out var originalValue);
+                    TryGetElementValue(sample.OptimizedValues, _focusElement, out var optimizedValue);
                     var displayValue = originalValue ?? optimizedValue;
                     if (!displayValue.HasValue)
                         continue;
@@ -762,9 +811,7 @@ namespace WebUI.Pages.Process
 
             foreach (var row in _secondaryRows)
             {
-                if (!IsCrmLabel(row.SolutionLabel))
-                    continue;
-                if (!row.Values.TryGetValue(_focusElement!, out var rawValue) || !rawValue.HasValue)
+                if (!TryGetElementValue(row.Values, _focusElement, out var rawValue) || !rawValue.HasValue)
                     continue;
 
                 var crmId = ExtractCrmIdFromLabel(row.SolutionLabel);
@@ -1043,9 +1090,9 @@ namespace WebUI.Pages.Process
             var rows = new List<OptimizedSampleRow>();
             foreach (var sample in data)
             {
-                sample.OriginalValues.TryGetValue(element, out var original);
-                sample.OptimizedValues.TryGetValue(element, out var optimized);
-                sample.CrmValues.TryGetValue(element, out var crmValue);
+                TryGetElementValue(sample.OriginalValues, element, out var original);
+                TryGetElementValue(sample.OptimizedValues, element, out var optimized);
+                TryGetElementValue(sample.CrmValues, element, out var crmValue);
                 sample.DiffPercentBefore.TryGetValue(element, out var diffBefore);
                 sample.DiffPercentAfter.TryGetValue(element, out var diffAfter);
                 var passed = sample.PassStatusAfter.TryGetValue(element, out var p) && p;
@@ -1124,17 +1171,16 @@ namespace WebUI.Pages.Process
             {
                 await JSRuntime.InvokeVoidAsync("destroyChart", "calibrationChart");
                 await JSRuntime.InvokeVoidAsync("destroyChart", "secondaryChart");
-                await JSRuntime.InvokeVoidAsync("destroyChart", "elementChart");
 
                 await Task.Delay(150);
 
                 if (_result != null)
                 {
                     await RenderCalibrationChartAsync();
-                    await RenderElementImprovementChartAsync();
                 }
 
                 await RenderSecondaryChartAsync();
+                await JSRuntime.InvokeVoidAsync("resizeAllCharts");
 
                 _chartsRendered = true;
             }
@@ -1149,6 +1195,7 @@ namespace WebUI.Pages.Process
             await Task.Delay(10);
             await RenderCalibrationChartAsync();
             await RenderSecondaryChartAsync();
+            await JSRuntime.InvokeVoidAsync("resizeAllCharts");
             StateHasChanged();
         }
 
@@ -1249,7 +1296,10 @@ namespace WebUI.Pages.Process
 
             var excludedLabels = new HashSet<string>(ParseExcludedLabels(), StringComparer.OrdinalIgnoreCase);
             var calibrationRows = BuildCalibrationRows();
-            if (_crmLabelOptions.Count > 0)
+            // Apply include filter only when user has actively deselected some items.
+            if (_crmLabelOptions.Count > 0 &&
+                _includedCrmLabels.Count > 0 &&
+                _includedCrmLabels.Count < _crmLabelOptions.Count)
             {
                 calibrationRows = calibrationRows
                     .Where(r => _includedCrmLabels.Contains(r.SolutionLabel))
@@ -1394,6 +1444,10 @@ namespace WebUI.Pages.Process
                         responsive = true,
                         maintainAspectRatio = false,
                         xLabels = ((dynamic)chartData).labels,
+                        layout = new
+                        {
+                            padding = new { bottom = 20, left = 10, right = 10, top = 10 }
+                        },
                         plugins = new
                         {
                             legend = new { display = true, position = "top" },
@@ -1401,7 +1455,23 @@ namespace WebUI.Pages.Process
                         },
                         scales = new
                         {
-                            x = new { },
+                            x = new
+                            {
+                                type = "linear",
+                                title = new { display = true, text = "Verification ID" },
+                                ticks = new
+                                {
+                                    display = true,
+                                    autoSkip = true,
+                                    maxTicksLimit = 20,
+                                    color = "#666"
+                                },
+                                grid = new
+                                {
+                                    display = true,
+                                    drawBorder = true
+                                }
+                            },
                             y = new { beginAtZero = false }
                         }
                     }
@@ -1432,7 +1502,7 @@ namespace WebUI.Pages.Process
             {
                 var row = rows[i];
                 var value = 0m;
-                if (row.Values.TryGetValue(_focusElement, out var rawValue) && rawValue.HasValue)
+                if (TryGetElementValue(row.Values, _focusElement, out var rawValue) && rawValue.HasValue)
                 {
                     value = rawValue.Value;
                 }
@@ -1531,6 +1601,10 @@ namespace WebUI.Pages.Process
                     {
                         responsive = true,
                         maintainAspectRatio = false, // مهم: aspect ratio را غیرفعال کن
+                        layout = new
+                        {
+                            padding = new { bottom = 20, left = 10, right = 10, top = 10 }
+                        },
                         animation = new
                         {
                             duration = 0 // انیمیشن را برای رندر سریع‌تر غیرفعال کن
@@ -1568,11 +1642,15 @@ namespace WebUI.Pages.Process
                                 },
                                 grid = new
                                 {
-                                    drawBorder = false,
+                                    drawBorder = true,
+                                    display = true,
                                     color = "rgba(0,0,0,0.1)"
                                 },
                                 ticks = new
                                 {
+                                    display = true,
+                                    autoSkip = true,
+                                    color = "#666",
                                     font = new { size = 10 },
                                     maxTicksLimit = 20
                                 }
