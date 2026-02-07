@@ -15,6 +15,10 @@ namespace WebUI.Pages.Process
         [Inject]
         private IJSRuntime JSRuntime { get; set; } = default!;
 
+        // Chart render guards (FIX)
+        private bool _chartsRendered = false;
+        private bool _isRenderingCharts = false;
+
         // Chart references
         private ElementReference chart1Canvas;
         private ElementReference chart2Canvas;
@@ -273,10 +277,9 @@ namespace WebUI.Pages.Process
         {
             _resultsTabIndex = newTabIndex;
 
-            // If Tab2 (index 1) is selected and we have results, re-render charts
-            if (newTabIndex == 1 && _result != null)
+            if (newTabIndex == 1 && _result != null && !_chartsRendered)
             {
-                await Task.Delay(100); // Wait for tab animation
+                await Task.Yield();
                 await RenderChartsAsync();
             }
         }
@@ -892,27 +895,25 @@ namespace WebUI.Pages.Process
         private async Task RenderChartsAsync()
         {
             if (_result == null) return;
+            if (_isRenderingCharts) return;
 
+            _isRenderingCharts = true;
             try
             {
-                // Clear existing charts first
                 await JSRuntime.InvokeVoidAsync("destroyChart", "elementChart");
                 await JSRuntime.InvokeVoidAsync("destroyChart", "calibrationChart");
 
-                // Wait for DOM to be fully ready
-                await Task.Delay(200);
+                await InvokeAsync(StateHasChanged);
+                await Task.Yield();
 
-                // Chart 1: Element-wise Improvement (top)
                 await RenderElementImprovementChartAsync();
-                await Task.Delay(100);
-
-                // Chart 2: Calibration scatter (per CRM) - mirrors Python plot_calib (bottom)
                 await RenderCalibrationChartAsync();
+
+                _chartsRendered = true;
             }
-            catch (Exception ex)
+            finally
             {
-                Snackbar.Add($"Error rendering charts: {ex.Message}", Severity.Error);
-                Console.WriteLine($"Error rendering charts: {ex.Message}");
+                _isRenderingCharts = false;
             }
         }
 
@@ -1289,10 +1290,13 @@ namespace WebUI.Pages.Process
 
         private async Task RefreshCalibrationAsync()
         {
-            // Re-render only the calibration chart
-            await Task.Delay(10);
-            await RenderCalibrationChartAsync();
-            StateHasChanged();
+            if (!_chartsRendered) return;
+
+            await JSRuntime.InvokeVoidAsync(
+                "updateChartData",
+                "calibrationChart",
+                GetCalibrationChartData()
+            );
         }
 
 
@@ -1339,42 +1343,13 @@ namespace WebUI.Pages.Process
 
         private async Task UpdateElementImprovementChartAsync()
         {
-            var data = _manualResult?.OptimizedData ?? _result?.OptimizedData;
-            if (data == null || string.IsNullOrWhiteSpace(_focusElement)) return;
+            if (!_chartsRendered) return;
 
-            decimal totalDiff = 0;
-            int count = 0;
-
-            foreach (var row in data)
-            {
-                // دریافت مقادیر از دیکشنری
-                if (!row.CrmValues.TryGetValue(_focusElement, out var certified) || certified == null || certified == 0) continue;
-                if (!row.OriginalValues.TryGetValue(_focusElement, out var original) || original == null) continue;
-
-                // محاسبه مقدار جدید با تنظیمات فعلی
-                var calculated = GetPreviewValue(original.Value);
-
-                // محاسبه درصد خطا: (Calc - Cert) / Cert * 100
-                var diff = (calculated - certified.Value) / certified.Value * 100m;
-
-                // در نمودار "Avg Diff %"، معمولا قدرمطلق خطا میانگین گرفته می‌شود تا خطاهای مثبت و منفی همدیگر را خنثی نکنند
-                totalDiff += Math.Abs(diff);
-                count++;
-            }
-
-            if (count > 0)
-            {
-                var newMeanDiff = totalDiff / count;
-
-                // آپدیت مقدار در حافظه
-                if (_result.ElementOptimizations.ContainsKey(_focusElement))
-                {
-                    _result.ElementOptimizations[_focusElement].MeanDiffAfter = newMeanDiff;
-                }
-
-                // رندر مجدد نمودار بالا
-                await RenderElementImprovementChartAsync();
-            }
+            await JSRuntime.InvokeVoidAsync(
+                "updateChartData",
+                "elementChart",
+                GetElementImprovementChartData()
+            );
         }
 
         private async Task OnPreviewParamChanged()
