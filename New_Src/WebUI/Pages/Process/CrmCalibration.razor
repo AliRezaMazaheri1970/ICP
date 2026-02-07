@@ -379,7 +379,7 @@
                                     {
 
                                         @* Chart 2 *@
-                                        <MudPaper Class="flex-grow-1 d-flex flex-column pa-3 crm-chart-paper" Elevation="1" Style="border-radius: 8px; background: white; min-height: 250px;">
+                                        <MudPaper Class="d-flex flex-column pa-3 crm-chart-paper" Elevation="1" Style="border-radius: 8px; background: white;">
                                             <div class="d-flex justify-space-between mb-2">
                                                 <MudText Typo="Typo.h6"><b>Calibration Plot (@_focusElement)</b></MudText>
                                             </div>
@@ -397,7 +397,7 @@
                                             </div>
                                         </MudPaper> *@
 
-                                        <MudPaper Class="flex-grow-1 d-flex flex-column pa-3 crm-chart-paper" Elevation="1" Style="border-radius: 8px; background: white; min-height: 250px;">
+                                        <MudPaper Class="d-flex flex-column pa-3 crm-chart-paper" Elevation="1" Style="border-radius: 8px; background: white;">
                                             <div class="d-flex justify-space-between mb-2">
                                                 <MudText Typo="Typo.h6"><b>Index vs Value (@_focusElement)</b></MudText>
                                             </div>
@@ -445,12 +445,21 @@
     }
 
     .crm-chart-paper {
+        height: 360px;
+    }
+
+    .crm-chart-paper .position-relative {
         min-height: 0;
+        height: 100%;
     }
 
     @@media (max-width: 960px) {
         .crm-layout {
             height: auto;
+        }
+
+        .crm-chart-paper {
+            height: 300px;
         }
     }
 </style>
