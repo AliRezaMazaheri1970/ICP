@@ -1062,6 +1062,21 @@ namespace WebUI.Pages.Process
             _previewScale = 1.0;
         }
 
+        private void ResetAll()
+        {
+            _minDiff = -10m;
+            _maxDiff = 10m;
+            //use multi-model
+            //filter element
+            _previewBlank = 0m;
+            _previewScale = 1.0;
+            _scaleRangeMin = null;
+            _scaleRangeMax = null;
+            // > 50 only
+            //_scaleAbove50Only = false;
+            ResetRanges();
+            RenderCharts();
+        }
         private async Task PrevElement()
         {
             if (_allElements.Count == 0 || string.IsNullOrWhiteSpace(_focusElement))
@@ -1543,46 +1558,6 @@ namespace WebUI.Pages.Process
             };
         }
 
-        //private async Task RenderSecondaryChartAsync()
-        //{
-        //    try
-        //    {
-        //        var chartData = GetSecondaryChartData();
-        //        var chartConfig = new
-        //        {
-        //            type = "scatter",
-        //            data = chartData,
-        //            options = new
-        //            {
-        //                responsive = true,
-        //                maintainAspectRatio = false,
-        //                plugins = new
-        //                {
-        //                    legend = new { display = true, position = "top" },
-        //                    tooltip = new { backgroundColor = "rgba(0,0,0,0.7)" }
-        //                },
-        //                scales = new
-        //                {
-        //                    x = new
-        //                    {
-        //                        type = "linear",
-        //                        title = new { display = true, text = "Index" }
-        //                    },
-        //                    y = new
-        //                    {
-        //                        title = new { display = true, text = "Value" }
-        //                    }
-        //                }
-        //            }
-        //        };
-
-        //        await JSRuntime.InvokeVoidAsync("createChart", "secondaryChart", chartConfig);
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        Console.WriteLine($"Error rendering secondary chart: {ex.Message}");
-        //    }
-        //}
         private async Task RenderSecondaryChartAsync()
         {
             try
@@ -1898,10 +1873,9 @@ namespace WebUI.Pages.Process
             return true;
         }
 
-        private async Task ResetBlankAndScale()
+        private async Task RenderCharts()
         {
-            _previewBlank = 0m;
-            _previewScale = 1.0;
+            
             await OnPreviewParamChanged();
         }
     }
