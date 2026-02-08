@@ -1,0 +1,474 @@
+﻿@page "/process/crm"
+@using WebUI.Services
+@inject ProjectService ProjectService
+@inject OptimizationService OptimizationService
+@inject CrmService CrmService
+@inject PivotService PivotService
+@inject CorrectionService CorrectionService
+@inject ISnackbar Snackbar
+
+
+<PageTitle>ICP - CRM Calibration</PageTitle>
+<NavigationLock OnBeforeInternalNavigation="OnBeforeNavigation" ConfirmExternalNavigation="_isLoading" />
+
+@* --- Loading Overlay --- *@
+<MudOverlay Visible="_isLoading" DarkBackground="true" Absolute="false" ZIndex="9999">
+    <MudPaper Class="pa-4 d-flex flex-column align-center gap-3" Elevation="4">
+        <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+        <MudText>Processing...</MudText>
+    </MudPaper>
+</MudOverlay>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4 mb-5">
+
+    @* --- Header --- *@
+    <div class="d-flex justify-space-between align-center mb-4">
+        <div>
+            <MudText Typo="Typo.h5" Class="fw-bold">CRM Calibration</MudText>
+            @if (!string.IsNullOrEmpty(_projectName))
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    Project: <b>@_projectName</b> | Differential Evolution Optimization
+                </MudText>
+            }
+        </div>
+        <ProcessNav CurrentStep="crm" />
+    </div>
+
+    @if (_projectId == null)
+    {
+        <MudAlert Severity="Severity.Warning">Please select a project first.</MudAlert>
+    }
+    else
+    {
+        <MudGrid Class="crm-layout">
+            @* ================= LEFT PANEL: SETTINGS ================= *@
+            <MudItem xs="12" md="4" lg="3">
+                <MudCard Elevation="2" Class="h-100">
+                    <MudCardContent Class="pa-0">
+                        @* Focus Element Selector *@
+                        <div class="pa-4 bg-gray-50 border-b">
+                            <MudText Typo="Typo.subtitle2" Color="Color.Primary" Class="mb-1"><b>Focus Element</b></MudText>
+                            <MudStack Row="true" Spacing="1">
+                                <MudSelect T="string" Value="_focusElement" ValueChanged="@SetFocusElement" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Class="flex-grow-1">
+                                    @foreach (var el in _allElements)
+                                    {
+                                        <MudSelectItem Value="@el">@el</MudSelectItem>
+                                    }
+                                </MudSelect>
+
+                            </MudStack>
+
+                            <MudButtonGroup Variant="Variant.Outlined" Size="Size.Small" Class="d-flex">
+                                <MudButton OnClick="PrevElement" StartIcon="@Icons.Material.Filled.ChevronLeft" Class="flex-grow-1">Prev</MudButton>
+                                <MudButton OnClick="NextElement" EndIcon="@Icons.Material.Filled.ChevronRight" Class="flex-grow-1">Next</MudButton>
+                            </MudButtonGroup>
+
+                        </div>
+
+                        @* TABS *@
+                        <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="true" PanelClass="pa-3" Color="Color.Transparent">
+
+                            @* Tab 1: Parameters *@
+                            <MudTabPanel Text="Params" Icon="@Icons.Material.Filled.Tune">
+                                <MudGrid Spacing="2">
+                                    <MudItem xs="6">
+                                        <MudNumericField @bind-Value="_minDiff" Label="Min Diff %" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                    </MudItem>
+                                    <MudItem xs="6">
+                                        <MudNumericField @bind-Value="_maxDiff" Label="Max Diff %" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                    </MudItem>
+                                    <MudItem xs="12">
+                                        @* FIX: Added T="bool" *@
+                                        <MudCheckBox T="bool" @bind-Checked="_useMultiModel" Label="Use Multi-Model (A/B/C)" Color="Color.Primary" Dense="true" />
+                                    </MudItem>
+                                    <MudItem xs="12">
+                                        <MudSelect T="string" Label="Filter Elements" MultiSelection="true" @bind-SelectedValues="_selectedElements" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                                            @foreach (var el in _allElements)
+                                            {
+                                                <MudSelectItem Value="@el">@el</MudSelectItem>
+                                            }
+                                        </MudSelect>
+                                    </MudItem>
+                                </MudGrid>
+                            </MudTabPanel>
+
+                            @* Tab 2: CRM *@
+                            <MudTabPanel Text="CRM" Icon="@Icons.Material.Filled.TableChart" BadgeData="@(_crmSelectionRows.Count)" BadgeColor="Color.Primary">
+                                @if (_crmSelectionRows.Any())
+                                {
+                                    <MudTable Items="@_crmSelectionRows" Dense="true" Hover="true" FixedHeader="true" Height="300px" Bordered="true" Elevation="0">
+                                        <HeaderContent>
+                                            <MudTh>Label</MudTh>
+                                            <MudTh>Method</MudTh>
+                                        </HeaderContent>
+                                        <RowTemplate>
+                                            <MudTd><MudText Typo="Typo.caption">@context.SolutionLabel</MudText></MudTd>
+                                            <MudTd>
+                                                <MudSelect T="string" Value="@context.SelectedOption" ValueChanged="@GetRowSelectionChangedHandler(context)" Margin="Margin.Dense" Dense="true" style="font-size: 0.8rem">
+                                                    @foreach (var opt in GetRowOptions(context))
+                                                    {
+                                                        <MudSelectItem Value="@opt">@opt</MudSelectItem>
+                                                    }
+                                                </MudSelect>
+                                            </MudTd>
+                                        </RowTemplate>
+                                    </MudTable>
+                                }
+                                else
+                                {
+                                    <MudAlert Severity="Severity.Info" Dense="true">No CRM rows</MudAlert>
+                                }
+                            </MudTabPanel>
+
+                            @* Tab 3: Manual *@
+                            <MudTabPanel Text="Manual" Icon="@Icons.Material.Filled.TouchApp">
+                                <MudTextField @bind-Value="_excludedLabelsInput" Label="Exclude Labels" Placeholder="comma separated" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" Class="mb-2" />
+
+                                <MudText Typo="Typo.caption" Class="mt-2"><b>Blank & Scale Correction</b></MudText>
+                                <MudGrid Spacing="1">
+                                    <MudItem xs="6">
+                                        <MudNumericField @bind-Value="_previewBlank" Label="Blank" Variant="Variant.Outlined" Margin="Margin.Dense" Step="0.01M" />
+                                    </MudItem>
+                                    <MudItem xs="6">
+                                        <MudNumericField @bind-Value="_previewScale" Label="Scale" Variant="Variant.Outlined" Margin="Margin.Dense" Step="0.01" />
+                                    </MudItem>
+                                </MudGrid>
+
+                                <div class="px-2 mt-2">
+                                    <MudSlider T="double" Value="_previewScale" ValueChanged="@(async (v) => await OnPreviewScaleChanged(v))" Min="0" Max="2" Step="0.01" Color="Color.Primary" />
+                                </div>
+
+                                <MudText Typo="Typo.caption" Class="mt-2"><b>Application Range</b></MudText>
+                                <MudGrid Spacing="1">
+                                    <MudItem xs="6">
+                                        <MudNumericField Value="_scaleRangeMin" ValueChanged="@(async (decimal? v) => await OnRangeMinChanged(v))" Label="Min Limit" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                    </MudItem>
+                                    <MudItem xs="6">
+                                        <MudNumericField Value="_scaleRangeMax" ValueChanged="@(async (decimal? v) => await OnRangeMaxChanged(v))" Label="Max Limit" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                    </MudItem>
+                                </MudGrid>
+
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mt-2">
+                                    @* FIX: Added T="bool" *@
+                                    <MudCheckBox T="bool" @bind-Checked="_scaleAbove50Only" Label=">50 Only" Color="Color.Primary" Dense="true" Size="Size.Small" />
+                                    <MudButton OnClick="OpenRangesDialog" Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Tune">Ranges</MudButton>
+                                </MudStack>
+                            </MudTabPanel>
+                        </MudTabs>
+
+                        <MudDivider />
+
+                        @* ACTIONS FOOTER *@
+                        <div class="pa-3 bg-gray-50">
+                            <MudStack Spacing="2">
+                                @* Manual Actions *@
+                                <MudGrid Spacing="2">
+                                    @* <MudItem xs="6"><MudButton OnClick="PreviewManualAsync" Variant="Variant.Outlined" Color="Color.Info" FullWidth="true" Size="Size.Small">Preview</MudButton></MudItem> *@
+                                    <MudItem xs="12"><MudButton OnClick="ApplyManualAsync" Variant="Variant.Filled" Color="Color.Success" FullWidth="true" Size="Size.Small">Apply</MudButton></MudItem>
+<<<<<<< HEAD
+                                    @* <MudItem xs="6"><MudButton OnClick="ResetAll" Variant="Variant.Outlined" Color="Color.Default" FullWidth="true" Size="Size.Small">Reset</MudButton></MudItem> *@
+=======
+                                    <MudItem xs="6"><MudButton OnClick="ResetPreview" Variant="Variant.Outlined" Color="Color.Default" FullWidth="true" Size="Size.Small">Reset</MudButton></MudItem>
+>>>>>>> 106f7cc88e6613c3746116d91165fc63e8608da7
+                                    <MudItem xs="6"><MudButton OnClick="UndoManualAsync" Variant="Variant.Outlined" Color="Color.Error" FullWidth="true" Size="Size.Small">Undo</MudButton></MudItem>
+                                </MudGrid>
+
+                                <MudDivider />
+
+                                @* Global Actions *@
+                                <MudGrid Spacing="1">
+                                    <MudItem xs="12">
+                                        <MudButton OnClick="RunCalibration" Variant="Variant.Outlined" Color="Color.Primary" FullWidth="true" Size="Size.Small">Calibration</MudButton>
+                                    </MudItem>
+                                    @* <MudItem xs="6">
+                                        <MudButton OnClick="GetCurrentStats" Variant="Variant.Outlined" Color="Color.Primary" FullWidth="true" Size="Size.Small">Stats</MudButton>
+                                    </MudItem> *@
+                                </MudGrid>
+
+                                @* <MudButton OnClick="RunOptimization" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" StartIcon="@Icons.Material.Filled.AutoFixHigh">
+                                    @( _isLoading ? "Optimizing..." : "Run Optimization" )
+                                </MudButton> *@
+                            </MudStack>
+                        </div>
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+
+            @* ================= RIGHT PANEL: RESULTS & CHARTS ================= *@
+            <MudItem xs="12" md="8" lg="9" Class="d-flex flex-column h-100">
+                <MudStack Spacing="3" Class="h-100">
+
+                    @* 1. SUMMARY CARDS *@
+                    @if (_result != null)
+                    {
+                        <MudGrid Spacing="2">
+                            <MudItem xs="6" sm="3">
+                                <MudPaper Class="pa-3 d-flex flex-column align-center mud-theme-info" Elevation="0">
+                                    <MudText Typo="Typo.h5"><b>@_result.TotalRmSamples</b></MudText>
+                                    <MudText Typo="Typo.caption">RM Samples</MudText>
+                                </MudPaper>
+                            </MudItem>
+                            <MudItem xs="6" sm="3">
+                                <MudPaper Class="pa-3 d-flex flex-column align-center mud-theme-warning" Elevation="0">
+                                    <MudText Typo="Typo.h5"><b>@_result.PassedBefore</b></MudText>
+                                    <MudText Typo="Typo.caption">Passed Before</MudText>
+                                </MudPaper>
+                            </MudItem>
+                            <MudItem xs="6" sm="3">
+                                <MudPaper Class="pa-3 d-flex flex-column align-center mud-theme-success" Elevation="0">
+                                    <MudText Typo="Typo.h5"><b>@_result.PassedAfter</b></MudText>
+                                    <MudText Typo="Typo.caption">Passed After</MudText>
+                                </MudPaper>
+                            </MudItem>
+                            <MudItem xs="6" sm="3">
+                                <MudPaper Class="pa-3 d-flex flex-column align-center" Elevation="0" Style="@(_result.ImprovementPercent >= 0 ? "background:#e8f5e9; color:#2e7d32;" : "background:#ffebee; color:#c62828;")">
+                                    <MudText Typo="Typo.h5"><b>@(_result.ImprovementPercent > 0 ? "+" : "")@_result.ImprovementPercent.ToString("F1")%</b></MudText>
+                                    <MudText Typo="Typo.caption">Improvement</MudText>
+                                </MudPaper>
+                            </MudItem>
+                        </MudGrid>
+                    }
+
+                    @* 2. MAIN TABS (RESULTS vs CHARTS) *@
+                    <MudPaper Elevation="2" Class="flex-grow-1 overflow-hidden d-flex flex-column">
+                        <MudTabs ActivePanelIndex="_resultsTabIndex" ActivePanelIndexChanged="OnResultsTabChanged" ApplyEffectsToContainer="true" PanelClass="h-100">
+
+                            @* TAB 1: DATA & DETAILS *@
+                            <MudTabPanel Text="Data & Optimization" Icon="@Icons.Material.Filled.Dataset">
+                                <div class="d-flex flex-column h-100 pa-4">
+
+                                    @if (_result == null)
+                                    {
+                                        <div class="d-flex justify-center align-center h-100">
+                                            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">Please run "CALIBRATION" to view results.</MudAlert>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <MudText Typo="Typo.subtitle1" Class="fw-bold mb-2">Element Results</MudText>
+                                        <MudTable Items="@_result.ElementOptimizations.Values" Dense="true" Hover="true" FixedHeader="true" Height="250px" Class="mb-4" Outlined="true">
+                                            <HeaderContent>
+                                                <MudTh>Element</MudTh>
+                                                <MudTh>Model</MudTh>
+                                                <MudTh>Blank</MudTh>
+                                                <MudTh>Scale</MudTh>
+                                                <MudTh>Pass (B/A)</MudTh>
+                                                <MudTh>Diff (B/A)</MudTh>
+                                            </HeaderContent>
+                                            <RowTemplate>
+                                                <MudTd><b>@context.Element</b></MudTd>
+                                                <MudTd><MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text">@context.SelectedModel</MudChip></MudTd>
+                                                <MudTd>@context.Blank.ToString("F3")</MudTd>
+                                                <MudTd>@context.Scale.ToString("F3")</MudTd>
+                                                <MudTd>
+                                                    <span class="red-text">@context.PassedBefore</span> ➜ <span class="green-text fw-bold">@context.PassedAfter</span>
+                                                </MudTd>
+                                                <MudTd>
+                                                    @context.MeanDiffBefore.ToString("F1")% ➜ <b style="@(Math.Abs(context.MeanDiffAfter) < Math.Abs(context.MeanDiffBefore) ? "color:green" : "")">@context.MeanDiffAfter.ToString("F1")%</b>
+                                                </MudTd>
+                                            </RowTemplate>
+                                        </MudTable>
+
+                                        @* --- MAXIMIZABLE DETAILS PANEL --- *@
+                                        <MudPaper Elevation="4" Outlined="true"
+                                                  Style="@(_detailsMaximized ? "position:fixed; top:10px; left:10px; right:10px; bottom:10px; z-index:2000; height:auto;" : "flex:1; display:flex; flex-direction:column; overflow:hidden;")">
+
+                                            <div class="d-flex justify-space-between align-center px-3 py-2 bg-gray-100 border-b">
+                                                <div class="d-flex align-center gap-2">
+                                                    <MudIcon Icon="@Icons.Material.Filled.ListAlt" />
+                                                    <MudText Typo="Typo.subtitle2"><b>@GetSampleDetailsTitle()</b></MudText>
+                                                    <MudChip T="string" Size="Size.Small" Color="Color.Info" Class="ms-2">@FilteredManualCount() / @FilteredOptimizedCount()</MudChip>
+                                                </div>
+                                                <MudTooltip Text="@(_detailsMaximized ? "Restore" : "Maximize")">
+                                                    <MudIconButton OnClick="ToggleDetailsMaximize" Icon="@(_detailsMaximized? Icons.Material.Filled.CloseFullscreen : Icons.Material.Filled.OpenInFull)" />
+                                                </MudTooltip>
+                                            </div>
+
+                                            <div class="flex-grow-1 overflow-hidden">
+                                                <MudTabs ActivePanelIndex="@_detailsTabIndex" ActivePanelIndexChanged="@((i) => _detailsTabIndex = i)" Color="Color.Transparent" SliderColor="Color.Primary" ApplyEffectsToContainer="true" PanelClass="h-100">
+
+                                                    @* Detail Tab 1: Manual/Optimized Grid *@
+                                                    <MudTabPanel Text="Samples">
+                                                        <div class="d-flex flex-column h-100">
+                                                            <div class="pa-2">
+                                                                <MudTextField @bind-Value="_sampleFilter" Placeholder="Filter Solution Label..." Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Margin="Margin.Dense" Variant="Variant.Outlined" FullWidth="true" />
+                                                            </div>
+                                                            <div class="flex-grow-1 overflow-auto">
+                                                                <MudDataGrid T="OptimizedSampleRow" Items="@(FilterRows(_manualRows.Any() ? _manualRows : _optimizedRows))" Dense="true" Hover="true" FixedHeader="true" Bordered="true" Style="height:100%">
+                                                                    <Columns>
+                                                                        <PropertyColumn Property="x => x.SolutionLabel" Title="Sample" StickyLeft="true" />
+                                                                        <PropertyColumn Property="x => x.CrmId" Title="CRM" />
+                                                                        <TemplateColumn Title="Orig">
+                                                                            <CellTemplate>@FormatDec(context.Item.OriginalValue)</CellTemplate>
+                                                                        </TemplateColumn>
+                                                                        <TemplateColumn Title="Opt">
+                                                                            <CellTemplate>
+                                                                                <MudText Color="Color.Success">@FormatDec(context.Item.OptimizedValue)</MudText>
+                                                                            </CellTemplate>
+                                                                        </TemplateColumn>
+                                                                        <TemplateColumn Title="Ref">
+                                                                            <CellTemplate><b>@FormatDec(context.Item.CrmValue)</b></CellTemplate>
+                                                                        </TemplateColumn>
+                                                                        <TemplateColumn Title="Diff%">
+                                                                            <CellTemplate>@context.Item.DiffAfter.ToString("F2")%</CellTemplate>
+                                                                        </TemplateColumn>
+                                                                        <TemplateColumn Title="Status">
+                                                                            <CellTemplate>
+                                                                                <MudIcon Icon="@(context.Item.IsPassed? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Cancel)"
+                                                                                         Color="@(context.Item.IsPassed ? Color.Success : Color.Error)" Size="Size.Small" />
+                                                                            </CellTemplate>
+                                                                        </TemplateColumn>
+                                                                    </Columns>
+                                                                </MudDataGrid>
+                                                            </div>
+                                                        </div>
+                                                    </MudTabPanel>
+
+                                                    @* Detail Tab 2: Pivot *@
+                                                    <MudTabPanel Text="Pivot View">
+                                                        <div class="d-flex flex-column h-100">
+                                                            <div class="pa-2 d-flex gap-2">
+                                                                <MudSelect T="PivotValueMode" Label="Mode" Value="_pivotMode" ValueChanged="OnPivotModeChanged" Margin="Margin.Dense" Dense="true" Variant="Variant.Outlined" Class="flex-grow-0" Style="width:150px">
+                                                                    <MudSelectItem Value="PivotValueMode.Crm">CRM</MudSelectItem>
+                                                                    <MudSelectItem Value="PivotValueMode.Original">Original</MudSelectItem>
+                                                                    <MudSelectItem Value="PivotValueMode.Optimized">Optimized</MudSelectItem>
+                                                                    <MudSelectItem Value="PivotValueMode.DiffAfter">Diff %</MudSelectItem>
+                                                                </MudSelect>
+                                                                <MudSelect T="string" Label="Columns" MultiSelection="true" SelectedValues="_pivotSelectedElements" SelectedValuesChanged="OnPivotElementsChanged" Margin="Margin.Dense" Dense="true" Variant="Variant.Outlined" Class="flex-grow-1">
+                                                                    @foreach (var el in _allElements)
+                                                                    {
+                                                                        <MudSelectItem Value="@el">@el</MudSelectItem>
+                                                                    }
+                                                                </MudSelect>
+                                                                <MudButton OnClick="ResetPivotColumns" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh">Reset</MudButton>
+                                                            </div>
+                                                            <div class="flex-grow-1 overflow-auto">
+                                                                <MudDataGrid T="PivotRowVm" Items="_pivotRows" Dense="true" Hover="true" FixedHeader="true" Bordered="true" Style="height:100%">
+                                                                    <Columns>
+                                                                        <PropertyColumn Property="x => x.SolutionLabel" Title="Label" StickyLeft="true" />
+                                                                        @foreach (var col in PivotColumns())
+                                                                        {
+                                                                            <TemplateColumn Title="@col">
+                                                                                <CellTemplate>
+                                                                                    @{
+                                                                                        context.Item.Values.TryGetValue(col, out var v);
+                                                                                    }
+                                                                                    @FormatDec(v)
+                                                                                </CellTemplate>
+                                                                            </TemplateColumn>
+                                                                        }
+                                                                    </Columns>
+                                                                </MudDataGrid>
+                                                            </div>
+                                                        </div>
+                                                    </MudTabPanel>
+                                                </MudTabs>
+                                            </div>
+                                        </MudPaper>
+                                    }
+                                </div>
+                            </MudTabPanel>
+
+                            @* TAB 2: CHARTS (Must keep ID logic for JS) *@
+                            <MudTabPanel Text="Visualizations" Icon="@Icons.Material.Filled.ShowChart">
+                                <div class="d-flex flex-column h-100 pa-4 gap-3">
+                                    @if (_result == null)
+                                    {
+                                        <div class="d-flex justify-center align-center h-100">
+                                            <MudText>No data to visualize. Run stats first.</MudText>
+                                        </div>
+                                    }
+                                    else
+                                    {
+
+                                        @* Chart 2 *@
+                                        <MudPaper Class="d-flex flex-column pa-3 crm-chart-paper" Elevation="1" Style="border-radius: 8px; background: white;">
+                                            <div class="d-flex flex-column mb-2">
+                                                <MudText Typo="Typo.h6"><b>Calibration Plot (@_focusElement)</b></MudText>
+                                                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+                                                    <MudCheckBox T="bool" Dense="true" Label="Certificate" Value="_showCertified" ValueChanged="OnShowCertifiedChanged" />
+                                                    <MudCheckBox T="bool" Dense="true" Label="CRM" Value="_showSampleValues" ValueChanged="OnShowSampleChanged" />
+                                                    <MudCheckBox T="bool" Dense="true" Label="Acceptable Range" Value="_showAcceptableRange" ValueChanged="OnShowAcceptableRangeChanged" />
+                                                </MudStack>
+                                            </div>
+                                            <div class="flex-grow-1 position-relative" style="min-height: 0;">
+                                                <canvas id="calibrationChart" style="width:100%; height:100%"></canvas>
+                                            </div>
+                                        </MudPaper>
+                                        @* Chart 1 *@
+                                        @* <MudPaper Class="flex-grow-1 d-flex flex-column pa-3" Elevation="1" Style="border-radius: 8px; background: white; min-height: 400px; max-height:420px; overflow: hidden;">
+                                            <div class="d-flex justify-space-between mb-2">
+                                                <MudText Typo="Typo.h6"><b>Element Improvement</b></MudText>
+                                            </div>
+                                            <div class="flex-grow-1 position-relative">
+                                                <canvas @ref="chart2Canvas" id="elementChart" style="width:100%; height:100%"></canvas>
+                                            </div>
+                                        </MudPaper> *@
+
+                                        <MudPaper Class="d-flex flex-column pa-3 crm-chart-paper" Elevation="1" Style="border-radius: 8px; background: white;">
+                                            <div class="d-flex justify-space-between mb-2">
+                                                <MudText Typo="Typo.h6"><b>Index vs Value (@_focusElement)</b></MudText>
+                                            </div>
+                                            <div class="flex-grow-1 position-relative" style="min-height: 0;">
+                                                <canvas id="secondaryChart" style="width:100%; height:100%"></canvas>
+                                            </div>
+                                        </MudPaper>
+
+                                    }
+                                </div>
+                            </MudTabPanel>
+                        </MudTabs>
+                    </MudPaper>
+                </MudStack>
+            </MudItem>
+        </MudGrid>
+    }
+</MudContainer>
+
+@* --- Dialogs (Ranges) --- *@
+<MudDialog @bind-Visible="_rangesDialogVisible" Options="new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true }">
+    <TitleContent>
+        <MudText Typo="Typo.h6"><MudIcon Icon="@Icons.Material.Filled.Tune" Class="me-2" /> Acceptable Ranges</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudGrid Spacing="2">
+            <MudItem xs="6"><MudNumericField @bind-Value="_rangeLow" Label="|x| < 10 (Abs)" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="6"><MudNumericField @bind-Value="_rangeMid" Label="10-100 (%)" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="6"><MudNumericField @bind-Value="_rangeHigh1" Label="100-1k (%)" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="6"><MudNumericField @bind-Value="_rangeHigh2" Label="1k-10k (%)" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="6"><MudNumericField @bind-Value="_rangeHigh3" Label="10k-100k (%)" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="6"><MudNumericField @bind-Value="_rangeHigh4" Label=">100k (%)" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="ResetRanges">Reset</MudButton>
+        <MudSpacer />
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="ApplyRangesAsync">Apply</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<style>
+    .crm-layout {
+        height: calc(100vh - 150px);
+    }
+
+    .crm-chart-paper {
+        height: 360px;
+    }
+
+    .crm-chart-paper .position-relative {
+        min-height: 0;
+        height: 100%;
+    }
+
+    @@media (max-width: 960px) {
+        .crm-layout {
+            height: auto;
+        }
+
+        .crm-chart-paper {
+            height: 300px;
+        }
+    }
+</style>
