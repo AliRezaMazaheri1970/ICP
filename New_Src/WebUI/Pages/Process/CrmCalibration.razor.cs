@@ -1087,6 +1087,22 @@ namespace WebUI.Pages.Process
                 StateHasChanged();
             }
         }
+        private void ResetAll()
+        {
+            _minDiff = -10m;
+            _maxDiff = 10m;
+            //use multi-model
+            //filter element _selectedElements
+            _previewBlank = 0m;
+            _previewScale = 1.0;
+            _scaleRangeMin = null;
+            _scaleRangeMax = null;
+            // > 50 only
+            //_scaleAbove50Only = false;
+            ResetRanges();
+            //RenderCharts();
+        }
+
 
         private async Task LoadElements() { var r = await PivotService.GetElementsAsync(_projectId!.Value); if (r.Succeeded) _allElements = r.Data ?? new(); if (_allElements.Any() && string.IsNullOrEmpty(_focusElement)) _focusElement = _allElements[0]; }
         private async Task LoadCrmReferenceData() { var r = await CrmService.GetCrmListAsync(pageSize: 0); if (r.Succeeded) _crmReferenceById = r.Data.Items.GroupBy(x => x.CrmId).ToDictionary(g => g.Key, g => g.ToList()); }

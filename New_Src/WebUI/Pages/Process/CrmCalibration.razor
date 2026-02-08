@@ -151,7 +151,7 @@
 
                                 <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mt-2">
                                     @* FIX: Added T="bool" *@
-                                    <MudCheckBox T="bool" @bind-Checked="_scaleAbove50Only" Label=">50 Only" Color="Color.Primary" Dense="true" Size="Size.Small" />
+                                    <MudCheckBox T="bool" @bind-Checked="_scaleAbove50Only" Label="> 50 Only" Color="Color.Primary" Dense="true" Size="Size.Small" />
                                     <MudButton OnClick="OpenRangesDialog" Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Tune">Ranges</MudButton>
                                 </MudStack>
                             </MudTabPanel>
@@ -166,7 +166,7 @@
                                 <MudGrid Spacing="2">
                                     @* <MudItem xs="6"><MudButton OnClick="PreviewManualAsync" Variant="Variant.Outlined" Color="Color.Info" FullWidth="true" Size="Size.Small">Preview</MudButton></MudItem> *@
                                     <MudItem xs="12"><MudButton OnClick="ApplyManualAsync" Variant="Variant.Filled" Color="Color.Success" FullWidth="true" Size="Size.Small">Apply</MudButton></MudItem>
-                                    @* <MudItem xs="6"><MudButton OnClick="ResetAll" Variant="Variant.Outlined" Color="Color.Default" FullWidth="true" Size="Size.Small">Reset</MudButton></MudItem> *@
+                                    <MudItem xs="6"><MudButton OnClick="ResetAll" Variant="Variant.Outlined" Color="Color.Default" FullWidth="true" Size="Size.Small">Reset</MudButton></MudItem>
                                     <MudItem xs="6"><MudButton OnClick="UndoManualAsync" Variant="Variant.Outlined" Color="Color.Error" FullWidth="true" Size="Size.Small">Undo</MudButton></MudItem>
                                 </MudGrid>
 
@@ -380,13 +380,8 @@
 
                                         @* Chart 2 *@
                                         <MudPaper Class="d-flex flex-column pa-3 crm-chart-paper" Elevation="1" Style="border-radius: 8px; background: white;">
-                                            <div class="d-flex flex-column mb-2">
+                                            <div class="d-flex justify-space-between mb-2">
                                                 <MudText Typo="Typo.h6"><b>Calibration Plot (@_focusElement)</b></MudText>
-                                                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
-                                                    <MudCheckBox T="bool" Dense="true" Label="Certificate" Value="_showCertified" ValueChanged="OnShowCertifiedChanged" />
-                                                    <MudCheckBox T="bool" Dense="true" Label="CRM" Value="_showSampleValues" ValueChanged="OnShowSampleChanged" />
-                                                    <MudCheckBox T="bool" Dense="true" Label="Acceptable Range" Value="_showAcceptableRange" ValueChanged="OnShowAcceptableRangeChanged" />
-                                                </MudStack>
                                             </div>
                                             <div class="flex-grow-1 position-relative" style="min-height: 0;">
                                                 <canvas id="calibrationChart" style="width:100%; height:100%"></canvas>
@@ -453,10 +448,10 @@
         height: 360px;
     }
 
-    .crm-chart-paper .position-relative {
-        min-height: 0;
-        height: 100%;
-    }
+        .crm-chart-paper .position-relative {
+            min-height: 0;
+            height: 100%;
+        }
 
     @@media (max-width: 960px) {
         .crm-layout {
