@@ -4,18 +4,15 @@
 @inject ProjectService ProjectService
 @inject DriftService DriftService
 @inject PivotService PivotService
+@inject CorrectionService CorrectionService
 @inject ISnackbar Snackbar
+@inject IJSRuntime JSRuntime
 
 <PageTitle>ICP - Drift Correction</PageTitle>
-@{
-    var user = AuthService.GetCurrentUser();
-    var isAuthenticated = user?.IsAuthenticated ?? false;
 
-}
-<NavigationLock OnBeforeInternalNavigation="OnBeforeNavigation" ConfirmExternalNavigation="_isLoading" />
+<NavigationLock OnBeforeInternalNavigation="OnBeforeNavigation" ConfirmExternalNavigation="@(_isLoading || _isApplying)" />
 
-@* Loading Overlay *@
-@if (_isLoading)
+@if (_isLoading || _isApplying)
 {
     <div class="loading-overlay">
         <MudPaper Elevation="4" Class="pa-6 d-flex flex-column align-center">
@@ -35,7 +32,7 @@
                     {
                         <span>Project: <strong>@_projectName</strong> | </span>
                     }
-                    Correct instrument drift using Linear or Stepwise methods
+                    RM-based drift analysis and correction
                 </MudText>
             </div>
             <ProcessNav CurrentStep="drift" />
@@ -44,226 +41,235 @@
 
     @if (_projectId == null)
     {
-        <MudAlert Severity="Severity.Warning">
-            Please select a project first.
-        </MudAlert>
+        <MudAlert Severity="Severity.Warning">Please select a project first.</MudAlert>
     }
     else
     {
         <MudGrid>
-            @* Settings Panel *@
-            <MudItem xs="12" md="3">
+            <MudItem xs="12" md="5">
                 <MudPaper Elevation="0" Class="pa-4 custom-card-all">
-                    <MudText Typo="Typo.h6" Class="mb-4">
-                        <MudIcon Icon="@Icons.Material.Filled.Settings" Class="me-2" />
-                        Settings
-                    </MudText>
+                    <MudText Typo="Typo.h6" Class="mb-3">Controls</MudText>
+
+                    <MudTextField T="string"
+                                  Label="Keyword"
+                                  Variant="Variant.Outlined"
+                                  Value="_keyword"
+                                  ValueChanged="OnKeywordChanged"
+                                  Class="mb-2" />
+
+                    <MudStack Row="true" Spacing="1" Class="mb-2">
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Success"
+                                   OnClick="AnalyzeDrift"
+                                   Disabled="@(_isLoading || _isApplying || string.IsNullOrWhiteSpace(_focusElement))">
+                            Check RM Changes
+                        </MudButton>
+                        <MudButton Variant="Variant.Outlined"
+                                   Color="Color.Default"
+                                   OnClick="UndoLastCorrection"
+                                   Disabled="@(_isLoading || _isApplying)">
+                            Undo Last Correction
+                        </MudButton>
+                    </MudStack>
+
+                    <MudCheckBox T="bool"
+                                 @bind-Value="_applyStepwiseChanges"
+                                 Dense="true"
+                                 Label="Apply Stepwise Changes"
+                                 Class="mb-2" />
+
+                    <MudTextField T="string"
+                                  Label="Filter Solution Labels"
+                                  Variant="Variant.Outlined"
+                                  Value="_solutionFilter"
+                                  ValueChanged="OnSolutionFilterChanged"
+                                  Immediate="true"
+                                  Class="mb-2" />
+
+                    <MudStack Row="true" Spacing="1" Class="mb-2">
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Success"
+                                   OnClick="AutoOptimizeToFlat"
+                                   Disabled="@(!HasAnalysis || _rmRatioRows.Count == 0)">
+                            Auto Optimize to Flat
+                        </MudButton>
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Success"
+                                   OnClick="AutoOptimizeSlopeToZero"
+                                   Disabled="@(!HasAnalysis || _rmRatioRows.Count == 0)">
+                            Auto Optimize Slope to Zero
+                        </MudButton>
+                    </MudStack>
+
+                    <MudStack Row="true" Spacing="2" Class="mb-2">
+                        <MudCheckBox T="bool" @bind-Value="_globalOptimizeIgnoreChecks" Dense="true" Label="Global Optimize (Ignore Checks)" />
+                        <MudCheckBox T="bool" @bind-Value="_perFileRmReference" Dense="true" Label="Per File RM Reference" />
+                    </MudStack>
 
                     <MudSelect T="DriftMethod"
-                               @bind-Value="_method"
-                               Label="Correction Method"
+                               Value="_method"
+                               ValueChanged="(v) => _method = v"
+                               Label="Method"
                                Variant="Variant.Outlined"
-                               Class="mb-4">
+                               Class="mb-2">
                         <MudSelectItem Value="DriftMethod.Linear">Linear</MudSelectItem>
                         <MudSelectItem Value="DriftMethod.Stepwise">Stepwise</MudSelectItem>
                     </MudSelect>
 
                     <MudSelect T="string"
-                               Label="Elements"
-                               MultiSelection="true"
-                               @bind-SelectedValues="_selectedElements"
+                               Value="_focusElement"
+                               ValueChanged="OnFocusElementChanged"
+                               Label="Element"
                                Variant="Variant.Outlined"
-                               Class="mb-4">
-                        @foreach (var el in _allElements)
+                               Class="mb-2">
+                        @foreach (var element in _allElements)
                         {
-                            <MudSelectItem Value="@el">@el</MudSelectItem>
+                            <MudSelectItem Value="@element">@element</MudSelectItem>
                         }
                     </MudSelect>
 
-                    <MudCheckBox @bind-Value="_useSegmentation"
-                                 Label="Use Segmentation"
-                                 Color="Color.Primary"
-                                 Class="mb-4" />
+                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="mb-2">
+                        <MudButton Variant="Variant.Outlined" OnClick="PrevRm" Disabled="@(!CanPrevRm)">Previous</MudButton>
+                        <MudButton Variant="Variant.Outlined" OnClick="NextRm" Disabled="@(!CanNextRm)">Next</MudButton>
+                        <MudText Typo="Typo.body2">@CurrentRmText</MudText>
+                    </MudStack>
 
-                    <MudButton Variant="Variant.Outlined"
-                               Color="Color.Info"
-                               FullWidth="true"
-                               StartIcon="@Icons.Material.Filled.Analytics"
-                               OnClick="AnalyzeDrift"
-                               Disabled="_isLoading "
-                               Class="mb-2">
-                        Analyze Drift
-                    </MudButton>
+                    <MudDivider Class="my-2" />
 
-                    <MudButton Variant="Variant.Filled"
-                               Color="Color.Primary"
-                               FullWidth="true"
-                               StartIcon="@Icons.Material.Filled.PlayArrow"
-                               OnClick="ApplyCorrection"
-                               Disabled="@(_isLoading || _analysisResult == null || (user?.Position?.Equals("Viewer", StringComparison.OrdinalIgnoreCase) ?? false))">
-                        @if (_isApplying )
-                        {
-                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
-                        }
-                        Apply Correction
-                    </MudButton>
-                </MudPaper>
+                    <MudText Typo="Typo.subtitle2" Class="mb-1">RM Points and Ratios</MudText>
+                    <MudTable Items="_rmRatioRows" Dense="true" Hover="true" FixedHeader="true" Height="200px" Breakpoint="Breakpoint.None" HorizontalScrollbar="true">
+                        <HeaderContent>
+                            <MudTh>RM Label</MudTh>
+                            <MudTh>Next RM</MudTh>
+                            <MudTh>Type</MudTh>
+                            <MudTh>Original Value</MudTh>
+                            <MudTh>Current Value</MudTh>
+                            <MudTh>Ratio</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd>@context.RmLabel</MudTd>
+                            <MudTd>@context.NextRmLabel</MudTd>
+                            <MudTd>@context.Type</MudTd>
+                            <MudTd>@context.OriginalValue.ToString("F3")</MudTd>
+                            <MudTd>@context.CurrentValue.ToString("F3")</MudTd>
+                            <MudTd>@context.Ratio.ToString("F3")</MudTd>
+                        </RowTemplate>
+                    </MudTable>
 
-                @* Segments Info *@
-                @if (_analysisResult != null && _analysisResult.Segments.Any())
-                {
-                    <MudPaper Elevation="0" Class="pa-4 mt-4 height-segmants custom-card-all">
-                        <MudText Typo="Typo.h6" Class="mb-2">
-                            <MudIcon Icon="@Icons.Material.Filled.Timeline" Class="me-2" />
-                            Segments
-                        </MudText>
-                        <MudList T="DriftSegment" Dense="true">
-                            @foreach (var seg in _analysisResult.Segments)
-                            {
-                                <MudListItem>
-                                    <div class="d-flex justify-space-between">
-                                        <span>Segment @(seg.SegmentIndex + 1)</span>
-                                        <MudChip T="string" Size="Size.Small">@seg.SampleCount samples</MudChip>
-                                    </div>
-                                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                                        @seg.StartStandard → @seg.EndStandard
-                                    </MudText>
-                                </MudListItem>
-                            }
-                        </MudList>
+                    <MudText Typo="Typo.subtitle2" Class="mt-3 mb-1">Data Between Selected RM Points</MudText>
+                    <MudTable Items="_betweenRows" Dense="true" Hover="true" FixedHeader="true" Height="200px" Breakpoint="Breakpoint.None" HorizontalScrollbar="true">
+                        <HeaderContent>
+                            <MudTh>Solution Label</MudTh>
+                            <MudTh>Original Value</MudTh>
+                            <MudTh>Corrected Value</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd>@context.SolutionLabel</MudTd>
+                            <MudTd>@context.OriginalValue.ToString("F3")</MudTd>
+                            <MudTd>@context.CorrectedValue.ToString("F3")</MudTd>
+                        </RowTemplate>
+                    </MudTable>
+
+                    <MudPaper Elevation="0" Class="pa-3 mt-3">
+                        <MudText Typo="Typo.subtitle2">Slope Optimization</MudText>
+                        <MudText Typo="Typo.body2" Class="mb-2">Current Slope: @_currentSlope.ToString("F6")</MudText>
+                        <MudNumericField T="decimal"
+                                         Label="Adjust Slope"
+                                         Variant="Variant.Outlined"
+                                         Value="_targetSlope"
+                                         ValueChanged="OnTargetSlopeChanged"
+                                         Class="mb-2" />
+                        <MudStack Row="true" Spacing="1">
+                            <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="RotateUp" Disabled="@(!HasAnalysis)">Rotate Up</MudButton>
+                            <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="RotateDown" Disabled="@(!HasAnalysis)">Rotate Down</MudButton>
+                            <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="ResetToOriginal" Disabled="@(!HasAnalysis)">Reset to Original</MudButton>
+                        </MudStack>
                     </MudPaper>
-                }
+                </MudPaper>
             </MudItem>
 
-            @* Results Panel *@
-            <MudItem xs="12" md="9">
+            <MudItem xs="12" md="7">
                 <MudPaper Elevation="0" Class="pa-4 custom-card-all">
-                    @if (_isLoading)
+                    @if (!HasAnalysis)
                     {
-                        <div class="d-flex justify-center align-center py-8">
-                            <MudProgressCircular Indeterminate="true" Size="Size.Large" />
-                        </div>
-                    }
-                    else if (_analysisResult == null)
-                    {
-                        <MudAlert Severity="Severity.Info">
-                            Click "Analyze Drift" to detect drift patterns in your data.
-                        </MudAlert>
+                        <MudAlert Severity="Severity.Info">Run "Check RM Changes" to build RM plot and drift diagnostics.</MudAlert>
                     }
                     else
                     {
-                        @* Summary Cards *@
-                        <MudGrid Class="mb-4">
-                            <MudItem xs="12" sm="6" md="3">
-                                <MudPaper Elevation="0" Class="pa-3 text-center" Style="background: var(--mud-palette-info-lighten);">
-                                    <MudText Typo="Typo.h4" Color="Color.Dark">@_analysisResult.TotalSamples</MudText>
-                                    <MudText Typo="Typo.caption">Total Samples</MudText>
+                        <MudGrid Class="mb-3">
+                            <MudItem xs="6" md="3">
+                                <MudPaper Elevation="0" Class="pa-2 text-center" Style="background: var(--mud-palette-info-lighten);">
+                                    <MudText Typo="Typo.h6">@_analysisResult!.TotalSamples</MudText>
+                                    <MudText Typo="Typo.caption">Samples</MudText>
                                 </MudPaper>
                             </MudItem>
-                            <MudItem xs="12" sm="6" md="3">
-                                <MudPaper Elevation="0" Class="pa-3 text-center" Style="background: var(--mud-palette-success-lighten);">
-                                    <MudText Typo="Typo.h4" Color="Color.Dark">@_analysisResult.SegmentsFound</MudText>
+                            <MudItem xs="6" md="3">
+                                <MudPaper Elevation="0" Class="pa-2 text-center" Style="background: var(--mud-palette-success-lighten);">
+                                    <MudText Typo="Typo.h6">@_analysisResult!.SegmentsFound</MudText>
                                     <MudText Typo="Typo.caption">Segments</MudText>
                                 </MudPaper>
                             </MudItem>
-                            <MudItem xs="12" sm="6" md="3">
-                                <MudPaper Elevation="0" Class="pa-3 text-center" Style="background: var(--mud-palette-warning-lighten);">
-                                    <MudText Typo="Typo.h4" Color="Color.Dark">@_analysisResult.ElementDrifts.Count</MudText>
-                                    <MudText Typo="Typo.caption">Elements Analyzed</MudText>
+                            <MudItem xs="6" md="3">
+                                <MudPaper Elevation="0" Class="pa-2 text-center" Style="background: var(--mud-palette-warning-lighten);">
+                                    <MudText Typo="Typo.h6">@_analysisResult!.ElementDrifts.Count</MudText>
+                                    <MudText Typo="Typo.caption">Elements</MudText>
                                 </MudPaper>
                             </MudItem>
-                            <MudItem xs="12" sm="6" md="3">
-                                <MudPaper Elevation="0" Class="pa-3 text-center" Style="background: var(--mud-palette-secondary-lighten);">
-                                    <MudText Typo="Typo.h4" Color="Color.Dark">@_analysisResult.CorrectedSamples</MudText>
+                            <MudItem xs="6" md="3">
+                                <MudPaper Elevation="0" Class="pa-2 text-center" Style="background: var(--mud-palette-secondary-lighten);">
+                                    <MudText Typo="Typo.h6">@_analysisResult!.CorrectedSamples</MudText>
                                     <MudText Typo="Typo.caption">Corrected</MudText>
                                 </MudPaper>
                             </MudItem>
                         </MudGrid>
 
-                        @* Element Drift Table *@
-                        <div class="d-flex justify-space-between align-center mb-2">
-                            <MudText Typo="Typo.h6">Element Drift Analysis</MudText>
-                            @if (_totalCount > 0)
-                            {
-                                <MudText Typo="Typo.caption">
-                                    Showing @((_currentPage - 1) * _pageSize + 1) -
-                                    @Math.Min(_currentPage * _pageSize, _totalCount)
-                                    of @_totalCount
-                                </MudText>
-                            }
+                        <div style="height: 640px;">
+                            <canvas id="driftChart" style="width:100%; height:100%"></canvas>
                         </div>
 
+                        <MudDivider Class="my-3" />
+
+                        <MudText Typo="Typo.h6" Class="mb-2">Element Drift Analysis</MudText>
                         <MudTable Items="@GetPagedElementDrifts()"
                                   Hover="true"
                                   Dense="true"
                                   FixedHeader="true"
-                                  Height="380px"
+                                  Height="260px"
                                   Breakpoint="Breakpoint.None"
                                   HorizontalScrollbar="true">
-
                             <HeaderContent>
                                 <MudTh>Element</MudTh>
                                 <MudTh>Initial Ratio</MudTh>
                                 <MudTh>Final Ratio</MudTh>
                                 <MudTh>Drift %</MudTh>
                                 <MudTh>Slope</MudTh>
-                                <MudTh>Status</MudTh>
                             </HeaderContent>
-
                             <RowTemplate>
-                                <MudTd>
-                                    <MudText Class="fw-medium">@context.Element</MudText>
-                                </MudTd>
+                                <MudTd>@context.Element</MudTd>
                                 <MudTd>@context.InitialRatio.ToString("F4")</MudTd>
                                 <MudTd>@context.FinalRatio.ToString("F4")</MudTd>
                                 <MudTd>
-                                    <MudChip T="string"
-                                             Size="Size.Small"
-                                             Color="@GetDriftColor(context.DriftPercent)">
+                                    <MudChip T="string" Size="Size.Small" Color="@GetDriftColor(context.DriftPercent)">
                                         @context.DriftPercent.ToString("F2")%
                                     </MudChip>
                                 </MudTd>
                                 <MudTd>@context.Slope.ToString("F6")</MudTd>
-                                <MudTd>
-                                    @if (Math.Abs(context.DriftPercent) < 2)
-                                    {
-                                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
-                                    }
-                                    else if (Math.Abs(context.DriftPercent) < 5)
-                                    {
-                                        <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Size="Size.Small" />
-                                    }
-                                    else
-                                    {
-                                        <MudIcon Icon="@Icons.Material.Filled.Error" Color="Color.Error" Size="Size.Small" />
-                                    }
-                                </MudTd>
                             </RowTemplate>
                         </MudTable>
 
-                        @* Pagination for element drift table *@
                         @if (_totalCount > 0)
                         {
-                            <div class="d-flex justify-center align-center mt-4 gap-4 change-flex-item">
+                            <div class="d-flex justify-center align-center mt-3 gap-4 change-flex-item">
                                 <MudSelect T="int"
                                            Value="_pageSize"
                                            ValueChanged="OnPageSizeChanged"
                                            Label="Per Page"
                                            Variant="Variant.Outlined"
                                            Dense="true"
-                                           Style="width: 100px;">
+                                           Style="width: 110px;">
                                     <MudSelectItem Value="10">10</MudSelectItem>
                                     <MudSelectItem Value="20">20</MudSelectItem>
-                                    <MudSelectItem Value="30">30</MudSelectItem>
-
-                                    <MudSelectItem Value="40">40</MudSelectItem>
                                     <MudSelectItem Value="50">50</MudSelectItem>
-                                    <MudSelectItem Value="60">60</MudSelectItem>
-
-                                    <MudSelectItem Value="70">70</MudSelectItem>
-                                    <MudSelectItem Value="80">80</MudSelectItem>
-                                    <MudSelectItem Value="90">90</MudSelectItem>
-
                                     <MudSelectItem Value="100">100</MudSelectItem>
                                 </MudSelect>
 
@@ -275,45 +281,6 @@
                                                BoundaryCount="1"
                                                MiddleCount="3" />
                             </div>
-                        }
-
-                        @* Corrected Data Preview *@
-                        @if (_analysisResult.CorrectedData.Any())
-                        {
-                            <MudDivider Class="my-4" />
-                            <MudExpansionPanels>
-                                <MudExpansionPanel Text="Corrected Data Preview">
-                                    <MudTable Items="@_analysisResult.CorrectedData.Take(20)"
-                                              Hover="true"
-                                              Dense="true"
-                                              FixedHeader="true"
-                                              Height="170px"
-                                              Breakpoint="Breakpoint.None"
-                                              HorizontalScrollbar="true">
-                                        <HeaderContent>
-                                            <MudTh>Sample</MudTh>
-                                            <MudTh>Segment</MudTh>
-                                            <MudTh>Correction Factors</MudTh>
-                                        </HeaderContent>
-                                        <RowTemplate>
-                                            <MudTd>@context.SolutionLabel</MudTd>
-                                            <MudTd>@(context.SegmentIndex + 1)</MudTd>
-                                            <MudTd>
-                                                @foreach (var cf in context.CorrectionFactors.Take(3))
-                                                {
-                                                    <MudChip T="string" Size="Size.Small" Class="ma-1">
-                                                        @cf.Key: @cf.Value.ToString("F4")
-                                                    </MudChip>
-                                                }
-                                                @if (context.CorrectionFactors.Count > 3)
-                                                {
-                                                    <MudChip T="string" Size="Size.Small">+@(context.CorrectionFactors.Count - 3)</MudChip>
-                                                }
-                                            </MudTd>
-                                        </RowTemplate>
-                                    </MudTable>
-                                </MudExpansionPanel>
-                            </MudExpansionPanels>
                         }
                     }
                 </MudPaper>
@@ -336,35 +303,7 @@
         z-index: 9999;
     }
 
-    .mud-simple-table table {
-        width: 100%;
-        display: table;
-        border-spacing: 0;
-        border-collapse: collapse;
-        height: 200px;
-        overflow: scroll;
-    }
-
-    .mud-table-dense * .mud-table-row .mud-table-cell {
-        padding: 0px 15px 1px 16px;
-        padding-inline-start: 16px;
-        padding-inline-end: 24px;
-    }
-
     .mud-table-cell {
-        white-space: nowrap; /* جلوگیری از شکستن متن در سلول‌ها */
+        white-space: nowrap;
     }
-
-    .mud-table {
-        color: var(--mud-palette-text-primary);
-        background-color: var(--mud-palette-surface);
-        border-radius: var(--mud-default-borderradius);
-        transition: box-shadow 300ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;
-        /* height: 400px;
-        overflow: scroll; */
-    }
-
-   
 </style>
-
-
