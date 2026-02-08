@@ -389,7 +389,7 @@ namespace WebUI.Pages.Process
             await LoadCrmSelections();
             LoadExcludedLabelsFromInput();
             await LoadSecondaryPlotRowsAsync();
-            await GetCurrentStats();
+            //await GetCurrentStats();
         }
 
         private async Task LoadCrmOptions()
@@ -1067,7 +1067,7 @@ namespace WebUI.Pages.Process
             _minDiff = -10m;
             _maxDiff = 10m;
             //use multi-model
-            //filter element
+            //filter element _selectedElements
             _previewBlank = 0m;
             _previewScale = 1.0;
             _scaleRangeMin = null;
