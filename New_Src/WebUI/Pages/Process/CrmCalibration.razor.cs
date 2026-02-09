@@ -236,15 +236,132 @@ namespace WebUI.Pages.Process
 
         private async Task OnResultsTabChanged(int i) { _resultsTabIndex = i; if (i == 1) await RefreshChartsAsync(); }
 
-        private void OnPivotModeChanged(PivotValueMode m) => _pivotMode = m;
+        //private void OnPivotModeChanged(PivotValueMode m) => _pivotMode = m;
+        private Task OnPivotModeChanged(PivotValueMode mode)
+        {
+            _pivotMode = mode;
+            RebuildPivot();
+            StateHasChanged();
+            return Task.CompletedTask;
+        }
 
-        private void OnPivotElementsChanged(IEnumerable<string> e) => _pivotSelectedElements = new HashSet<string>(e, StringComparer.OrdinalIgnoreCase);
+        //private void OnPivotElementsChanged(IEnumerable<string> e) => _pivotSelectedElements = new HashSet<string>(e, StringComparer.OrdinalIgnoreCase);
 
+        private Task OnPivotElementsChanged(IEnumerable<string> values)
+        {
+            _pivotSelectedElements = new HashSet<string>(values ?? Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            RebuildPivot();
+            StateHasChanged();
+            return Task.CompletedTask;
+        }
+
+        private async Task RebuildPivot()
+        {
+            if (!_projectId.HasValue) return;
+            _isLoading = true;
+            StateHasChanged();
+
+            try
+            {
+                // لود کل دیتای پروژه (854 ردیف) از سرویس اصلی پیوت
+                var request = new AdvancedPivotRequest(
+                    ProjectId: _projectId.Value,
+                    SearchText: _sampleFilter,
+                    SelectedElements: _allElements.ToList(), // Argument 4
+                    NumberFilters: null,                    // Argument 5
+                    UseOxide: false,                        // Argument 6
+                    UseInt: false,                          // Argument 7
+                    DecimalPlaces: 4,                       // Argument 8
+                    Page: 1,                                // Argument 9
+                    PageSize: 2000,                         // لود کامل برای اسکرول (Argument 10)
+                    MergeRepeats: false,                    // Argument 11
+                    Aggregation: "First"                    // Argument 12
+                );
+
+                var result = await PivotService.GetAdvancedPivotTableAsync(request);
+
+                if (result.Succeeded && result.Data != null)
+                {
+                    var cols = PivotColumns().ToList();
+                    var rows = new List<PivotRowVm>();
+                    int order = 0;
+
+                    // دسترسی به دیتای محدود شده CRMها
+                    //var optimizedData = _manualResult?.OptimizedData ?? _result?.OptimizedData;
+                    //var optimizedData = _result?.OptimizedData;
+                    
+                    var optimizedData = _manualRows.Any() ? null : _result?.OptimizedData;
+
+                    foreach (var s in result.Data.Rows)
+                    {
+                        // 1. اضافه کردن ردیف اصلی نمونه (برای همه 854 ردیف)
+                        rows.Add(new PivotRowVm
+                        {
+                            Order = order++,
+                            SolutionLabel = s.SolutionLabel,
+                            RowType = PivotRowType.Sample,
+                            Values = s.Values
+                        });
+
+                        // 2. اگر این ردیف جزو CRMهای کالیبراسیون بود، ردیف‌های مرجع و Diff را تزریق کن
+                        var crmMatch = optimizedData?.FirstOrDefault(x => x.SolutionLabel == s.SolutionLabel);
+                        if (crmMatch != null && !string.IsNullOrEmpty(crmMatch.CrmId))
+                        {
+                            // ردیف زرد (Reference)
+                            rows.Add(new PivotRowVm
+                            {
+                                Order = order++,
+                                SolutionLabel = $"{crmMatch.CrmId} CRM",
+                                RowType = PivotRowType.CrmRef,
+                                Values = BuildDictValues(crmMatch.CrmValues, cols)
+                            });
+
+                            // ردیف صورتی (Diff %)
+                            rows.Add(new PivotRowVm
+                            {
+                                Order = order++,
+                                SolutionLabel = $"{s.SolutionLabel} Diff (%)",
+                                RowType = PivotRowType.DiffAfter,
+                                Values = BuildDiffValues(crmMatch.DiffPercentAfter, cols)
+                            });
+                        }
+                    }
+                    _pivotRows = rows;
+                }
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Error rebuilding pivot: {ex.Message}", Severity.Error);
+            }
+            finally
+            {
+                _isLoading = false;
+                StateHasChanged();
+            }
+        }
+
+        private Dictionary<string, decimal?> BuildDictValues(Dictionary<string, decimal?> source, List<string> cols)
+        {
+            var dict = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var el in cols)
+                dict[el] = source.TryGetValue(el, out var v) ? v : null;
+            return dict;
+        }
+
+         private Dictionary<string, decimal?> BuildDiffValues(Dictionary<string, decimal> source, List<string> cols)
+        {
+            var dict = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var el in cols)
+                dict[el] = source.TryGetValue(el, out var v) ? v : null;
+            return dict;
+        }
         private void ResetPivotColumns() => _pivotSelectedElements.Clear();
 
         private void OpenRangesDialog() => _rangesDialogVisible = true;
+        private void CancelRangesAsync() => _rangesDialogVisible = false;
 
         private async Task ApplyRangesAsync() { _rangesDialogVisible = false; await RefreshChartsAsync(); }
+     
 
         private void ResetRanges() { _rangeLow = 2; _rangeMid = 20; _rangeHigh1 = 10; _rangeHigh2 = 8; _rangeHigh3 = 5; _rangeHigh4 = 3; }
 

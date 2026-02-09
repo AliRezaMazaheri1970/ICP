@@ -359,7 +359,7 @@
                                                     </MudTabPanel>
 
                                                     @* Detail Tab 2: Pivot *@
-                                                    <MudTabPanel Text="Pivot View">
+                                                    @* <MudTabPanel Text="Pivot View">
                                                         <div class="d-flex flex-column h-100">
                                                             <div class="pa-2 d-flex gap-2">
                                                                 <MudSelect T="PivotValueMode" Label="Mode" Value="_pivotMode" ValueChanged="OnPivotModeChanged" Margin="Margin.Dense" Dense="true" Variant="Variant.Outlined" Class="flex-grow-0" Style="width:150px">
@@ -395,7 +395,84 @@
                                                                 </MudDataGrid>
                                                             </div>
                                                         </div>
+                                                    </MudTabPanel> *@
+
+                                                    <MudTabPanel Text="PIVOT">
+
+                                                        <MudPaper Class="pa-3 mb-2" Elevation="0">
+                                                            <MudGrid Spacing="2" AlignItems="AlignItems.Center" Style="align-items:center;">
+
+                                                                <MudItem xs="12" md="3">
+                                                                    <MudSelect T="PivotValueMode"
+                                                                               Label="Mode"
+                                                                               Dense="true"
+                                                                               Variant="Variant.Outlined"
+                                                                               Value="_pivotMode"
+                                                                               ValueChanged="OnPivotModeChanged">
+                                                                        <MudSelectItem Value="PivotValueMode.Crm">CRM</MudSelectItem>
+                                                                        <MudSelectItem Value="PivotValueMode.Original">Original</MudSelectItem>
+                                                                        <MudSelectItem Value="PivotValueMode.Optimized">Optimized</MudSelectItem>
+                                                                        <MudSelectItem Value="PivotValueMode.DiffAfter">Diff After (%)</MudSelectItem>
+                                                                    </MudSelect>
+                                                                </MudItem>
+
+                                                                <MudItem xs="12" md="6">
+                                                                    <MudSelect T="string"
+                                                                               Label="Columns (Elements)"
+                                                                               Dense="true"
+                                                                               Variant="Variant.Outlined"
+                                                                               MultiSelection="true"
+                                                                               SelectAll="true"
+                                                                               Clearable="true"
+                                                                               SelectedValues="_pivotSelectedElements"
+                                                                               SelectedValuesChanged="OnPivotElementsChanged">
+                                                                        @foreach (var el in _allElements)
+                                                                        {
+                                                                            <MudSelectItem Value="@el">@el</MudSelectItem>
+                                                                        }
+                                                                    </MudSelect>
+                                                                </MudItem>
+
+                                                                <MudItem xs="12" md="2" Class="d-flex justify-end">
+                                                                    <MudButton Style="height:3rem;" Variant="Variant.Outlined" OnClick="ResetPivotColumns" StartIcon="@Icons.Material.Filled.RestartAlt">
+                                                                        Reset
+                                                                    </MudButton>
+                                                                </MudItem>
+
+                                                            </MudGrid>
+                                                        </MudPaper>
+
+                                                        <div style="overflow-x:auto;">
+                                                            <MudDataGrid T="PivotRowVm"
+                                                                         Items="_pivotRows"
+                                                                         Dense="true"
+                                                                         Hover="true"
+                                                                         Bordered="true"
+                                                                         FixedHeader="true"
+                                                                         Height="calc(100vh - 420px)"
+                                                                         Virtualize="true">
+
+                                                                <Columns>
+                                                                    <PropertyColumn Property="x => x.SolutionLabel" Title="Solution Label" />
+
+                                                                    @foreach (var col in PivotColumns())
+                                                                    {
+                                                                        <TemplateColumn Title="@col">
+                                                                            <CellTemplate Context="cell">
+                                                                                @{
+                                                                                    cell.Item.Values.TryGetValue(col, out var v);
+                                                                                }
+                                                                                <MudText Typo="Typo.body2">@FormatDec(v)</MudText>
+                                                                            </CellTemplate>
+                                                                        </TemplateColumn>
+                                                                    }
+                                                                </Columns>
+
+                                                            </MudDataGrid>
+                                                        </div>
+
                                                     </MudTabPanel>
+
                                                 </MudTabs>
                                             </div>
                                         </MudPaper>
@@ -473,6 +550,7 @@
         <MudButton OnClick="ResetRanges">Reset</MudButton>
         <MudSpacer />
         <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="ApplyRangesAsync">Apply</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Filled" OnClick="CancelRangesAsync">Cancel</MudButton>
     </DialogActions>
 </MudDialog>
 
