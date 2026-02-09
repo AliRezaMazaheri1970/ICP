@@ -59,11 +59,21 @@
 
                             </MudStack>
 
-                            <MudButtonGroup Variant="Variant.Outlined" Size="Size.Small" Class="d-flex">
+                            @* <MudButtonGroup Variant="Variant.Outlined" Size="Size.Small" Class="d-flex">
                                 <MudButton OnClick="PrevElement" StartIcon="@Icons.Material.Filled.ChevronLeft" Class="flex-grow-1">Prev</MudButton>
                                 <MudButton OnClick="NextElement" EndIcon="@Icons.Material.Filled.ChevronRight" Class="flex-grow-1">Next</MudButton>
-                            </MudButtonGroup>
+                            </MudButtonGroup> *@
 
+                            <MudButtonGroup Variant="Variant.Outlined" Size="Size.Small" Class="d-flex">
+                                <MudButton OnClick="PrevElement"
+                                           StartIcon="@Icons.Material.Filled.ChevronLeft"
+                                           Class="flex-grow-1"
+                                           Disabled="@_isLoading">Prev</MudButton>
+                                <MudButton OnClick="NextElement"
+                                           EndIcon="@Icons.Material.Filled.ChevronRight"
+                                           Class="flex-grow-1"
+                                           Disabled="@_isLoading">Next</MudButton>
+                            </MudButtonGroup>
                         </div>
 
                         @* TABS *@
@@ -117,14 +127,35 @@
                                 </div>
 
                                 <MudText Typo="Typo.caption" Class="mt-2"><b>Application Range</b></MudText>
+
+
                                 <MudGrid Spacing="1">
                                     <MudItem xs="6">
-                                        <MudNumericField Value="_scaleRangeMin" ValueChanged="@(async (decimal? v) => await OnRangeMinChanged(v))" Label="Min Limit" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                        <MudNumericField Value="_scaleRangeMin"
+                                                         ValueChanged="@(async (decimal? v) => await OnRangeMinChanged(v))"
+                                                         Label="Min Limit"
+                                                         Variant="Variant.Outlined"
+                                                         Margin="Margin.Dense"
+                                                         Error="@(_scaleRangeMin.HasValue && _scaleRangeMax.HasValue && _scaleRangeMin > _scaleRangeMax)"
+                                                         ErrorText="Min must be less than Max!" />
                                     </MudItem>
                                     <MudItem xs="6">
-                                        <MudNumericField Value="_scaleRangeMax" ValueChanged="@(async (decimal? v) => await OnRangeMaxChanged(v))" Label="Max Limit" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                        <MudNumericField Value="_scaleRangeMax"
+                                                         ValueChanged="@(async (decimal? v) => await OnRangeMaxChanged(v))"
+                                                         Label="Max Limit"
+                                                         Variant="Variant.Outlined"
+                                                         Margin="Margin.Dense"
+                                                         Error="@(_scaleRangeMin.HasValue && _scaleRangeMax.HasValue && _scaleRangeMin > _scaleRangeMax)"
+                                                         ErrorText="Max must be greater than Min!" />
                                     </MudItem>
                                 </MudGrid>
+                                @* نمایش محدوده فعلی *@
+                                @if (_scaleRangeMin.HasValue && _scaleRangeMax.HasValue)
+                                {
+                                    <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">
+                                        <MudText>Scale will be applied to values between @_scaleRangeMin.Value.ToString("F2") and @_scaleRangeMax.Value.ToString("F2")</MudText>
+                                    </MudAlert>
+                                }
 
                                 <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mt-2">
                                     @* FIX: Added T="bool" *@
@@ -140,12 +171,25 @@
                                     <MudCheckBox T="bool" @bind-Checked="_useMultiModel" Label="Use Multi-Model (A/B/C)" Color="Color.Primary" Dense="true" />
                                 </MudItem>
                                 <MudItem xs="12">
-                                    <MudSelect T="string" Label="Filter Elements" MultiSelection="true" @bind-SelectedValues="_selectedElements" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
-                                        @foreach (var el in _allElements)
-                                        {
-                                            <MudSelectItem Value="@el">@el</MudSelectItem>
-                                        }
-                                    </MudSelect>
+                                
+
+                                    @* در تب Manual، بعد از بخش Application Range *@
+                                    <MudDivider Class="my-2" />
+
+                                    <MudText Typo="Typo.caption" Class="mt-2"><b>Filter Elements</b></MudText>
+
+                                    <MudTextField Value="@_filterText"
+                                                  ValueChanged="OnFilterTextChangedCallback"
+                                                  Label="Filter Labels (e.g., rm)"
+                                                  Placeholder="Enter filter text"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense"
+                                                  Adornment="Adornment.Start"
+                                                  AdornmentIcon="@Icons.Material.Filled.FilterAlt"
+                                                  Class="mb-2"
+                                                  Immediate="true" />
+
+                             
                                 </MudItem>
                             </MudTabPanel>
                         </MudTabs>

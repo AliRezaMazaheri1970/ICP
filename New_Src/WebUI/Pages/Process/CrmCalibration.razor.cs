@@ -52,6 +52,11 @@ namespace WebUI.Pages.Process
         private bool _scaleAbove50Only = false;
         private string _excludedLabelsInput = string.Empty;
 
+        // متغیرهای جدید برای مدیریت فیلتر
+        private string _filterText = "";
+        private bool _showOriginal = true;
+        private bool _showCorrected = true;
+
         // --- داده‌ها و مراجع ---
         private List<AdvancedPivotRowDto> _secondaryRows = new();
         private BlankScaleOptimizationResult? _result;
@@ -77,6 +82,11 @@ namespace WebUI.Pages.Process
         private bool _showCertified = true;
         private bool _showSampleValues = true;
         private bool _showAcceptableRange = true;
+
+
+        private CancellationTokenSource _refreshCts;
+        private DateTime _lastRefreshTime = DateTime.MinValue;
+        private readonly TimeSpan _refreshThrottleInterval = TimeSpan.FromMilliseconds(300);
 
         // ریجکس برای تشخیص برچسب‌های CRM (مطابق تصویر پایتون V 252b)
         private static readonly Regex CrmIdRegex = new(@"(?i)(?:\bCRM\b|\bOREAS\b|\bV\b)[^\d]*(\d+[a-zA-Z]?)", RegexOptions.Compiled);
@@ -223,8 +233,6 @@ namespace WebUI.Pages.Process
         private int FilteredManualCount() => FilterRows(_manualRows).Count();
 
         private List<string> PivotColumns() => _pivotSelectedElements.OrderBy(x => x).ToList();
-
-        private void ResetPreview() { _previewBlank = 0m; _previewScale = 1.0; StateHasChanged(); }
 
         private async Task OnResultsTabChanged(int i) { _resultsTabIndex = i; if (i == 1) await RefreshChartsAsync(); }
 
@@ -553,7 +561,8 @@ namespace WebUI.Pages.Process
                 return;
             }
 
-            var orderedRows = _secondaryRows
+            // اعمال فیلتر بر اساس متن وارد شده
+            var filteredRows = GetFilteredSecondaryRows()
                 .OrderBy(r => r.OriginalIndex)
                 .ThenBy(r => r.SetIndex)
                 .ToList();
@@ -562,9 +571,10 @@ namespace WebUI.Pages.Process
             var correctedPoints = new List<object>();
             var xValues = new List<double>();
 
-            foreach (var row in orderedRows)
+            foreach (var row in filteredRows)
             {
-                if (!TryGetElementValue(row.Values, _focusElement, out var valueMaybe)) continue;
+                if (!TryGetElementValue(row.Values, _focusElement, out var valueMaybe))
+                    continue;
 
                 var rawValue = valueMaybe ?? 0m;
                 var x = (double)row.OriginalIndex;
@@ -572,11 +582,55 @@ namespace WebUI.Pages.Process
                 var corrected = (double)((rawValue - _previewBlank) * (decimal)_previewScale);
 
                 xValues.Add(x);
-                originalPoints.Add(new { x, y, label = row.SolutionLabel });
-                correctedPoints.Add(new { x, y = corrected, label = row.SolutionLabel });
+
+                if (_showOriginal)
+                {
+                    originalPoints.Add(new { x, y, label = row.SolutionLabel });
+                }
+
+                if (_showCorrected)
+                {
+                    correctedPoints.Add(new { x, y = corrected, label = row.SolutionLabel });
+                }
             }
 
             if (!originalPoints.Any() && !correctedPoints.Any())
+            {
+                await JSRuntime.InvokeVoidAsync("destroyChart", "secondaryChart");
+                return;
+            }
+
+            var datasets = new List<object>();
+
+            if (_showOriginal && originalPoints.Any())
+            {
+                datasets.Add(new
+                {
+                    label = "Original",
+                    data = originalPoints,
+                    backgroundColor = "#2196F3",
+                    borderColor = "#2196F3",
+                    pointStyle = "circle",
+                    pointRadius = 4,
+                    showLine = false
+                });
+            }
+
+            if (_showCorrected && correctedPoints.Any())
+            {
+                datasets.Add(new
+                {
+                    label = "Corrected",
+                    data = correctedPoints,
+                    backgroundColor = "#F44336",
+                    borderColor = "#F44336",
+                    pointStyle = "crossRot",
+                    pointRadius = 5,
+                    showLine = false
+                });
+            }
+
+            if (!datasets.Any())
             {
                 await JSRuntime.InvokeVoidAsync("destroyChart", "secondaryChart");
                 return;
@@ -588,32 +642,7 @@ namespace WebUI.Pages.Process
             var config = new
             {
                 type = "scatter",
-                data = new
-                {
-                    datasets = new object[]
-                    {
-                        new
-                        {
-                            label = "Original",
-                            data = originalPoints,
-                            backgroundColor = "#2196F3",
-                            borderColor = "#2196F3",
-                            pointStyle = "circle",
-                            pointRadius = 4,
-                            showLine = false
-                        },
-                        new
-                        {
-                            label = "Corrected",
-                            data = correctedPoints,
-                            backgroundColor = "#F44336",
-                            borderColor = "#F44336",
-                            pointStyle = "crossRot",
-                            pointRadius = 5,
-                            showLine = false
-                        }
-                    }
-                },
+                data = new { datasets = datasets.ToArray() },
                 options = new
                 {
                     responsive = true,
@@ -643,14 +672,39 @@ namespace WebUI.Pages.Process
                             display = true,
                             position = "top",
                             labels = new { usePointStyle = true }
+                        },
+                        tooltip = new
+                        {
+                            callbacks = new
+                            {
+                                label = new
+                                {
+                                    function = "function(context) { return context.raw.label + ': ' + context.raw.y.toFixed(3); }"
+                                }
+                            }
                         }
                     }
                 }
             };
+
             await JSRuntime.InvokeVoidAsync("createChart", "secondaryChart", config);
         }
 
-        private async Task RefreshChartsAsync() { await Task.Delay(250); await RenderCalibrationChartAsync(); await RenderSecondaryChartAsync(); await JSRuntime.InvokeVoidAsync("resizeAllCharts"); }
+        //private async Task RefreshChartsAsync() { await Task.Delay(250); await RenderCalibrationChartAsync(); await RenderSecondaryChartAsync(); await JSRuntime.InvokeVoidAsync("resizeAllCharts"); }
+
+        private async Task RefreshChartsAsync(bool refreshCalibration = true, bool refreshSecondary = true)
+        {
+            await Task.Delay(50); // تأخیر بسیار کم برای جلوگیری از تداخل
+
+            if (refreshCalibration)
+                await RenderCalibrationChartAsync();
+
+            if (refreshSecondary)
+                await RenderSecondaryChartAsync();
+
+            await JSRuntime.InvokeVoidAsync("resizeAllCharts");
+        }
+
 
         // ============================================================
         // سرویس‌ها و متدهای کمکی
@@ -900,32 +954,24 @@ namespace WebUI.Pages.Process
 
             if (_scaleAbove50Only && rawValue <= 50m) return false;
 
+            // اعمال محدوده: اگر محدوده تعیین شده باشد، فقط مقادیر درون آن محدوده تصحیح می‌شوند
             if (_scaleRangeMin.HasValue && _scaleRangeMax.HasValue)
             {
+                // مطمئن شویم min کوچکتر از max است
                 var minRange = Math.Min(_scaleRangeMin.Value, _scaleRangeMax.Value);
                 var maxRange = Math.Max(_scaleRangeMin.Value, _scaleRangeMax.Value);
+
+                // اگر مقدار خارج از محدوده باشد، تصحیح اعمال نمی‌شود
                 if (rawValue < minRange || rawValue > maxRange) return false;
+            }
+            else if (_scaleRangeMin.HasValue || _scaleRangeMax.HasValue)
+            {
+                // اگر فقط یکی از مقادیر تعیین شده باشد
+                if (_scaleRangeMin.HasValue && rawValue < _scaleRangeMin.Value) return false;
+                if (_scaleRangeMax.HasValue && rawValue > _scaleRangeMax.Value) return false;
             }
 
             return true;
-        }
-
-        private async Task OnShowCertifiedChanged(bool value)
-        {
-            _showCertified = value;
-            await RefreshChartsAsync();
-        }
-
-        private async Task OnShowSampleChanged(bool value)
-        {
-            _showSampleValues = value;
-            await RefreshChartsAsync();
-        }
-
-        private async Task OnShowAcceptableRangeChanged(bool value)
-        {
-            _showAcceptableRange = value;
-            await RefreshChartsAsync();
         }
 
         private static string NormalizeElement(string raw) => raw.Split(new[] { ' ', '_', '.' }, StringSplitOptions.RemoveEmptyEntries)[0].Trim().ToLower();
@@ -1040,26 +1086,72 @@ namespace WebUI.Pages.Process
 
         private async Task SetFocusElement(string? el)
         {
-            if (!await _loadingLock.WaitAsync(0)) return;
+            // به جای WaitAsync(0) از WaitAsync با timeout استفاده می‌کنیم
+            if (!await _loadingLock.WaitAsync(TimeSpan.FromSeconds(2)))
+            {
+                Snackbar.Add("System is busy. Please wait...", Severity.Warning);
+                return;
+            }
+
             try
             {
                 _focusElement = el;
-                await AwaitWithTimeout(LoadSecondaryPlotRowsAsync(), TimeSpan.FromSeconds(30), "Reload pivot rows");
-                await AwaitWithTimeout(RefreshChartsAsync(), TimeSpan.FromSeconds(20), "Render charts");
-            }
-            catch (TimeoutException timeoutEx)
-            {
-                Snackbar.Add(timeoutEx.Message, Severity.Warning);
+                await LoadSecondaryPlotRowsAsync();
+                await RefreshChartsAsync();
             }
             catch (Exception ex)
             {
                 Snackbar.Add($"Element update failed: {ex.Message}", Severity.Error);
             }
-            finally { _loadingLock.Release(); StateHasChanged(); }
+            finally
+            {
+                _loadingLock.Release();
+                StateHasChanged();
+            }
         }
 
-        private async Task PrevElement() { var i = _allElements.IndexOf(_focusElement ?? ""); if (i > 0) await SetFocusElement(_allElements[i - 1]); }
-        private async Task NextElement() { var i = _allElements.IndexOf(_focusElement ?? ""); if (i < _allElements.Count - 1) await SetFocusElement(_allElements[i + 1]); }
+        private async Task PrevElement()
+        {
+            // جلوگیری از کلیک‌های مکرر
+            //if (_isLoading) return;
+            _isLoading = true;
+
+            var currentIndex = _allElements.IndexOf(_focusElement ?? "");
+            if (currentIndex > 0)
+            {
+                var prevElement = _allElements[currentIndex - 1];
+                await SetFocusElement(prevElement);
+            }
+            else
+            {
+                Snackbar.Add("Already at first element", Severity.Info);
+            }
+            _isLoading = false;
+        }
+
+        private async Task NextElement()
+        {
+
+            // جلوگیری از کلیک‌های مکرر
+            //if (_isLoading) return;
+            _isLoading = true;
+            var currentIndex = _allElements.IndexOf(_focusElement ?? "");
+            if (currentIndex < _allElements.Count - 1 && currentIndex >= 0)
+            {
+                var nextElement = _allElements[currentIndex + 1];
+                await SetFocusElement(nextElement);
+            }
+            else if (currentIndex < 0 && _allElements.Any())
+            {
+                // اگر هیچ عنصری انتخاب نشده، اولین عنصر را انتخاب کن
+                await SetFocusElement(_allElements[0]);
+            }
+            else
+            {
+                Snackbar.Add("Already at last element", Severity.Info);
+            }
+            _isLoading = false;
+        }
         private async Task RunCalibration()
         {
             if (!_projectId.HasValue) return;
@@ -1087,20 +1179,35 @@ namespace WebUI.Pages.Process
                 StateHasChanged();
             }
         }
-        private void ResetAll()
+        private async Task ResetAll()
         {
+            // Reset all settings to default values
             _minDiff = -10m;
             _maxDiff = 10m;
-            //use multi-model
-            //filter element _selectedElements
+            _useMultiModel = true;
             _previewBlank = 0m;
             _previewScale = 1.0;
             _scaleRangeMin = null;
             _scaleRangeMax = null;
-            // > 50 only
-            //_scaleAbove50Only = false;
+            _scaleAbove50Only = false;
+            _excludedLabelsInput = string.Empty;
+            _filterText = string.Empty;
+            _sampleFilter = string.Empty;
+
+            // Reset ranges
             ResetRanges();
-            //RenderCharts();
+
+            // Clear any selections
+            _selectedElements = new HashSet<string>();
+
+            // Refresh charts after reset
+            await RefreshChartsAsync(refreshCalibration: true, refreshSecondary: true);
+
+            // Show notification
+            Snackbar.Add("All settings have been reset to default values.", Severity.Info);
+
+            // Force UI update
+            StateHasChanged();
         }
 
 
@@ -1113,10 +1220,96 @@ namespace WebUI.Pages.Process
         private IEnumerable<OptimizedSampleRow> FilterRows(IEnumerable<OptimizedSampleRow> rows) => string.IsNullOrEmpty(_sampleFilter) ? rows : rows.Where(r => r.SolutionLabel.Contains(_sampleFilter, StringComparison.OrdinalIgnoreCase));
         private List<string> GetRowOptions(CrmSelectionRowDto r) => r.PreferredOptions.Concat(r.AllOptions).Distinct().ToList();
         private EventCallback<string> GetRowSelectionChangedHandler(CrmSelectionRowDto r) => EventCallback.Factory.Create<string>(this, async v => { r.SelectedOption = v; if (_projectId != null) await OptimizationService.SaveCrmSelectionsAsync(new CrmSelectionSaveRequest { ProjectId = _projectId.Value, Selections = new List<CrmSelectionItemDto> { new CrmSelectionItemDto { SolutionLabel = r.SolutionLabel, RowIndex = r.RowIndex, SelectedCrmKey = v } } }); });
-        private async Task OnPreviewScaleChanged(double v) { _previewScale = v; await RefreshChartsAsync(); }
-        private async Task OnRangeMinChanged(decimal? v) { _scaleRangeMin = v; await RefreshChartsAsync(); }
-        private async Task OnRangeMaxChanged(decimal? v) { _scaleRangeMax = v; await RefreshChartsAsync(); }
+      
+        private async Task OnPreviewScaleChanged(double v)
+        {
+            _previewScale = v;
+            await RefreshChartsAsync(refreshCalibration: true, refreshSecondary: true);
+        }
 
-        public void Dispose() => _loadingLock.Dispose();
+        private async Task OnRangeMinChanged(decimal? v)
+        {
+            _scaleRangeMin = v;
+
+            // اعتبارسنجی
+            if (_scaleRangeMin.HasValue && _scaleRangeMax.HasValue)
+            {
+                if (_scaleRangeMin.Value > _scaleRangeMax.Value)
+                {
+                    Snackbar.Add("Min Limit cannot be greater than Max Limit!", Severity.Error);
+                    _scaleRangeMin = null;
+                    _scaleRangeMax = null;
+                    StateHasChanged();
+                }
+            }
+
+            await RefreshChartsAsync(refreshCalibration: true, refreshSecondary: true);
+        }
+
+      private async Task OnRangeMaxChanged(decimal? v)
+{
+    _scaleRangeMax = v;
+    
+    // اعتبارسنجی
+    if (_scaleRangeMin.HasValue && _scaleRangeMax.HasValue)
+    {
+        if (_scaleRangeMin.Value > _scaleRangeMax.Value)
+        {
+            Snackbar.Add("Min Limit cannot be greater than Max Limit!", Severity.Error);
+            _scaleRangeMin = null;
+            _scaleRangeMax = null;
+            StateHasChanged();
+        }
+    }
+    
+    await RefreshChartsAsync(refreshCalibration: true, refreshSecondary: true);
+}
+
+        private IEnumerable<AdvancedPivotRowDto> GetFilteredSecondaryRows()
+        {
+            if (string.IsNullOrWhiteSpace(_filterText))
+                return _secondaryRows;
+
+            var filter = _filterText.Trim().ToLower();
+            return _secondaryRows.Where(row =>
+                !string.IsNullOrWhiteSpace(row.SolutionLabel) &&
+                row.SolutionLabel.ToLower().Contains(filter));
+        }
+
+        private async Task ThrottledRefreshChartsAsync(bool refreshCalibration = true, bool refreshSecondary = true)
+        {
+            // اگر به تازگی refresh شده، صبر کنید
+            if (DateTime.Now - _lastRefreshTime < _refreshThrottleInterval)
+                return;
+
+            _lastRefreshTime = DateTime.Now;
+
+            // cancel previous refresh if still running
+            _refreshCts?.Cancel();
+            _refreshCts = new CancellationTokenSource();
+
+            try
+            {
+                await Task.Delay(_refreshThrottleInterval, _refreshCts.Token);
+                await RefreshChartsAsync(refreshCalibration, refreshSecondary);
+            }
+            catch (TaskCanceledException)
+            {
+                // اگر cancel شد، ignore کنیم
+            }
+        }
+        // در بخش C# کلاس، این property را اضافه کنید
+        private EventCallback<string> OnFilterTextChangedCallback =>
+            EventCallback.Factory.Create<string>(this, async (value) =>
+            {
+                _filterText = value;
+                await ThrottledRefreshChartsAsync(refreshCalibration: false, refreshSecondary: true);
+            });
+        public void Dispose()
+        {
+            _loadingLock.Dispose();
+            _refreshCts?.Cancel();
+            _refreshCts?.Dispose();
+        }
     }
 }

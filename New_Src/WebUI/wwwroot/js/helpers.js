@@ -165,3 +165,16 @@ window.triggerFileInput = function (elementId) {
     }
     return false;
 };
+
+    // در فایل JavaScript مربوطه
+    window.createChart = function(canvasId, config) {
+        const ctx = document.getElementById(canvasId);
+        if (!ctx) return;
+    
+        // اگر chart قبلی وجود دارد، نابودش کن
+        if (window[canvasId + 'Chart']) {
+            window[canvasId + 'Chart'].destroy();
+        }
+    
+        window[canvasId + 'Chart'] = new Chart(ctx, config);
+    };
