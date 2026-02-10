@@ -672,6 +672,8 @@ namespace WebUI.Pages.Process
                     pointStyle = "triangle",
                     pointRotation = 180,
                     pointRadius = 7,
+                    pointHitRadius = 14,
+                    pointHoverRadius = 8,
                     showLine = false,
                     order = 1
                 });
@@ -687,6 +689,8 @@ namespace WebUI.Pages.Process
                     borderColor = "#008000",
                     pointStyle = "circle",
                     pointRadius = 6,
+                    pointHitRadius = 14,
+                    pointHoverRadius = 8,
                     showLine = false,
                     order = 2
                 });
@@ -747,6 +751,12 @@ namespace WebUI.Pages.Process
                     maintainAspectRatio = false,
                     xLabels = data.Labels,
                     animation = false,
+                    interaction = new
+                    {
+                        mode = "nearest",
+                        intersect = false,
+                        axis = "xy"
+                    },
                     scales = new
                     {
                         x = new
@@ -777,12 +787,29 @@ namespace WebUI.Pages.Process
                         },
                         tooltip = new
                         {
-                            callbacks = new
+                            enabled = true,
+                            mode = "nearest",
+                            intersect = false,
+                            displayColors = true
+                        },
+                        zoom = new
+                        {
+                            limits = new
                             {
-                                label = new
-                                {
-                                    function = "function(context) { return context.dataset.label + ': ' + context.parsed.y.toFixed(3); }"
-                                }
+                                x = new { min = "original", max = "original" },
+                                y = new { min = "original", max = "original" }
+                            },
+                            pan = new
+                            {
+                                enabled = true,
+                                mode = "xy"
+                            },
+                            zoom = new
+                            {
+                                wheel = new { enabled = true },
+                                pinch = new { enabled = true },
+                                drag = new { enabled = true },
+                                mode = "xy"
                             }
                         }
                     }
@@ -852,6 +879,8 @@ namespace WebUI.Pages.Process
                     borderColor = "#2196F3",
                     pointStyle = "circle",
                     pointRadius = 4,
+                    pointHitRadius = 12,
+                    pointHoverRadius = 7,
                     showLine = false
                 });
             }
@@ -866,6 +895,8 @@ namespace WebUI.Pages.Process
                     borderColor = "#F44336",
                     pointStyle = "crossRot",
                     pointRadius = 5,
+                    pointHitRadius = 12,
+                    pointHoverRadius = 8,
                     showLine = false
                 });
             }
@@ -888,6 +919,12 @@ namespace WebUI.Pages.Process
                     responsive = true,
                     maintainAspectRatio = false,
                     animation = false,
+                    interaction = new
+                    {
+                        mode = "nearest",
+                        intersect = false,
+                        axis = "xy"
+                    },
                     scales = new
                     {
                         x = new
@@ -915,12 +952,29 @@ namespace WebUI.Pages.Process
                         },
                         tooltip = new
                         {
-                            callbacks = new
+                            enabled = true,
+                            mode = "nearest",
+                            intersect = false,
+                            displayColors = true
+                        },
+                        zoom = new
+                        {
+                            limits = new
                             {
-                                label = new
-                                {
-                                    function = "function(context) { return context.raw.label + ': ' + context.raw.y.toFixed(3); }"
-                                }
+                                x = new { min = "original", max = "original" },
+                                y = new { min = "original", max = "original" }
+                            },
+                            pan = new
+                            {
+                                enabled = true,
+                                mode = "xy"
+                            },
+                            zoom = new
+                            {
+                                wheel = new { enabled = true },
+                                pinch = new { enabled = true },
+                                drag = new { enabled = true },
+                                mode = "xy"
                             }
                         }
                     }

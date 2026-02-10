@@ -167,6 +167,7 @@ window.triggerFileInput = function (elementId) {
 };
 
     // در فایل JavaScript مربوطه
+if (typeof window.createChart !== 'function') {
     window.createChart = function(canvasId, config) {
         const ctx = document.getElementById(canvasId);
         if (!ctx) return;
@@ -178,3 +179,4 @@ window.triggerFileInput = function (elementId) {
     
         window[canvasId + 'Chart'] = new Chart(ctx, config);
     };
+}

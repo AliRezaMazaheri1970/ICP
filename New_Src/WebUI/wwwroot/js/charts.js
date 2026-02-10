@@ -61,17 +61,19 @@ function createChart(canvasId, config) {
             console.warn('[createChart] Failed to attach xLabels callback', e);
         }
 
-        // Keep chart axes stable: accidental mouse wheel over chart should not zoom/pan.
+        // Keep chart axes stable by default, but respect explicit zoom config from caller.
         config.options = config.options || {};
         config.options.plugins = config.options.plugins || {};
-        config.options.plugins.zoom = {
-            pan: { enabled: false },
-            zoom: {
-                wheel: { enabled: false },
-                pinch: { enabled: false },
-                drag: { enabled: false }
-            }
-        };
+        if (!config.options.plugins.zoom) {
+            config.options.plugins.zoom = {
+                pan: { enabled: false },
+                zoom: {
+                    wheel: { enabled: false },
+                    pinch: { enabled: false },
+                    drag: { enabled: false }
+                }
+            };
+        }
 
         chartInstances[canvasId] = new Chart(ctx, config);
         console.log(`✓ Chart "${canvasId}" created successfully`);
