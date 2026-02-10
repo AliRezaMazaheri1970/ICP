@@ -56,13 +56,7 @@
                                         <MudSelectItem Value="@el">@el</MudSelectItem>
                                     }
                                 </MudSelect>
-
                             </MudStack>
-
-                            @* <MudButtonGroup Variant="Variant.Outlined" Size="Size.Small" Class="d-flex">
-                                <MudButton OnClick="PrevElement" StartIcon="@Icons.Material.Filled.ChevronLeft" Class="flex-grow-1">Prev</MudButton>
-                                <MudButton OnClick="NextElement" EndIcon="@Icons.Material.Filled.ChevronRight" Class="flex-grow-1">Next</MudButton>
-                            </MudButtonGroup> *@
 
                             <MudButtonGroup Variant="Variant.Outlined" Size="Size.Small" Class="d-flex">
                                 <MudButton OnClick="PrevElement"
@@ -171,7 +165,7 @@
                                     <MudCheckBox T="bool" @bind-Checked="_useMultiModel" Label="Use Multi-Model (A/B/C)" Color="Color.Primary" Dense="true" />
                                 </MudItem>
                                 <MudItem xs="12">
-                                
+
 
                                     @* در تب Manual، بعد از بخش Application Range *@
                                     <MudDivider Class="my-2" />
@@ -189,7 +183,7 @@
                                                   Class="mb-2"
                                                   Immediate="true" />
 
-                             
+
                                 </MudItem>
                             </MudTabPanel>
                         </MudTabs>
@@ -201,7 +195,6 @@
                             <MudStack Spacing="2">
                                 @* Manual Actions *@
                                 <MudGrid Spacing="2">
-                                    @* <MudItem xs="6"><MudButton OnClick="PreviewManualAsync" Variant="Variant.Outlined" Color="Color.Info" FullWidth="true" Size="Size.Small">Preview</MudButton></MudItem> *@
                                     <MudItem xs="12"><MudButton OnClick="ApplyManualAsync" Variant="Variant.Filled" Color="Color.Success" FullWidth="true" Size="Size.Small">Apply</MudButton></MudItem>
                                     <MudItem xs="6"><MudButton OnClick="ResetAll" Variant="Variant.Outlined" Color="Color.Default" FullWidth="true" Size="Size.Small">Reset</MudButton></MudItem>
                                     <MudItem xs="6"><MudButton OnClick="UndoManualAsync" Variant="Variant.Outlined" Color="Color.Error" FullWidth="true" Size="Size.Small">Undo</MudButton></MudItem>
@@ -214,14 +207,7 @@
                                     <MudItem xs="12">
                                         <MudButton OnClick="RunCalibration" Variant="Variant.Outlined" Color="Color.Primary" FullWidth="true" Size="Size.Small">Calibration</MudButton>
                                     </MudItem>
-                                    @* <MudItem xs="6">
-                                        <MudButton OnClick="GetCurrentStats" Variant="Variant.Outlined" Color="Color.Primary" FullWidth="true" Size="Size.Small">Stats</MudButton>
-                                    </MudItem> *@
                                 </MudGrid>
-
-                                @* <MudButton OnClick="RunOptimization" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" StartIcon="@Icons.Material.Filled.AutoFixHigh">
-                                    @( _isLoading ? "Optimizing..." : "Run Optimization" )
-                                </MudButton> *@
                             </MudStack>
                         </div>
                     </MudCardContent>
@@ -358,45 +344,6 @@
                                                         </div>
                                                     </MudTabPanel>
 
-                                                    @* Detail Tab 2: Pivot *@
-                                                    @* <MudTabPanel Text="Pivot View">
-                                                        <div class="d-flex flex-column h-100">
-                                                            <div class="pa-2 d-flex gap-2">
-                                                                <MudSelect T="PivotValueMode" Label="Mode" Value="_pivotMode" ValueChanged="OnPivotModeChanged" Margin="Margin.Dense" Dense="true" Variant="Variant.Outlined" Class="flex-grow-0" Style="width:150px">
-                                                                    <MudSelectItem Value="PivotValueMode.Crm">CRM</MudSelectItem>
-                                                                    <MudSelectItem Value="PivotValueMode.Original">Original</MudSelectItem>
-                                                                    <MudSelectItem Value="PivotValueMode.Optimized">Optimized</MudSelectItem>
-                                                                    <MudSelectItem Value="PivotValueMode.DiffAfter">Diff %</MudSelectItem>
-                                                                </MudSelect>
-                                                                <MudSelect T="string" Label="Columns" MultiSelection="true" SelectedValues="_pivotSelectedElements" SelectedValuesChanged="OnPivotElementsChanged" Margin="Margin.Dense" Dense="true" Variant="Variant.Outlined" Class="flex-grow-1">
-                                                                    @foreach (var el in _allElements)
-                                                                    {
-                                                                        <MudSelectItem Value="@el">@el</MudSelectItem>
-                                                                    }
-                                                                </MudSelect>
-                                                                <MudButton OnClick="ResetPivotColumns" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh">Reset</MudButton>
-                                                            </div>
-                                                            <div class="flex-grow-1 overflow-auto">
-                                                                <MudDataGrid T="PivotRowVm" Items="_pivotRows" Dense="true" Hover="true" FixedHeader="true" Bordered="true" Style="height:100%">
-                                                                    <Columns>
-                                                                        <PropertyColumn Property="x => x.SolutionLabel" Title="Label" StickyLeft="true" />
-                                                                        @foreach (var col in PivotColumns())
-                                                                        {
-                                                                            <TemplateColumn Title="@col">
-                                                                                <CellTemplate>
-                                                                                    @{
-                                                                                        context.Item.Values.TryGetValue(col, out var v);
-                                                                                    }
-                                                                                    @FormatDec(v)
-                                                                                </CellTemplate>
-                                                                            </TemplateColumn>
-                                                                        }
-                                                                    </Columns>
-                                                                </MudDataGrid>
-                                                            </div>
-                                                        </div>
-                                                    </MudTabPanel> *@
-
                                                     <MudTabPanel Text="PIVOT">
 
                                                         <MudPaper Class="pa-3 mb-2" Elevation="0">
@@ -501,15 +448,6 @@
                                                 <canvas id="calibrationChart" style="width:100%; height:100%"></canvas>
                                             </div>
                                         </MudPaper>
-                                        @* Chart 1 *@
-                                        @* <MudPaper Class="flex-grow-1 d-flex flex-column pa-3" Elevation="1" Style="border-radius: 8px; background: white; min-height: 400px; max-height:420px; overflow: hidden;">
-                                            <div class="d-flex justify-space-between mb-2">
-                                                <MudText Typo="Typo.h6"><b>Element Improvement</b></MudText>
-                                            </div>
-                                            <div class="flex-grow-1 position-relative">
-                                                <canvas @ref="chart2Canvas" id="elementChart" style="width:100%; height:100%"></canvas>
-                                            </div>
-                                        </MudPaper> *@
 
                                         <MudPaper Class="d-flex flex-column pa-3 crm-chart-paper" Elevation="1" Style="border-radius: 8px; background: white;">
                                             <div class="d-flex justify-space-between mb-2">

@@ -92,6 +92,7 @@ namespace WebUI.Pages.Process
         private static readonly Regex CrmIdRegex = new(@"(?i)(?:\bCRM\b|\bOREAS\b|\bV\b)[^\d]*(\d+[a-zA-Z]?)", RegexOptions.Compiled);
         private static readonly Regex BlankLabelRegex = new(@"(?:CRM\s*)?(?:BLANK|BLNK)(?:\s+.*)?", RegexOptions.Compiled | RegexOptions.IgnoreCase);
         private static readonly Regex MultiWhitespaceRegex = new(@"\s+", RegexOptions.Compiled);
+        private static readonly Regex ElementWavelengthRegex = new(@"^([a-zA-Z]+)\s*(\d+\.?\d*)$", RegexOptions.Compiled);
 
         // ============================================================
         // مدل‌های داده داخلی (Models)
@@ -141,6 +142,51 @@ namespace WebUI.Pages.Process
         }
 
         // ============================================================
+        // توابع کمکی برای کار با عناصر و طول موج‌ها
+        // ============================================================
+
+        // نرمالایز کردن کامل عنصر با طول موج
+        private static string NormalizeElementFull(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+            return raw.Trim().ToLowerInvariant();
+        }
+
+        // استخراج فقط نام عنصر (بدون طول موج)
+        private static string NormalizeElementName(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+            var match = ElementWavelengthRegex.Match(raw.Trim());
+            if (match.Success)
+            {
+                return match.Groups[1].Value.Trim().ToLowerInvariant();
+            }
+
+            var parts = raw.Split(new[] { ' ', '_', '.' }, StringSplitOptions.RemoveEmptyEntries);
+            return parts.Length > 0 ? parts[0].Trim().ToLowerInvariant() : raw.Trim().ToLowerInvariant();
+        }
+
+        // استخراج طول موج از نام عنصر
+        private static string NormalizeElementWavelength(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+            var match = ElementWavelengthRegex.Match(raw.Trim());
+            if (match.Success)
+            {
+                return match.Groups[2].Value.Trim();
+            }
+            return string.Empty;
+        }
+
+        // ترکیب نام عنصر و طول موج
+        private static string CombineElementNameAndWavelength(string elementName, string wavelength)
+        {
+            if (string.IsNullOrWhiteSpace(elementName)) return string.Empty;
+            if (string.IsNullOrWhiteSpace(wavelength)) return elementName;
+            return $"{elementName.Trim()} {wavelength.Trim()}";
+        }
+
+        // ============================================================
         // چرخه حیات و بارگذاری (Lifecycle)
         // ============================================================
 
@@ -152,9 +198,11 @@ namespace WebUI.Pages.Process
             var projectResult = await ProjectService.GetProjectAsync(_projectId.Value);
             if (projectResult.Succeeded) _projectName = projectResult.Data?.ProjectName;
 
+            // اجرای دیباگ برای بررسی داده‌ها
+            await DebugElementDataSources();
+
             await LoadInitialDataInternalAsync();
         }
-
         private void OnBeforeNavigation(LocationChangingContext context)
         {
             if (_isLoading) context.PreventNavigation();
@@ -236,7 +284,6 @@ namespace WebUI.Pages.Process
 
         private async Task OnResultsTabChanged(int i) { _resultsTabIndex = i; if (i == 1) await RefreshChartsAsync(); }
 
-        //private void OnPivotModeChanged(PivotValueMode m) => _pivotMode = m;
         private Task OnPivotModeChanged(PivotValueMode mode)
         {
             _pivotMode = mode;
@@ -244,8 +291,6 @@ namespace WebUI.Pages.Process
             StateHasChanged();
             return Task.CompletedTask;
         }
-
-        //private void OnPivotElementsChanged(IEnumerable<string> e) => _pivotSelectedElements = new HashSet<string>(e, StringComparer.OrdinalIgnoreCase);
 
         private Task OnPivotElementsChanged(IEnumerable<string> values)
         {
@@ -267,15 +312,15 @@ namespace WebUI.Pages.Process
                 var request = new AdvancedPivotRequest(
                     ProjectId: _projectId.Value,
                     SearchText: _sampleFilter,
-                    SelectedElements: _allElements.ToList(), // Argument 4
-                    NumberFilters: null,                    // Argument 5
-                    UseOxide: false,                        // Argument 6
-                    UseInt: false,                          // Argument 7
-                    DecimalPlaces: 4,                       // Argument 8
-                    Page: 1,                                // Argument 9
-                    PageSize: 2000,                         // لود کامل برای اسکرول (Argument 10)
-                    MergeRepeats: false,                    // Argument 11
-                    Aggregation: "First"                    // Argument 12
+                    SelectedElements: _allElements.ToList(),
+                    NumberFilters: null,
+                    UseOxide: false,
+                    UseInt: false,
+                    DecimalPlaces: 4,
+                    Page: 1,
+                    PageSize: 2000,
+                    MergeRepeats: false,
+                    Aggregation: "First"
                 );
 
                 var result = await PivotService.GetAdvancedPivotTableAsync(request);
@@ -286,10 +331,6 @@ namespace WebUI.Pages.Process
                     var rows = new List<PivotRowVm>();
                     int order = 0;
 
-                    // دسترسی به دیتای محدود شده CRMها
-                    //var optimizedData = _manualResult?.OptimizedData ?? _result?.OptimizedData;
-                    //var optimizedData = _result?.OptimizedData;
-                    
                     var optimizedData = _manualRows.Any() ? null : _result?.OptimizedData;
 
                     foreach (var s in result.Data.Rows)
@@ -348,49 +389,58 @@ namespace WebUI.Pages.Process
             return dict;
         }
 
-         private Dictionary<string, decimal?> BuildDiffValues(Dictionary<string, decimal> source, List<string> cols)
+        private Dictionary<string, decimal?> BuildDiffValues(Dictionary<string, decimal> source, List<string> cols)
         {
             var dict = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase);
             foreach (var el in cols)
                 dict[el] = source.TryGetValue(el, out var v) ? v : null;
             return dict;
         }
+
         private void ResetPivotColumns() => _pivotSelectedElements.Clear();
 
         private void OpenRangesDialog() => _rangesDialogVisible = true;
         private void CancelRangesAsync() => _rangesDialogVisible = false;
 
         private async Task ApplyRangesAsync() { _rangesDialogVisible = false; await RefreshChartsAsync(); }
-     
 
         private void ResetRanges() { _rangeLow = 2; _rangeMid = 20; _rangeHigh1 = 10; _rangeHigh2 = 8; _rangeHigh3 = 5; _rangeHigh4 = 3; }
 
         // ============================================================
         // منطق نمودار و محاسبات (Logic)
         // ============================================================
-
         private List<CalibrationRow> BuildCalibrationRows()
         {
             var rows = new List<CalibrationRow>();
-            if (string.IsNullOrWhiteSpace(_focusElement)) return rows;
+            if (string.IsNullOrWhiteSpace(_focusElement))
+            {
+                Console.WriteLine("BuildCalibrationRows: No focus element selected");
+                return rows;
+            }
+
+            Console.WriteLine($"BuildCalibrationRows: Building rows for element '{_focusElement}'");
 
             var excludedLabels = ParseExcludedLabels();
             var selectionQueues = BuildSelectionQueueByLabel();
             var (rawValuesByLabel, rawValuesByCrmId) = BuildRawBaseValueQueuesForFocusElement();
 
-            // Primary source: optimization stats (already CRM-aligned and exactly 8 rows for this project)
+            // ابتدا از داده‌های بهینه‌سازی استفاده کن
             var optimizedData = _result?.OptimizedData;
             if (optimizedData != null && optimizedData.Any())
             {
+                Console.WriteLine($"Using optimized data: {optimizedData.Count()} samples");
+
                 var order = 0;
                 foreach (var sample in optimizedData)
                 {
                     var solutionLabel = sample.SolutionLabel?.Trim() ?? "";
-                    var normalizedSolutionLabel = NormalizeSolutionLabel(solutionLabel);
                     if (string.IsNullOrWhiteSpace(solutionLabel)) continue;
                     if (BlankLabelRegex.IsMatch(solutionLabel)) continue;
 
+                    Console.WriteLine($"Processing sample: {solutionLabel}");
+
                     string? selectedOption = null;
+                    var normalizedSolutionLabel = NormalizeSolutionLabel(solutionLabel);
                     if (selectionQueues.TryGetValue(normalizedSolutionLabel, out var optionQueue) && optionQueue.Count > 0)
                         selectedOption = optionQueue.Dequeue();
 
@@ -402,33 +452,69 @@ namespace WebUI.Pages.Process
                         crmToken = NormalizeCrmIdToken(crmFromLabel.Groups[1].Value);
                     }
 
-                    decimal rawValue;
-                    if (!TryDequeueRawBaseValue(solutionLabel, crmToken, rawValuesByLabel, rawValuesByCrmId, out rawValue))
+                    // پیدا کردن مقدار اصلی
+                    decimal rawValue = 0;
+                    bool foundRawValue = false;
+
+                    // اول از داده‌های بهینه‌سازی بگیر
+                    if (TryGetElementValueExact(sample.OriginalValues, _focusElement, out var rawValueMaybe) && rawValueMaybe.HasValue)
                     {
-                        if (!TryGetElementValue(sample.OriginalValues, _focusElement, out var rawValueMaybe) || !rawValueMaybe.HasValue)
-                        {
-                            if (!TryGetElementValue(sample.OptimizedValues, _focusElement, out rawValueMaybe) || !rawValueMaybe.HasValue)
-                                continue;
-                        }
                         rawValue = rawValueMaybe.Value;
+                        foundRawValue = true;
+                        Console.WriteLine($"  Raw value from original: {rawValue}");
+                    }
+                    else if (TryGetElementValueExact(sample.OptimizedValues, _focusElement, out rawValueMaybe) && rawValueMaybe.HasValue)
+                    {
+                        rawValue = rawValueMaybe.Value;
+                        foundRawValue = true;
+                        Console.WriteLine($"  Raw value from optimized: {rawValue}");
                     }
 
-                    decimal? certValue = null;
-                    if (TryGetElementValue(sample.CrmValues, _focusElement, out var crmValueMaybe) && crmValueMaybe.HasValue)
-                        certValue = crmValueMaybe.Value;
+                    // اگر پیدا نکردی، از داده‌های خام بگیر
+                    if (!foundRawValue)
+                    {
+                        if (!TryDequeueRawBaseValue(solutionLabel, crmToken, rawValuesByLabel, rawValuesByCrmId, out rawValue))
+                        {
+                            Console.WriteLine($"  Could not find raw value for {_focusElement}");
+                            continue;
+                        }
+                        Console.WriteLine($"  Raw value from base values: {rawValue}");
+                    }
 
+                    // پیدا کردن مقدار مرجع CRM
+                    decimal? certValue = null;
+
+                    // اول از داده‌های بهینه‌سازی بگیر
+                    if (TryGetElementValueExact(sample.CrmValues, _focusElement, out var crmValueMaybe) && crmValueMaybe.HasValue)
+                    {
+                        certValue = crmValueMaybe.Value;
+                        Console.WriteLine($"  CRM value from optimized data: {certValue}");
+                    }
+
+                    // اگر پیدا نکردی، از مرجع CRM بگیر
                     if (!certValue.HasValue)
                     {
                         var crmRef = ResolveCrmReferenceForRow(crmToken, selectedOption);
-                        if (crmRef != null && TryGetReferenceElementValue(crmRef.Elements, _focusElement, out var certFromRef))
+                        if (crmRef != null && TryGetReferenceElementValueExact(crmRef.Elements, _focusElement, out var certFromRef))
+                        {
                             certValue = certFromRef;
+                            Console.WriteLine($"  CRM value from reference: {certValue}");
+                        }
                     }
 
-                    if (!certValue.HasValue) continue;
+                    if (!certValue.HasValue)
+                    {
+                        Console.WriteLine($"  Could not find CRM value for {_focusElement}");
+                        continue;
+                    }
 
+                    // اعمال تصحیح دستی
                     var correctedValue = rawValue;
                     if (ShouldApplyManualCorrection(solutionLabel, rawValue, excludedLabels))
+                    {
                         correctedValue = (rawValue - _previewBlank) * (decimal)_previewScale;
+                        Console.WriteLine($"  Corrected value: {correctedValue} (Blank: {_previewBlank}, Scale: {_previewScale})");
+                    }
 
                     rows.Add(new CalibrationRow
                     {
@@ -439,12 +525,29 @@ namespace WebUI.Pages.Process
                         CorrectedValue = correctedValue,
                         CrmValue = certValue.Value
                     });
+
+                    Console.WriteLine($"  Added row: {solutionLabel} - CRM: {crmToken} - Raw: {rawValue} - Corrected: {correctedValue} - CRM Ref: {certValue.Value}");
                 }
 
-                if (rows.Any()) return rows;
+                if (rows.Any())
+                {
+                    Console.WriteLine($"Returning {rows.Count} rows from optimized data");
+                    return rows;
+                }
+            }
+            else
+            {
+                Console.WriteLine("No optimized data available");
             }
 
-            if (!_secondaryRows.Any()) return rows;
+            // اگر داده‌های بهینه‌سازی نبود، از داده‌های پیوت استفاده کن
+            if (!_secondaryRows.Any())
+            {
+                Console.WriteLine("No secondary rows available");
+                return rows;
+            }
+
+            Console.WriteLine($"Using secondary data: {_secondaryRows.Count} rows");
 
             var source = _secondaryRows
                 .OrderBy(r => r.OriginalIndex)
@@ -469,12 +572,12 @@ namespace WebUI.Pages.Process
                 decimal rawValue;
                 if (!TryDequeueRawBaseValue(solutionLabel, crmId, rawValuesByLabel, rawValuesByCrmId, out rawValue))
                 {
-                    if (!TryGetElementValue(sourceRow.Values, _focusElement, out var rawValueMaybe)) continue;
+                    if (!TryGetElementValueExact(sourceRow.Values, _focusElement, out var rawValueMaybe)) continue;
                     rawValue = rawValueMaybe ?? 0m;
                 }
 
                 var crmRef = ResolveCrmReferenceForRow(crmId, selectedOption);
-                if (crmRef == null || !TryGetReferenceElementValue(crmRef.Elements, _focusElement, out var certValue)) continue;
+                if (crmRef == null || !TryGetReferenceElementValueExact(crmRef.Elements, _focusElement, out var certValue)) continue;
 
                 var correctedValue = rawValue;
                 if (ShouldApplyManualCorrection(solutionLabel, rawValue, excludedLabels))
@@ -491,8 +594,10 @@ namespace WebUI.Pages.Process
                 });
             }
 
+            Console.WriteLine($"Returning {rows.Count} total rows");
             return rows;
         }
+
 
         private CalibrationChartPayload? GetCalibrationChartData()
         {
@@ -619,12 +724,18 @@ namespace WebUI.Pages.Process
 
         private async Task RenderCalibrationChartAsync()
         {
+            Console.WriteLine($"=== RenderCalibrationChartAsync for '{_focusElement}' ===");
+
             var data = GetCalibrationChartData();
             if (data == null)
             {
+                Console.WriteLine("No data for calibration chart");
                 await JSRuntime.InvokeVoidAsync("destroyChart", "calibrationChart");
                 return;
             }
+
+            Console.WriteLine($"Chart data: {data.Labels.Length} labels, {data.Datasets.Count} datasets");
+            Console.WriteLine($"Y Range: {data.MinY} to {data.MaxY}");
 
             var config = new
             {
@@ -663,11 +774,23 @@ namespace WebUI.Pages.Process
                             display = true,
                             position = "top",
                             labels = new { usePointStyle = true, boxWidth = 26 }
+                        },
+                        tooltip = new
+                        {
+                            callbacks = new
+                            {
+                                label = new
+                                {
+                                    function = "function(context) { return context.dataset.label + ': ' + context.parsed.y.toFixed(3); }"
+                                }
+                            }
                         }
                     }
                 }
             };
+
             await JSRuntime.InvokeVoidAsync("createChart", "calibrationChart", config);
+            Console.WriteLine("Chart rendered successfully");
         }
 
         private async Task RenderSecondaryChartAsync()
@@ -690,7 +813,7 @@ namespace WebUI.Pages.Process
 
             foreach (var row in filteredRows)
             {
-                if (!TryGetElementValue(row.Values, _focusElement, out var valueMaybe))
+                if (!TryGetElementValueExact(row.Values, _focusElement, out var valueMaybe))
                     continue;
 
                 var rawValue = valueMaybe ?? 0m;
@@ -807,11 +930,9 @@ namespace WebUI.Pages.Process
             await JSRuntime.InvokeVoidAsync("createChart", "secondaryChart", config);
         }
 
-        //private async Task RefreshChartsAsync() { await Task.Delay(250); await RenderCalibrationChartAsync(); await RenderSecondaryChartAsync(); await JSRuntime.InvokeVoidAsync("resizeAllCharts"); }
-
         private async Task RefreshChartsAsync(bool refreshCalibration = true, bool refreshSecondary = true)
         {
-            await Task.Delay(50); // تأخیر بسیار کم برای جلوگیری از تداخل
+            await Task.Delay(50);
 
             if (refreshCalibration)
                 await RenderCalibrationChartAsync();
@@ -821,7 +942,6 @@ namespace WebUI.Pages.Process
 
             await JSRuntime.InvokeVoidAsync("resizeAllCharts");
         }
-
 
         // ============================================================
         // سرویس‌ها و متدهای کمکی
@@ -956,13 +1076,24 @@ namespace WebUI.Pages.Process
             if (string.IsNullOrWhiteSpace(_focusElement) || !_rawCrmBaseValues.Any())
                 return (byLabel, byCrmId);
 
-            var normalizedFocusElement = NormalizeElement(_focusElement);
+            var normalizedFocusElement = NormalizeElementFull(_focusElement);
+            var focusElementName = NormalizeElementName(_focusElement);
+
             foreach (var row in _rawCrmBaseValues.OrderBy(r => r.Sequence))
             {
-                var rowElement = NormalizeElement(row.Element);
-                if (!string.Equals(rowElement, normalizedFocusElement, StringComparison.OrdinalIgnoreCase) &&
-                    !rowElement.StartsWith(normalizedFocusElement, StringComparison.OrdinalIgnoreCase))
-                    continue;
+                var rowElementFull = NormalizeElementFull(row.Element);
+                var rowElementName = NormalizeElementName(row.Element);
+
+                // تطبیق دقیق با نام کامل عنصر و طول موج
+                bool isMatch = string.Equals(rowElementFull, normalizedFocusElement, StringComparison.OrdinalIgnoreCase);
+
+                // اگر تطبیق کامل نبود، فقط با نام عنصر تطبیق ده
+                if (!isMatch)
+                {
+                    isMatch = string.Equals(rowElementName, focusElementName, StringComparison.OrdinalIgnoreCase);
+                }
+
+                if (!isMatch) continue;
 
                 if (!byLabel.TryGetValue(row.NormalizedLabel, out var labelQueue))
                 {
@@ -1071,19 +1202,15 @@ namespace WebUI.Pages.Process
 
             if (_scaleAbove50Only && rawValue <= 50m) return false;
 
-            // اعمال محدوده: اگر محدوده تعیین شده باشد، فقط مقادیر درون آن محدوده تصحیح می‌شوند
             if (_scaleRangeMin.HasValue && _scaleRangeMax.HasValue)
             {
-                // مطمئن شویم min کوچکتر از max است
                 var minRange = Math.Min(_scaleRangeMin.Value, _scaleRangeMax.Value);
                 var maxRange = Math.Max(_scaleRangeMin.Value, _scaleRangeMax.Value);
 
-                // اگر مقدار خارج از محدوده باشد، تصحیح اعمال نمی‌شود
                 if (rawValue < minRange || rawValue > maxRange) return false;
             }
             else if (_scaleRangeMin.HasValue || _scaleRangeMax.HasValue)
             {
-                // اگر فقط یکی از مقادیر تعیین شده باشد
                 if (_scaleRangeMin.HasValue && rawValue < _scaleRangeMin.Value) return false;
                 if (_scaleRangeMax.HasValue && rawValue > _scaleRangeMax.Value) return false;
             }
@@ -1091,26 +1218,188 @@ namespace WebUI.Pages.Process
             return true;
         }
 
-        private static string NormalizeElement(string raw) => raw.Split(new[] { ' ', '_', '.' }, StringSplitOptions.RemoveEmptyEntries)[0].Trim().ToLower();
         private static string NormalizeSolutionLabel(string? raw) => string.IsNullOrWhiteSpace(raw) ? string.Empty : MultiWhitespaceRegex.Replace(raw.Trim(), " ");
 
-        private static bool TryGetElementValue(IReadOnlyDictionary<string, decimal?> values, string? el, out decimal? v)
+        // تابع جدید برای تطبیق دقیق عناصر با طول موج
+        //private static bool TryGetElementValueExact(IReadOnlyDictionary<string, decimal?> values, string? el, out decimal? v)
+        //{
+        //    v = null;
+        //    if (values == null || string.IsNullOrEmpty(el)) return false;
+
+        //    // ابتدا سعی کن با کلید کامل تطبیق دهی
+        //    var normalizedFull = NormalizeElementFull(el);
+        //    var exactMatch = values.FirstOrDefault(k =>
+        //        string.Equals(NormalizeElementFull(k.Key), normalizedFull, StringComparison.OrdinalIgnoreCase));
+
+        //    if (exactMatch.Key != null)
+        //    {
+        //        v = exactMatch.Value;
+        //        return true;
+        //    }
+
+        //    // اگر پیدا نکردی، فقط با نام عنصر تطبیق بده
+        //    var elementName = NormalizeElementName(el);
+        //    var nameMatch = values.FirstOrDefault(k =>
+        //        string.Equals(NormalizeElementName(k.Key), elementName, StringComparison.OrdinalIgnoreCase));
+
+        //    if (nameMatch.Key != null)
+        //    {
+        //        v = nameMatch.Value;
+        //        return true;
+        //    }
+
+        //    return false;
+        //}
+
+
+
+        // این تابع را جایگزین TryGetElementValueExact کنید
+        // این تابع ساده و مستقیم را جایگزین کنید
+        private static bool TryGetElementValueExact(IReadOnlyDictionary<string, decimal?> values, string? el, out decimal? v)
         {
-            v = null; if (values == null || string.IsNullOrEmpty(el)) return false;
-            if (values.TryGetValue(el, out v)) return true;
-            var norm = NormalizeElement(el);
-            var match = values.FirstOrDefault(k => NormalizeElement(k.Key).StartsWith(norm));
-            if (match.Key != null) { v = match.Value; return true; }
+            v = null;
+            if (values == null || string.IsNullOrEmpty(el)) return false;
+
+            // 1. تطبیق دقیق - مهمترین حالت
+            if (values.TryGetValue(el, out v))
+            {
+                return true;
+            }
+
+            // 2. تطبیق بدون حساسیت به حروف
+            var exactMatch = values.FirstOrDefault(kvp =>
+                string.Equals(kvp.Key, el, StringComparison.OrdinalIgnoreCase));
+
+            if (!string.IsNullOrEmpty(exactMatch.Key))
+            {
+                v = exactMatch.Value;
+                return true;
+            }
+
+            // 3. اگر el شامل فاصله است (مثلاً "Ag 328.068")
+            if (el.Contains(' '))
+            {
+                var parts = el.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2)
+                {
+                    var elementName = parts[0];
+
+                    // پیدا کردن کلیدی که با نام عنصر شروع می‌شود
+                    var nameMatch = values.FirstOrDefault(kvp =>
+                        kvp.Key.StartsWith(elementName, StringComparison.OrdinalIgnoreCase));
+
+                    if (!string.IsNullOrEmpty(nameMatch.Key))
+                    {
+                        v = nameMatch.Value;
+                        return true;
+                    }
+                }
+            }
+
+            // 4. اگر el نام ساده است (مثلاً "Ag")
+            var simpleMatch = values.FirstOrDefault(kvp =>
+                kvp.Key.StartsWith(el, StringComparison.OrdinalIgnoreCase));
+
+            if (!string.IsNullOrEmpty(simpleMatch.Key))
+            {
+                v = simpleMatch.Value;
+                return true;
+            }
+
             return false;
         }
 
-        private static bool TryGetReferenceElementValue(IReadOnlyDictionary<string, decimal> values, string? el, out decimal v)
+        // تابع مشابه برای داده‌های مرجع
+        private static bool TryGetReferenceElementValueExact(IReadOnlyDictionary<string, decimal> values, string? el, out decimal v)
         {
-            v = 0; if (values == null || string.IsNullOrEmpty(el)) return false;
-            var norm = NormalizeElement(el);
-            var match = values.FirstOrDefault(k => NormalizeElement(k.Key) == norm || NormalizeElement(k.Key).StartsWith(norm));
-            if (match.Key != null) { v = match.Value; return true; }
+            v = 0;
+            if (values == null || string.IsNullOrEmpty(el)) return false;
+
+            // 1. تطبیق دقیق
+            if (values.TryGetValue(el, out v))
+            {
+                return true;
+            }
+
+            // 2. تطبیق بدون حساسیت به حروف
+            var exactMatch = values.FirstOrDefault(kvp =>
+                string.Equals(kvp.Key, el, StringComparison.OrdinalIgnoreCase));
+
+            if (!string.IsNullOrEmpty(exactMatch.Key))
+            {
+                v = exactMatch.Value;
+                return true;
+            }
+
+            // 3. اگر el شامل فاصله است
+            if (el.Contains(' '))
+            {
+                var parts = el.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2)
+                {
+                    var elementName = parts[0];
+
+                    var nameMatch = values.FirstOrDefault(kvp =>
+                        kvp.Key.StartsWith(elementName, StringComparison.OrdinalIgnoreCase));
+
+                    if (!string.IsNullOrEmpty(nameMatch.Key))
+                    {
+                        v = nameMatch.Value;
+                        return true;
+                    }
+                }
+            }
+
+            // 4. اگر el نام ساده است
+            var simpleMatch = values.FirstOrDefault(kvp =>
+                kvp.Key.StartsWith(el, StringComparison.OrdinalIgnoreCase));
+
+            if (!string.IsNullOrEmpty(simpleMatch.Key))
+            {
+                v = simpleMatch.Value;
+                return true;
+            }
+
             return false;
+        }
+
+        private string FindSimilarElementInData(string element)
+        {
+            if (string.IsNullOrEmpty(element)) return element;
+
+            // اگر عنصر از قبل در لیست عناصر وجود دارد، برگردان
+            if (_allElements.Contains(element))
+                return element;
+
+            // اگر عنصر شامل طول موج است (مثلاً "Ag 328.068")
+            if (element.Contains(' '))
+            {
+                var elementName = element.Split(' ')[0];
+
+                // پیدا کردن اولین عنصر در لیست که با این نام شروع می‌شود
+                var similar = _allElements.FirstOrDefault(e =>
+                    e.StartsWith(elementName, StringComparison.OrdinalIgnoreCase));
+
+                if (!string.IsNullOrEmpty(similar))
+                {
+                    Console.WriteLine($"Found similar element for '{element}': '{similar}'");
+                    return similar;
+                }
+            }
+            else
+            {
+                // اگر فقط نام عنصر است، پیدا کردن اولین تطابق
+                var similar = _allElements.FirstOrDefault(e =>
+                    e.StartsWith(element, StringComparison.OrdinalIgnoreCase));
+
+                if (!string.IsNullOrEmpty(similar))
+                {
+                    Console.WriteLine($"Found similar element for '{element}': '{similar}'");
+                    return similar;
+                }
+            }
+
+            return element;
         }
 
         private CrmListItemDto? ResolveCrmReferenceForRow(string id, string? opt)
@@ -1203,7 +1492,6 @@ namespace WebUI.Pages.Process
 
         private async Task SetFocusElement(string? el)
         {
-            // به جای WaitAsync(0) از WaitAsync با timeout استفاده می‌کنیم
             if (!await _loadingLock.WaitAsync(TimeSpan.FromSeconds(2)))
             {
                 Snackbar.Add("System is busy. Please wait...", Severity.Warning);
@@ -1212,12 +1500,42 @@ namespace WebUI.Pages.Process
 
             try
             {
-                _focusElement = el;
+                if (!string.IsNullOrEmpty(el))
+                {
+                    Console.WriteLine($"=== SetFocusElement: '{el}' ===");
+
+                    // بررسی آیا عنصر در لیست وجود دارد
+                    if (_allElements.Contains(el))
+                    {
+                        _focusElement = el;
+                        Console.WriteLine($"Element found in list: {_focusElement}");
+                    }
+                    else
+                    {
+                        // پیدا کردن عنصر مشابه
+                        var similarElement = FindSimilarElementInData(el);
+                        _focusElement = similarElement;
+                        Console.WriteLine($"Using similar element: {_focusElement}");
+                    }
+
+                    // لاگ عناصر مشابه
+                    var similarElements = _allElements
+                        .Where(e => e.StartsWith(el.Split(' ')[0], StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+
+                    Console.WriteLine($"Similar elements found: {similarElements.Count}");
+                    foreach (var similar in similarElements)
+                    {
+                        Console.WriteLine($"  - {similar}");
+                    }
+                }
+
                 await LoadSecondaryPlotRowsAsync();
                 await RefreshChartsAsync();
             }
             catch (Exception ex)
             {
+                Console.WriteLine($"Error in SetFocusElement: {ex.Message}");
                 Snackbar.Add($"Element update failed: {ex.Message}", Severity.Error);
             }
             finally
@@ -1226,11 +1544,8 @@ namespace WebUI.Pages.Process
                 StateHasChanged();
             }
         }
-
         private async Task PrevElement()
         {
-            // جلوگیری از کلیک‌های مکرر
-            //if (_isLoading) return;
             _isLoading = true;
 
             var currentIndex = _allElements.IndexOf(_focusElement ?? "");
@@ -1248,9 +1563,6 @@ namespace WebUI.Pages.Process
 
         private async Task NextElement()
         {
-
-            // جلوگیری از کلیک‌های مکرر
-            //if (_isLoading) return;
             _isLoading = true;
             var currentIndex = _allElements.IndexOf(_focusElement ?? "");
             if (currentIndex < _allElements.Count - 1 && currentIndex >= 0)
@@ -1260,7 +1572,6 @@ namespace WebUI.Pages.Process
             }
             else if (currentIndex < 0 && _allElements.Any())
             {
-                // اگر هیچ عنصری انتخاب نشده، اولین عنصر را انتخاب کن
                 await SetFocusElement(_allElements[0]);
             }
             else
@@ -1269,6 +1580,7 @@ namespace WebUI.Pages.Process
             }
             _isLoading = false;
         }
+
         private async Task RunCalibration()
         {
             if (!_projectId.HasValue) return;
@@ -1296,9 +1608,9 @@ namespace WebUI.Pages.Process
                 StateHasChanged();
             }
         }
+
         private async Task ResetAll()
         {
-            // Reset all settings to default values
             _minDiff = -10m;
             _maxDiff = 10m;
             _useMultiModel = true;
@@ -1311,33 +1623,438 @@ namespace WebUI.Pages.Process
             _filterText = string.Empty;
             _sampleFilter = string.Empty;
 
-            // Reset ranges
             ResetRanges();
 
-            // Clear any selections
             _selectedElements = new HashSet<string>();
 
-            // Refresh charts after reset
             await RefreshChartsAsync(refreshCalibration: true, refreshSecondary: true);
 
-            // Show notification
             Snackbar.Add("All settings have been reset to default values.", Severity.Info);
 
-            // Force UI update
             StateHasChanged();
         }
 
+        //private async Task LoadElements()
+        //{
+        //    var r = await PivotService.GetElementsAsync(_projectId!.Value);
+        //    if (r.Succeeded)
+        //    {
+        //        _allElements = r.Data ?? new();
 
-        private async Task LoadElements() { var r = await PivotService.GetElementsAsync(_projectId!.Value); if (r.Succeeded) _allElements = r.Data ?? new(); if (_allElements.Any() && string.IsNullOrEmpty(_focusElement)) _focusElement = _allElements[0]; }
-        private async Task LoadCrmReferenceData() { var r = await CrmService.GetCrmListAsync(pageSize: 0); if (r.Succeeded) _crmReferenceById = r.Data.Items.GroupBy(x => x.CrmId).ToDictionary(g => g.Key, g => g.ToList()); }
-        private async Task LoadCrmSelections() { var r = await OptimizationService.GetCrmSelectionOptionsAsync(_projectId!.Value); if (r.Succeeded) _crmSelectionRows = r.Data.Items; }
-        private async Task LoadSecondaryPlotRowsAsync() { var r = await PivotService.GetAdvancedPivotTableAsync(new AdvancedPivotRequest(ProjectId: _projectId!.Value, SearchText: null, SelectedElements: null, NumberFilters: null, UseOxide: false, UseInt: false, DecimalPlaces: 4, Page: 1, PageSize: 5000, Aggregation: "First", MergeRepeats: false)); if (r.Succeeded) _secondaryRows = r.Data.Rows; }
-        private async Task GetCurrentStats() { var r = await OptimizationService.GetCurrentStatsAsync(_projectId!.Value, _minDiff, _maxDiff); if (r.Succeeded) { _result = r.Data; _optimizedRows = BuildOptimizedRows(_result?.OptimizedData, _focusElement); } }
-        private List<OptimizedSampleRow> BuildOptimizedRows(IEnumerable<OptimizedSampleDto>? d, string? e) { if (d == null || string.IsNullOrEmpty(e)) return new(); return d.Select(s => { TryGetElementValue(s.OriginalValues, e, out var orig); TryGetElementValue(s.OptimizedValues, e, out var opt); TryGetReferenceElementValue(s.CrmValues.ToDictionary(k => k.Key, v => v.Value ?? 0m), e, out var refV); decimal db = s.DiffPercentBefore.TryGetValue(e, out var v1) ? v1 : 0; decimal da = s.DiffPercentAfter.TryGetValue(e, out var v2) ? v2 : 0; bool p = s.PassStatusAfter.TryGetValue(e, out var ps) && ps; return new OptimizedSampleRow(s.SolutionLabel, s.CrmId, e, orig, opt, refV, db, da, p); }).ToList(); }
-        private IEnumerable<OptimizedSampleRow> FilterRows(IEnumerable<OptimizedSampleRow> rows) => string.IsNullOrEmpty(_sampleFilter) ? rows : rows.Where(r => r.SolutionLabel.Contains(_sampleFilter, StringComparison.OrdinalIgnoreCase));
+        //        // اطمینان از نمایش عناصر با طول موج
+        //        if (_allElements.Any())
+        //        {
+        //            // اگر عناصر دارای طول موج هستند، آنها را به درستی نمایش بده
+        //            foreach (var element in _allElements)
+        //            {
+        //                Console.WriteLine($"Element: {element}");
+        //            }
+
+        //            if (string.IsNullOrEmpty(_focusElement))
+        //                _focusElement = _allElements[0];
+        //        }
+        //    }
+        //}
+
+        //private async Task LoadElements()
+        //{
+        //    Console.WriteLine("=== LoadElements START ===");
+        //    var r = await PivotService.GetElementsAsync(_projectId!.Value);
+        //    if (r.Succeeded)
+        //    {
+        //        _allElements = r.Data ?? new();
+
+        //        // لاگ برای دیباگ
+        //        Console.WriteLine($"Total elements loaded: {_allElements.Count}");
+        //        foreach (var el in _allElements.Take(20))
+        //        {
+        //            Console.WriteLine($"Element: '{el}'");
+        //        }
+
+        //        // اگر عناصر فقط نام هستند (مثلاً "Ag")، باید طول موج‌ها را از داده‌های دیگر استخراج کنیم
+        //        if (_allElements.Any() && string.IsNullOrEmpty(_focusElement))
+        //        {
+        //            _focusElement = _allElements[0];
+        //            Console.WriteLine($"Focus element set to: {_focusElement}");
+        //        }
+        //    }
+        //    else
+        //    {
+        //        Console.WriteLine($"Failed to load elements: {r.Message}");
+        //    }
+        //    Console.WriteLine("=== LoadElements END ===");
+        //}
+
+
+        private async Task LoadElements()
+        {
+            Console.WriteLine("=== LoadElements START ===");
+
+            var allElementKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // 1. از PivotService بگیر (اما احتمالاً بدون طول موج است)
+            var r = await PivotService.GetElementsAsync(_projectId!.Value);
+            if (r.Succeeded && r.Data != null)
+            {
+                foreach (var el in r.Data)
+                {
+                    allElementKeys.Add(el);
+                }
+                Console.WriteLine($"Added {r.Data.Count} elements from PivotService");
+            }
+
+            // 2. از داده‌های پیوت استخراج کن (احتمالاً با طول موج)
+            try
+            {
+                var pivotRequest = new AdvancedPivotRequest(
+                    ProjectId: _projectId.Value,
+                    SearchText: null,
+                    SelectedElements: null,
+                    NumberFilters: null,
+                    UseOxide: false,
+                    UseInt: false,
+                    DecimalPlaces: 4,
+                    Page: 1,
+                    PageSize: 100,
+                    Aggregation: "First",
+                    MergeRepeats: false
+                );
+
+                var pivotResult = await PivotService.GetAdvancedPivotTableAsync(pivotRequest);
+                if (pivotResult.Succeeded && pivotResult.Data != null && pivotResult.Data.Rows.Any())
+                {
+                    foreach (var row in pivotResult.Data.Rows)
+                    {
+                        foreach (var key in row.Values.Keys)
+                        {
+                            // فقط اضافه کن اگر شامل عدد باشد (طول موج)
+                            if (key.Any(char.IsDigit) && key.Contains(' '))
+                            {
+                                allElementKeys.Add(key);
+                            }
+                        }
+                    }
+                    Console.WriteLine($"Added elements from pivot data, total: {allElementKeys.Count}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error loading from pivot: {ex.Message}");
+            }
+
+            // 3. لیست نهایی را مرتب کن
+            _allElements = allElementKeys
+                .OrderBy(e => e)
+                .ToList();
+
+            Console.WriteLine($"Total elements loaded: {_allElements.Count}");
+
+            // نمایش عناصر با طول موج
+            var elementsWithWavelength = _allElements.Where(e => e.Contains(' ') && e.Any(char.IsDigit)).ToList();
+            Console.WriteLine($"Elements with wavelength: {elementsWithWavelength.Count}");
+            foreach (var el in elementsWithWavelength.Take(20))
+            {
+                Console.WriteLine($"  '{el}'");
+            }
+
+            // گروه‌بندی عناصر مشابه
+            var elementGroups = _allElements
+                .GroupBy(e =>
+                {
+                    var parts = e.Split(' ');
+                    return parts.Length > 0 ? parts[0].ToUpper() : e.ToUpper();
+                })
+                .Where(g => g.Count() > 1)
+                .ToList();
+
+            Console.WriteLine($"Found {elementGroups.Count} element groups with multiple wavelengths");
+            foreach (var group in elementGroups)
+            {
+                Console.WriteLine($"  {group.Key}: {string.Join(", ", group.Take(5))}");
+            }
+
+            // انتخاب عنصر فوکوس اولیه
+            if (_allElements.Any())
+            {
+                // اولویت با عناصری که طول موج دارند
+                var firstWithWavelength = _allElements.FirstOrDefault(e => e.Contains(' ') && e.Any(char.IsDigit));
+                _focusElement = firstWithWavelength ?? _allElements[0];
+                Console.WriteLine($"Focus element set to: {_focusElement}");
+            }
+
+            Console.WriteLine("=== LoadElements END ===");
+        }
+
+
+        private async Task LoadCrmReferenceData()
+        {
+            var r = await CrmService.GetCrmListAsync(pageSize: 0);
+            if (r.Succeeded)
+            {
+                _crmReferenceById = r.Data.Items
+                    .GroupBy(x => x.CrmId)
+                    .ToDictionary(g => g.Key, g => g.ToList());
+            }
+        }
+
+        private async Task LoadCrmSelections()
+        {
+            var r = await OptimizationService.GetCrmSelectionOptionsAsync(_projectId!.Value);
+            if (r.Succeeded) _crmSelectionRows = r.Data.Items;
+        }
+
+        //private async Task LoadSecondaryPlotRowsAsync()
+        //{
+        //    var r = await PivotService.GetAdvancedPivotTableAsync(new AdvancedPivotRequest(
+        //        ProjectId: _projectId!.Value,
+        //        SearchText: null,
+        //        SelectedElements: null,
+        //        NumberFilters: null,
+        //        UseOxide: false,
+        //        UseInt: false,
+        //        DecimalPlaces: 4,
+        //        Page: 1,
+        //        PageSize: 5000,
+        //        Aggregation: "First",
+        //        MergeRepeats: false));
+
+        //    if (r.Succeeded)
+        //    {
+        //        _secondaryRows = r.Data.Rows;
+        //        // نمایش نمونه‌ای از داده‌ها برای دیباگ
+        //        if (_secondaryRows.Any())
+        //        {
+        //            var firstRow = _secondaryRows.First();
+        //            if (firstRow.Values.Any())
+        //            {
+        //                Console.WriteLine($"Sample element keys in pivot data: {string.Join(", ", firstRow.Values.Keys.Take(5))}");
+        //            }
+        //        }
+        //    }
+        //}
+
+
+
+        private async Task LoadSecondaryPlotRowsAsync()
+        {
+            Console.WriteLine("=== LoadSecondaryPlotRowsAsync START ===");
+            var r = await PivotService.GetAdvancedPivotTableAsync(new AdvancedPivotRequest(
+                ProjectId: _projectId!.Value,
+                SearchText: null,
+                SelectedElements: null,
+                NumberFilters: null,
+                UseOxide: false,
+                UseInt: false,
+                DecimalPlaces: 4,
+                Page: 1,
+                PageSize: 5000,
+                Aggregation: "First",
+                MergeRepeats: false));
+
+            if (r.Succeeded)
+            {
+                _secondaryRows = r.Data.Rows;
+
+                // استخراج کلیدهای عناصر از داده‌های پیوت (اینها احتمالاً شامل طول موج هستند)
+                if (_secondaryRows.Any() && _secondaryRows.First().Values.Any())
+                {
+                    var allElementKeys = _secondaryRows
+                        .SelectMany(r => r.Values.Keys)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(k => k)
+                        .ToList();
+
+                    Console.WriteLine($"Found {allElementKeys.Count} element keys in pivot data");
+
+                    // اگر لیست عناصر خالی است یا فقط نام عناصر بدون طول موج دارد،
+                    // از کلیدهای پیوت استفاده کن
+                    if (!_allElements.Any() ||
+                        (_allElements.Count > 0 && !allElementKeys.Any(k => k.Contains(" "))))
+                    {
+                        _allElements = allElementKeys;
+                        Console.WriteLine($"Updated _allElements from pivot data: {_allElements.Count} elements");
+
+                        if (!string.IsNullOrEmpty(_focusElement) && _allElements.Contains(_focusElement))
+                        {
+                            // عنصر فوکوس در لیست جدید وجود دارد
+                        }
+                        else if (_allElements.Any())
+                        {
+                            _focusElement = _allElements[0];
+                            Console.WriteLine($"Focus element updated to: {_focusElement}");
+                        }
+                    }
+
+                    // نمایش نمونه‌ای از عناصر
+                    Console.WriteLine("First 20 element keys in pivot data:");
+                    foreach (var key in allElementKeys.Take(20))
+                    {
+                        Console.WriteLine($"  '{key}'");
+                    }
+
+                    // گروه‌بندی عناصر بر اساس نام
+                    var elementGroups = allElementKeys
+                        .GroupBy(k =>
+                        {
+                            var parts = k.Split(' ');
+                            return parts.Length > 0 ? parts[0] : k;
+                        })
+                        .Where(g => g.Count() > 1)
+                        .ToList();
+
+                    Console.WriteLine($"Found {elementGroups.Count} elements with multiple wavelengths");
+                    foreach (var group in elementGroups)
+                    {
+                        Console.WriteLine($"  {group.Key}: {string.Join(", ", group)}");
+                    }
+                }
+            }
+            else
+            {
+                Console.WriteLine($"Failed to load pivot rows: {r.Message}");
+            }
+            Console.WriteLine("=== LoadSecondaryPlotRowsAsync END ===");
+        }
+
+
+        private void ExtractElementsFromOptimizedData()
+        {
+            if (_result?.OptimizedData == null || !_result.OptimizedData.Any())
+                return;
+
+            Console.WriteLine("=== ExtractElementsFromOptimizedData START ===");
+
+            // استخراج کلیدهای عناصر از داده‌های بهینه‌سازی
+            var allElementKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var sample in _result.OptimizedData)
+            {
+                foreach (var key in sample.OriginalValues.Keys)
+                {
+                    allElementKeys.Add(key);
+                }
+                foreach (var key in sample.OptimizedValues.Keys)
+                {
+                    allElementKeys.Add(key);
+                }
+                foreach (var key in sample.CrmValues.Keys)
+                {
+                    allElementKeys.Add(key);
+                }
+            }
+
+            var elementKeysList = allElementKeys.OrderBy(k => k).ToList();
+            Console.WriteLine($"Found {elementKeysList.Count} element keys in optimized data");
+
+            // به‌روزرسانی لیست عناصر اگر نیاز باشد
+            if (elementKeysList.Any() && elementKeysList.Any(k => k.Contains(" ")))
+            {
+                _allElements = elementKeysList;
+                Console.WriteLine($"Updated _allElements from optimized data: {_allElements.Count} elements");
+
+                // اگر عنصر فوکوس در لیست نیست، اولین عنصر را انتخاب کن
+                if (!string.IsNullOrEmpty(_focusElement) && _allElements.Contains(_focusElement))
+                {
+                    // عنصر فوکوس در لیست جدید وجود دارد
+                }
+                else if (_allElements.Any())
+                {
+                    _focusElement = _allElements[0];
+                    Console.WriteLine($"Focus element updated to: {_focusElement}");
+                }
+            }
+
+            // نمایش نمونه‌ای
+            Console.WriteLine("First 20 element keys in optimized data:");
+            foreach (var key in elementKeysList.Take(20))
+            {
+                Console.WriteLine($"  '{key}'");
+            }
+
+            Console.WriteLine("=== ExtractElementsFromOptimizedData END ===");
+        }
+
+
+        //private async Task GetCurrentStats()
+        //{
+        //    var r = await OptimizationService.GetCurrentStatsAsync(_projectId!.Value, _minDiff, _maxDiff);
+        //    if (r.Succeeded)
+        //    {
+        //        _result = r.Data;
+        //        _optimizedRows = BuildOptimizedRows(_result?.OptimizedData, _focusElement);
+
+        //        // نمایش نمونه‌ای برای دیباگ
+        //        if (_result?.OptimizedData != null && _result.OptimizedData.Any())
+        //        {
+        //            var firstSample = _result.OptimizedData.First();
+        //            Console.WriteLine($"Sample CRM values keys: {string.Join(", ", firstSample.CrmValues.Keys.Take(5))}");
+        //        }
+        //    }
+        //}
+
+        private async Task GetCurrentStats()
+        {
+            var r = await OptimizationService.GetCurrentStatsAsync(_projectId!.Value, _minDiff, _maxDiff);
+            if (r.Succeeded)
+            {
+                _result = r.Data;
+                _optimizedRows = BuildOptimizedRows(_result?.OptimizedData, _focusElement);
+
+                // استخراج عناصر از داده‌های بهینه‌سازی
+                ExtractElementsFromOptimizedData();
+
+                // برای دیباگ
+                if (_result?.OptimizedData != null && _result.OptimizedData.Any())
+                {
+                    var firstSample = _result.OptimizedData.First();
+                    Console.WriteLine("First sample element keys:");
+                    Console.WriteLine($"  Original: {string.Join(", ", firstSample.OriginalValues.Keys.Take(5))}");
+                    Console.WriteLine($"  Optimized: {string.Join(", ", firstSample.OptimizedValues.Keys.Take(5))}");
+                    Console.WriteLine($"  CRM: {string.Join(", ", firstSample.CrmValues.Keys.Take(5))}");
+                }
+            }
+        }
+        private List<OptimizedSampleRow> BuildOptimizedRows(IEnumerable<OptimizedSampleDto>? d, string? e)
+        {
+            if (d == null || string.IsNullOrEmpty(e)) return new();
+
+            return d.Select(s =>
+            {
+                TryGetElementValueExact(s.OriginalValues, e, out var orig);
+                TryGetElementValueExact(s.OptimizedValues, e, out var opt);
+                TryGetReferenceElementValueExact(s.CrmValues.ToDictionary(k => k.Key, v => v.Value ?? 0m), e, out var refV);
+                decimal db = s.DiffPercentBefore.TryGetValue(e, out var v1) ? v1 : 0;
+                decimal da = s.DiffPercentAfter.TryGetValue(e, out var v2) ? v2 : 0;
+                bool p = s.PassStatusAfter.TryGetValue(e, out var ps) && ps;
+                return new OptimizedSampleRow(s.SolutionLabel, s.CrmId, e, orig, opt, refV, db, da, p);
+            }).ToList();
+        }
+
+        private IEnumerable<OptimizedSampleRow> FilterRows(IEnumerable<OptimizedSampleRow> rows) =>
+            string.IsNullOrEmpty(_sampleFilter) ? rows : rows.Where(r => r.SolutionLabel.Contains(_sampleFilter, StringComparison.OrdinalIgnoreCase));
+
         private List<string> GetRowOptions(CrmSelectionRowDto r) => r.PreferredOptions.Concat(r.AllOptions).Distinct().ToList();
-        private EventCallback<string> GetRowSelectionChangedHandler(CrmSelectionRowDto r) => EventCallback.Factory.Create<string>(this, async v => { r.SelectedOption = v; if (_projectId != null) await OptimizationService.SaveCrmSelectionsAsync(new CrmSelectionSaveRequest { ProjectId = _projectId.Value, Selections = new List<CrmSelectionItemDto> { new CrmSelectionItemDto { SolutionLabel = r.SolutionLabel, RowIndex = r.RowIndex, SelectedCrmKey = v } } }); });
-      
+
+        private EventCallback<string> GetRowSelectionChangedHandler(CrmSelectionRowDto r) =>
+            EventCallback.Factory.Create<string>(this, async v =>
+            {
+                r.SelectedOption = v;
+                if (_projectId != null)
+                    await OptimizationService.SaveCrmSelectionsAsync(new CrmSelectionSaveRequest
+                    {
+                        ProjectId = _projectId.Value,
+                        Selections = new List<CrmSelectionItemDto>
+                        {
+                            new CrmSelectionItemDto
+                            {
+                                SolutionLabel = r.SolutionLabel,
+                                RowIndex = r.RowIndex,
+                                SelectedCrmKey = v
+                            }
+                        }
+                    });
+            });
+
         private async Task OnPreviewScaleChanged(double v)
         {
             _previewScale = v;
@@ -1348,7 +2065,6 @@ namespace WebUI.Pages.Process
         {
             _scaleRangeMin = v;
 
-            // اعتبارسنجی
             if (_scaleRangeMin.HasValue && _scaleRangeMax.HasValue)
             {
                 if (_scaleRangeMin.Value > _scaleRangeMax.Value)
@@ -1363,24 +2079,23 @@ namespace WebUI.Pages.Process
             await RefreshChartsAsync(refreshCalibration: true, refreshSecondary: true);
         }
 
-      private async Task OnRangeMaxChanged(decimal? v)
-{
-    _scaleRangeMax = v;
-    
-    // اعتبارسنجی
-    if (_scaleRangeMin.HasValue && _scaleRangeMax.HasValue)
-    {
-        if (_scaleRangeMin.Value > _scaleRangeMax.Value)
+        private async Task OnRangeMaxChanged(decimal? v)
         {
-            Snackbar.Add("Min Limit cannot be greater than Max Limit!", Severity.Error);
-            _scaleRangeMin = null;
-            _scaleRangeMax = null;
-            StateHasChanged();
+            _scaleRangeMax = v;
+
+            if (_scaleRangeMin.HasValue && _scaleRangeMax.HasValue)
+            {
+                if (_scaleRangeMin.Value > _scaleRangeMax.Value)
+                {
+                    Snackbar.Add("Min Limit cannot be greater than Max Limit!", Severity.Error);
+                    _scaleRangeMin = null;
+                    _scaleRangeMax = null;
+                    StateHasChanged();
+                }
+            }
+
+            await RefreshChartsAsync(refreshCalibration: true, refreshSecondary: true);
         }
-    }
-    
-    await RefreshChartsAsync(refreshCalibration: true, refreshSecondary: true);
-}
 
         private IEnumerable<AdvancedPivotRowDto> GetFilteredSecondaryRows()
         {
@@ -1395,13 +2110,11 @@ namespace WebUI.Pages.Process
 
         private async Task ThrottledRefreshChartsAsync(bool refreshCalibration = true, bool refreshSecondary = true)
         {
-            // اگر به تازگی refresh شده، صبر کنید
             if (DateTime.Now - _lastRefreshTime < _refreshThrottleInterval)
                 return;
 
             _lastRefreshTime = DateTime.Now;
 
-            // cancel previous refresh if still running
             _refreshCts?.Cancel();
             _refreshCts = new CancellationTokenSource();
 
@@ -1415,18 +2128,84 @@ namespace WebUI.Pages.Process
                 // اگر cancel شد، ignore کنیم
             }
         }
-        // در بخش C# کلاس، این property را اضافه کنید
+
         private EventCallback<string> OnFilterTextChangedCallback =>
             EventCallback.Factory.Create<string>(this, async (value) =>
             {
                 _filterText = value;
                 await ThrottledRefreshChartsAsync(refreshCalibration: false, refreshSecondary: true);
             });
+
         public void Dispose()
         {
             _loadingLock.Dispose();
             _refreshCts?.Cancel();
             _refreshCts?.Dispose();
+        }
+
+
+
+        private async Task DebugElementDataSources()
+        {
+            Console.WriteLine("=== DebugElementDataSources START ===");
+
+            // 1. بررسی عناصر از PivotService
+            var elementsResult = await PivotService.GetElementsAsync(_projectId!.Value);
+            Console.WriteLine($"Elements from PivotService: {elementsResult.Data?.Count ?? 0}");
+            if (elementsResult.Succeeded && elementsResult.Data != null)
+            {
+                foreach (var el in elementsResult.Data.Take(10))
+                {
+                    Console.WriteLine($"  - '{el}'");
+                }
+            }
+
+            // 2. بررسی داده‌های پیوت
+            var pivotRequest = new AdvancedPivotRequest(
+                ProjectId: _projectId.Value,
+                SearchText: null,
+                SelectedElements: null,
+                NumberFilters: null,
+                UseOxide: false,
+                UseInt: false,
+                DecimalPlaces: 4,
+                Page: 1,
+                PageSize: 50,
+                Aggregation: "First",
+                MergeRepeats: false
+            );
+
+            var pivotResult = await PivotService.GetAdvancedPivotTableAsync(pivotRequest);
+            if (pivotResult.Succeeded && pivotResult.Data != null && pivotResult.Data.Rows.Any())
+            {
+                var firstRow = pivotResult.Data.Rows.First();
+                Console.WriteLine($"Element keys in first pivot row: {firstRow.Values.Count}");
+                foreach (var key in firstRow.Values.Keys.Take(20))
+                {
+                    Console.WriteLine($"  - '{key}'");
+                }
+            }
+
+            // 3. بررسی داده‌های بهینه‌سازی
+            var statsResult = await OptimizationService.GetCurrentStatsAsync(_projectId.Value, _minDiff, _maxDiff);
+            if (statsResult.Succeeded && statsResult.Data != null && statsResult.Data.OptimizedData != null)
+            {
+                var firstSample = statsResult.Data.OptimizedData.FirstOrDefault();
+                if (firstSample != null)
+                {
+                    Console.WriteLine($"Element keys in optimized data:");
+                    Console.WriteLine($"  Original: {firstSample.OriginalValues.Keys.Count()}");
+                    Console.WriteLine($"  Optimized: {firstSample.OptimizedValues.Keys.Count()}");
+                    Console.WriteLine($"  CRM: {firstSample.CrmValues.Keys.Count()}");
+
+                    foreach (var key in firstSample.CrmValues.Keys.Take(10))
+                    {
+                        Console.WriteLine($"    - '{key}'");
+                    }
+                }
+            }
+
+            Console.WriteLine("=== DebugElementDataSources END ===");
         }
     }
 }
