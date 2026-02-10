@@ -1220,39 +1220,6 @@ namespace WebUI.Pages.Process
 
         private static string NormalizeSolutionLabel(string? raw) => string.IsNullOrWhiteSpace(raw) ? string.Empty : MultiWhitespaceRegex.Replace(raw.Trim(), " ");
 
-        // تابع جدید برای تطبیق دقیق عناصر با طول موج
-        //private static bool TryGetElementValueExact(IReadOnlyDictionary<string, decimal?> values, string? el, out decimal? v)
-        //{
-        //    v = null;
-        //    if (values == null || string.IsNullOrEmpty(el)) return false;
-
-        //    // ابتدا سعی کن با کلید کامل تطبیق دهی
-        //    var normalizedFull = NormalizeElementFull(el);
-        //    var exactMatch = values.FirstOrDefault(k =>
-        //        string.Equals(NormalizeElementFull(k.Key), normalizedFull, StringComparison.OrdinalIgnoreCase));
-
-        //    if (exactMatch.Key != null)
-        //    {
-        //        v = exactMatch.Value;
-        //        return true;
-        //    }
-
-        //    // اگر پیدا نکردی، فقط با نام عنصر تطبیق بده
-        //    var elementName = NormalizeElementName(el);
-        //    var nameMatch = values.FirstOrDefault(k =>
-        //        string.Equals(NormalizeElementName(k.Key), elementName, StringComparison.OrdinalIgnoreCase));
-
-        //    if (nameMatch.Key != null)
-        //    {
-        //        v = nameMatch.Value;
-        //        return true;
-        //    }
-
-        //    return false;
-        //}
-
-
-
         // این تابع را جایگزین TryGetElementValueExact کنید
         // این تابع ساده و مستقیم را جایگزین کنید
         private static bool TryGetElementValueExact(IReadOnlyDictionary<string, decimal?> values, string? el, out decimal? v)
@@ -1634,57 +1601,6 @@ namespace WebUI.Pages.Process
             StateHasChanged();
         }
 
-        //private async Task LoadElements()
-        //{
-        //    var r = await PivotService.GetElementsAsync(_projectId!.Value);
-        //    if (r.Succeeded)
-        //    {
-        //        _allElements = r.Data ?? new();
-
-        //        // اطمینان از نمایش عناصر با طول موج
-        //        if (_allElements.Any())
-        //        {
-        //            // اگر عناصر دارای طول موج هستند، آنها را به درستی نمایش بده
-        //            foreach (var element in _allElements)
-        //            {
-        //                Console.WriteLine($"Element: {element}");
-        //            }
-
-        //            if (string.IsNullOrEmpty(_focusElement))
-        //                _focusElement = _allElements[0];
-        //        }
-        //    }
-        //}
-
-        //private async Task LoadElements()
-        //{
-        //    Console.WriteLine("=== LoadElements START ===");
-        //    var r = await PivotService.GetElementsAsync(_projectId!.Value);
-        //    if (r.Succeeded)
-        //    {
-        //        _allElements = r.Data ?? new();
-
-        //        // لاگ برای دیباگ
-        //        Console.WriteLine($"Total elements loaded: {_allElements.Count}");
-        //        foreach (var el in _allElements.Take(20))
-        //        {
-        //            Console.WriteLine($"Element: '{el}'");
-        //        }
-
-        //        // اگر عناصر فقط نام هستند (مثلاً "Ag")، باید طول موج‌ها را از داده‌های دیگر استخراج کنیم
-        //        if (_allElements.Any() && string.IsNullOrEmpty(_focusElement))
-        //        {
-        //            _focusElement = _allElements[0];
-        //            Console.WriteLine($"Focus element set to: {_focusElement}");
-        //        }
-        //    }
-        //    else
-        //    {
-        //        Console.WriteLine($"Failed to load elements: {r.Message}");
-        //    }
-        //    Console.WriteLine("=== LoadElements END ===");
-        //}
-
 
         private async Task LoadElements()
         {
@@ -1802,37 +1718,6 @@ namespace WebUI.Pages.Process
             var r = await OptimizationService.GetCrmSelectionOptionsAsync(_projectId!.Value);
             if (r.Succeeded) _crmSelectionRows = r.Data.Items;
         }
-
-        //private async Task LoadSecondaryPlotRowsAsync()
-        //{
-        //    var r = await PivotService.GetAdvancedPivotTableAsync(new AdvancedPivotRequest(
-        //        ProjectId: _projectId!.Value,
-        //        SearchText: null,
-        //        SelectedElements: null,
-        //        NumberFilters: null,
-        //        UseOxide: false,
-        //        UseInt: false,
-        //        DecimalPlaces: 4,
-        //        Page: 1,
-        //        PageSize: 5000,
-        //        Aggregation: "First",
-        //        MergeRepeats: false));
-
-        //    if (r.Succeeded)
-        //    {
-        //        _secondaryRows = r.Data.Rows;
-        //        // نمایش نمونه‌ای از داده‌ها برای دیباگ
-        //        if (_secondaryRows.Any())
-        //        {
-        //            var firstRow = _secondaryRows.First();
-        //            if (firstRow.Values.Any())
-        //            {
-        //                Console.WriteLine($"Sample element keys in pivot data: {string.Join(", ", firstRow.Values.Keys.Take(5))}");
-        //            }
-        //        }
-        //    }
-        //}
-
 
 
         private async Task LoadSecondaryPlotRowsAsync()
@@ -1973,24 +1858,6 @@ namespace WebUI.Pages.Process
 
             Console.WriteLine("=== ExtractElementsFromOptimizedData END ===");
         }
-
-
-        //private async Task GetCurrentStats()
-        //{
-        //    var r = await OptimizationService.GetCurrentStatsAsync(_projectId!.Value, _minDiff, _maxDiff);
-        //    if (r.Succeeded)
-        //    {
-        //        _result = r.Data;
-        //        _optimizedRows = BuildOptimizedRows(_result?.OptimizedData, _focusElement);
-
-        //        // نمایش نمونه‌ای برای دیباگ
-        //        if (_result?.OptimizedData != null && _result.OptimizedData.Any())
-        //        {
-        //            var firstSample = _result.OptimizedData.First();
-        //            Console.WriteLine($"Sample CRM values keys: {string.Join(", ", firstSample.CrmValues.Keys.Take(5))}");
-        //        }
-        //    }
-        //}
 
         private async Task GetCurrentStats()
         {
