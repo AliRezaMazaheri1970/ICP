@@ -137,7 +137,15 @@
                     <MudDivider Class="my-2" />
 
                     <MudText Typo="Typo.subtitle2" Class="mb-1">RM Points and Ratios</MudText>
-                    <MudTable Items="_rmRatioRows" Dense="true" Hover="true" FixedHeader="true" Height="200px" Breakpoint="Breakpoint.None" HorizontalScrollbar="true">
+                    <MudTable Items="_rmRatioRows"
+                              T="RmRatioRowVm"
+                              Dense="true"
+                              Hover="true"
+                              FixedHeader="true"
+                              Height="200px"
+                              Breakpoint="Breakpoint.None"
+                              HorizontalScrollbar="true"
+                              OnRowClick="OnRmRatioRowClick">
                         <HeaderContent>
                             <MudTh>RM Label</MudTh>
                             <MudTh>Next RM</MudTh>
@@ -157,7 +165,7 @@
                     </MudTable>
 
                     <MudText Typo="Typo.subtitle2" Class="mt-3 mb-1">Data Between Selected RM Points</MudText>
-                    <MudTable Items="_betweenRows" Dense="true" Hover="true" FixedHeader="true" Height="200px" Breakpoint="Breakpoint.None" HorizontalScrollbar="true">
+                    <MudTable Items="_betweenRows" T="BetweenRmRowVm" Dense="true" Hover="true" FixedHeader="true" Height="200px" Breakpoint="Breakpoint.None" HorizontalScrollbar="true">
                         <HeaderContent>
                             <MudTh>Solution Label</MudTh>
                             <MudTh>Original Value</MudTh>
