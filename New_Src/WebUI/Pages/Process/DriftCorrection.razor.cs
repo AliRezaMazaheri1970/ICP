@@ -39,7 +39,9 @@ namespace WebUI.Pages.Process
         private decimal _currentSlope;
         private decimal _targetSlope;
 
+        private int _currentRmNum = 1;
         private int _selectedRatioIndex;
+        private List<int> _availableRmNumbers = new();
         private readonly Dictionary<int, decimal> _manualCurrentOverrides = new();
         private readonly List<AdvancedPivotRowDto> _pivotRows = new();
         private readonly List<DriftPlotPointVm> _plotPoints = new();
@@ -52,14 +54,14 @@ namespace WebUI.Pages.Process
         private int _totalPages => _totalCount == 0 ? 1 : (int)Math.Ceiling((double)_totalCount / _pageSize);
 
         private string CurrentRmText =>
-            _rmRatioRows.Count == 0
+            _availableRmNumbers.Count == 0
                 ? "Current RM: None"
-                : $"Current RM: {_selectedRatioIndex + 1} / {_rmRatioRows.Count}";
+                : $"Current RM: {_currentRmNum}";
 
         private bool HasAnalysis => _analysisResult != null;
         private bool HasPlotData => _plotPoints.Count > 0;
-        private bool CanPrevRm => _rmRatioRows.Count > 0 && _selectedRatioIndex > 0;
-        private bool CanNextRm => _rmRatioRows.Count > 0 && _selectedRatioIndex < _rmRatioRows.Count - 1;
+        private bool CanPrevRm => _availableRmNumbers.Count > 0 && _availableRmNumbers.IndexOf(_currentRmNum) > 0;
+        private bool CanNextRm => _availableRmNumbers.Count > 0 && _availableRmNumbers.IndexOf(_currentRmNum) < _availableRmNumbers.Count - 1;
 
         protected override async Task OnInitializedAsync()
         {
@@ -122,6 +124,7 @@ namespace WebUI.Pages.Process
             var selectedElements = !string.IsNullOrWhiteSpace(_focusElement)
                 ? new List<string> { _focusElement! }
                 : null;
+            var effectiveKeyword = GetEffectiveKeyword();
 
             return new DriftCorrectionRequest
             {
@@ -129,7 +132,7 @@ namespace WebUI.Pages.Process
                 Method = _applyStepwiseChanges ? DriftMethod.Stepwise : _method,
                 UseSegmentation = _useSegmentation,
                 SelectedElements = selectedElements,
-                Keyword = string.IsNullOrWhiteSpace(_keyword) ? "RM" : _keyword.Trim(),
+                Keyword = effectiveKeyword,
                 TargetRmNum = includeTargetRm ? GetCurrentTargetRmNumber() : null,
                 PreviewOnly = false
             };
@@ -289,7 +292,10 @@ namespace WebUI.Pages.Process
         private async Task PrevRm()
         {
             if (!CanPrevRm) return;
-            _selectedRatioIndex--;
+            var idx = _availableRmNumbers.IndexOf(_currentRmNum);
+            if (idx <= 0) return;
+            _currentRmNum = _availableRmNumbers[idx - 1];
+            _selectedRatioIndex = 0;
             RebuildDriftUiData();
             RequestChartRender();
             await Task.CompletedTask;
@@ -298,10 +304,34 @@ namespace WebUI.Pages.Process
         private async Task NextRm()
         {
             if (!CanNextRm) return;
-            _selectedRatioIndex++;
+            var idx = _availableRmNumbers.IndexOf(_currentRmNum);
+            if (idx < 0 || idx >= _availableRmNumbers.Count - 1) return;
+            _currentRmNum = _availableRmNumbers[idx + 1];
+            _selectedRatioIndex = 0;
             RebuildDriftUiData();
             RequestChartRender();
             await Task.CompletedTask;
+        }
+
+        private Task OnRmRatioRowClick(TableRowClickEventArgs<RmRatioRowVm> args)
+        {
+            if (args.Item == null || _rmRatioRows.Count == 0)
+                return Task.CompletedTask;
+
+            var index = _rmRatioRows.FindIndex(r =>
+                ReferenceEquals(r, args.Item) ||
+                (r.StartSampleIndex == args.Item.StartSampleIndex &&
+                 r.EndSampleIndex == args.Item.EndSampleIndex &&
+                 string.Equals(r.RmLabel, args.Item.RmLabel, StringComparison.OrdinalIgnoreCase)));
+
+            if (index < 0)
+                return Task.CompletedTask;
+
+            _selectedRatioIndex = index;
+            _betweenRows.Clear();
+            BuildBetweenRows();
+            StateHasChanged();
+            return Task.CompletedTask;
         }
 
         private async Task AutoOptimizeToFlat()
@@ -315,12 +345,12 @@ namespace WebUI.Pages.Process
             if (_globalOptimizeIgnoreChecks)
             {
                 foreach (var range in _rmRatioRows)
-                    ApplyFlatToRange(range.StartIndex, range.EndIndex, range.CurrentValue);
+                    ApplyFlatToRange(range.StartSampleIndex, range.EndSampleIndex, range.CurrentValue);
             }
             else
             {
                 var selected = _rmRatioRows[Math.Clamp(_selectedRatioIndex, 0, _rmRatioRows.Count - 1)];
-                ApplyFlatToRange(selected.StartIndex, selected.EndIndex, selected.CurrentValue);
+                ApplyFlatToRange(selected.StartSampleIndex, selected.EndSampleIndex, selected.CurrentValue);
             }
 
             RebuildDriftUiData();
@@ -366,21 +396,25 @@ namespace WebUI.Pages.Process
             if (string.IsNullOrWhiteSpace(_focusElement) || !_pivotRows.Any()) return;
 
             var correctedMap = BuildCorrectedLookupForFocusElement();
+            var sampleIdx = 0;
             foreach (var row in _pivotRows)
             {
+                var rowSampleIndex = sampleIdx++;
                 if (!TryGetElementValue(row.Values, _focusElement, out var originalMaybe) || !originalMaybe.HasValue) continue;
                 var label = NormalizeSolutionLabel(row.SolutionLabel);
                 if (string.IsNullOrWhiteSpace(label)) continue;
 
                 var isRm = IsRmLabel(label);
                 var (rmNum, rmType) = ParseRmInfo(label);
-                var baseCurrent = correctedMap.TryGetValue(row.OriginalIndex, out var corrected)
+                var sampleKey = BuildSampleKey(label, row.OriginalIndex);
+                var baseCurrent = correctedMap.TryGetValue(sampleKey, out var corrected)
                     ? corrected
                     : originalMaybe.Value;
 
                 _plotPoints.Add(new DriftPlotPointVm
                 {
                     OriginalIndex = row.OriginalIndex,
+                    SampleIndex = rowSampleIndex,
                     SolutionLabel = label,
                     OriginalValue = originalMaybe.Value,
                     BaseCurrentValue = baseCurrent,
@@ -389,6 +423,23 @@ namespace WebUI.Pages.Process
                     RmNum = rmNum,
                     RmType = rmType
                 });
+            }
+
+            _availableRmNumbers = _plotPoints
+                .Where(p => p.IsRm && p.RmNum > 0)
+                .Select(p => p.RmNum)
+                .Distinct()
+                .OrderBy(x => x)
+                .ToList();
+
+            if (_availableRmNumbers.Count > 0)
+            {
+                if (!_availableRmNumbers.Contains(_currentRmNum))
+                    _currentRmNum = _availableRmNumbers[0];
+            }
+            else
+            {
+                _currentRmNum = 1;
             }
 
             ApplyPreviewAdjustments();
@@ -402,27 +453,33 @@ namespace WebUI.Pages.Process
             var anchorX = GetSlopeAnchorX();
             foreach (var point in _plotPoints)
             {
-                var current = _manualCurrentOverrides.TryGetValue(point.OriginalIndex, out var manual)
+                var current = _manualCurrentOverrides.TryGetValue(point.SampleIndex, out var manual)
                     ? manual
                     : point.BaseCurrentValue;
-                point.CurrentValue = current + (_previewSlopeOffset * (point.OriginalIndex - anchorX));
+                point.CurrentValue = current + (_previewSlopeOffset * (point.SampleIndex - anchorX));
             }
         }
 
         private void BuildRmRatioRows()
         {
-            var rms = _plotPoints.Where(p => p.IsRm).OrderBy(p => p.OriginalIndex).ToList();
-            for (var i = 0; i < rms.Count - 1; i++)
+            var rms = _plotPoints
+                .Where(p => p.IsRm && p.RmNum == _currentRmNum)
+                .OrderBy(p => p.SampleIndex)
+                .ToList();
+
+            for (var i = 0; i < rms.Count; i++)
             {
                 var start = rms[i];
-                var end = rms[i + 1];
-                var ratio = start.CurrentValue == 0m ? 1m : end.CurrentValue / start.CurrentValue;
+                var end = i < rms.Count - 1 ? rms[i + 1] : null;
+                var ratio = start.OriginalValue == 0m ? 1m : start.CurrentValue / start.OriginalValue;
                 _rmRatioRows.Add(new RmRatioRowVm
                 {
                     StartIndex = start.OriginalIndex,
-                    EndIndex = end.OriginalIndex,
-                    RmLabel = start.SolutionLabel,
-                    NextRmLabel = end.SolutionLabel,
+                    EndIndex = end?.OriginalIndex ?? start.OriginalIndex,
+                    StartSampleIndex = start.SampleIndex,
+                    EndSampleIndex = end?.SampleIndex ?? start.SampleIndex,
+                    RmLabel = $"{start.SolutionLabel}-{start.SampleIndex}",
+                    NextRmLabel = end == null ? "N/A" : $"{end.SolutionLabel}-{end.SampleIndex}",
                     Type = start.RmType,
                     StartRmNum = start.RmNum,
                     OriginalValue = start.OriginalValue,
@@ -440,10 +497,17 @@ namespace WebUI.Pages.Process
             if (_rmRatioRows.Count == 0) return;
 
             var range = _rmRatioRows[_selectedRatioIndex];
+            var currentRmPoints = _plotPoints
+                .Where(p => p.IsRm && p.RmNum == _currentRmNum)
+                .OrderBy(p => p.SampleIndex)
+                .Select(p => p.SampleIndex)
+                .ToHashSet();
+
             var samples = _plotPoints
-                .Where(p => !p.IsRm && p.OriginalIndex > range.StartIndex && p.OriginalIndex < range.EndIndex)
+                .Where(p => !p.IsRm && p.SampleIndex > range.StartSampleIndex && p.SampleIndex < range.EndSampleIndex)
+                .Where(p => !currentRmPoints.Contains(p.SampleIndex))
                 .Where(MatchesFilter)
-                .OrderBy(p => p.OriginalIndex)
+                .OrderBy(p => p.SampleIndex)
                 .ToList();
 
             _betweenRows.AddRange(samples.Select(p => new BetweenRmRowVm
@@ -455,33 +519,39 @@ namespace WebUI.Pages.Process
             }));
         }
 
-        private Dictionary<int, decimal> BuildCorrectedLookupForFocusElement()
+        private Dictionary<string, decimal> BuildCorrectedLookupForFocusElement()
         {
-            var map = new Dictionary<int, decimal>();
+            var map = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
             if (_analysisResult == null || string.IsNullOrWhiteSpace(_focusElement)) return map;
 
             foreach (var row in _analysisResult.CorrectedData)
             {
-                if (TryGetElementValue(row.CorrectedValues, _focusElement, out var corrected) && corrected.HasValue)
-                    map[row.OriginalIndex] = corrected.Value;
+                if (!TryGetElementValue(row.CorrectedValues, _focusElement, out var corrected) || !corrected.HasValue)
+                    continue;
+
+                var key = BuildSampleKey(row.SolutionLabel, row.OriginalIndex);
+                map[key] = corrected.Value;
             }
 
             return map;
         }
 
+        private static string BuildSampleKey(string? solutionLabel, int originalIndex)
+            => $"{NormalizeSolutionLabel(solutionLabel)}|{originalIndex}";
+
         private void ApplyFlatToRange(int startIndex, int endIndex, decimal targetValue)
         {
             var anchorX = GetSlopeAnchorX();
-            foreach (var point in _plotPoints.Where(p => !p.IsRm && p.OriginalIndex > startIndex && p.OriginalIndex < endIndex))
-                _manualCurrentOverrides[point.OriginalIndex] = targetValue - (_previewSlopeOffset * (point.OriginalIndex - anchorX));
+            foreach (var point in _plotPoints.Where(p => !p.IsRm && p.SampleIndex > startIndex && p.SampleIndex < endIndex))
+                _manualCurrentOverrides[point.SampleIndex] = targetValue - (_previewSlopeOffset * (point.SampleIndex - anchorX));
         }
 
         private int GetSlopeAnchorX()
-            => _plotPoints.Where(p => p.IsRm).OrderBy(p => p.OriginalIndex).Select(p => p.OriginalIndex).FirstOrDefault();
+            => _plotPoints.Where(p => p.IsRm && p.RmNum == _currentRmNum).OrderBy(p => p.SampleIndex).Select(p => p.SampleIndex).FirstOrDefault();
 
         private void UpdateSlopeIndicators()
         {
-            var rmPoints = _plotPoints.Where(p => p.IsRm).OrderBy(p => p.OriginalIndex).ToList();
+            var rmPoints = _plotPoints.Where(p => p.IsRm && p.RmNum == _currentRmNum).OrderBy(p => p.SampleIndex).ToList();
             _currentSlope = CalculateSlope(rmPoints);
             _targetSlope = _currentSlope;
         }
@@ -489,7 +559,7 @@ namespace WebUI.Pages.Process
         private static decimal CalculateSlope(IReadOnlyList<DriftPlotPointVm> points)
         {
             if (points.Count < 2) return 0m;
-            var x = points.Select(p => (double)p.OriginalIndex).ToArray();
+            var x = points.Select(p => (double)p.SampleIndex).ToArray();
             var y = points.Select(p => (double)p.CurrentValue).ToArray();
             var meanX = x.Average();
             var meanY = y.Average();
@@ -514,16 +584,37 @@ namespace WebUI.Pages.Process
                 return;
             }
 
-            var filtered = _plotPoints.Where(p => p.IsRm || MatchesFilter(p)).OrderBy(p => p.OriginalIndex).ToList();
+            var rmPoints = _plotPoints
+                .Where(p => p.IsRm && p.RmNum == _currentRmNum)
+                .OrderBy(p => p.SampleIndex)
+                .ToList();
+
+            var betweenSamples = new List<DriftPlotPointVm>();
+            for (var i = 0; i < rmPoints.Count - 1; i++)
+            {
+                var start = rmPoints[i].SampleIndex;
+                var end = rmPoints[i + 1].SampleIndex;
+                betweenSamples.AddRange(
+                    _plotPoints
+                        .Where(p => !p.IsRm && p.SampleIndex > start && p.SampleIndex < end)
+                        .Where(MatchesFilter)
+                        .OrderBy(p => p.SampleIndex));
+            }
+
+            var filtered = rmPoints
+                .Concat(betweenSamples)
+                .OrderBy(p => p.SampleIndex)
+                .ToList();
+
             if (filtered.Count == 0)
             {
                 await JSRuntime.InvokeVoidAsync("destroyChart", "driftChart");
                 return;
             }
 
-            var originalSamples = filtered.Where(p => !p.IsRm).Select(p => new { x = p.OriginalIndex, y = (double)p.OriginalValue }).ToList<object>();
-            var correctedSamples = filtered.Where(p => !p.IsRm).Select(p => new { x = p.OriginalIndex, y = (double)p.CurrentValue }).ToList<object>();
-            var rmCurrent = filtered.Where(p => p.IsRm).Select(p => new { x = p.OriginalIndex, y = (double)p.CurrentValue }).ToList<object>();
+            var originalSamples = filtered.Where(p => !p.IsRm).Select(p => new { x = p.SampleIndex, y = (double)p.OriginalValue }).ToList<object>();
+            var correctedSamples = filtered.Where(p => !p.IsRm).Select(p => new { x = p.SampleIndex, y = (double)p.CurrentValue }).ToList<object>();
+            var rmCurrent = filtered.Where(p => p.IsRm).Select(p => new { x = p.SampleIndex, y = (double)p.CurrentValue }).ToList<object>();
 
             var yValues = filtered.SelectMany(p => new[] { (double)p.OriginalValue, (double)p.CurrentValue }).ToList();
             var minY = yValues.Min();
@@ -531,8 +622,8 @@ namespace WebUI.Pages.Process
             var span = maxY - minY;
             var margin = span > 0 ? span * 0.08 : Math.Max(1.0, Math.Abs(maxY) * 0.08);
 
-            var minX = filtered.Min(p => p.OriginalIndex) - 2;
-            var maxX = filtered.Max(p => p.OriginalIndex) + 2;
+            var minX = Math.Max(0, filtered.Min(p => p.SampleIndex) - 2);
+            var maxX = filtered.Max(p => p.SampleIndex) + 2;
 
             var config = new
             {
@@ -570,25 +661,47 @@ namespace WebUI.Pages.Process
         private bool IsRmLabel(string? label)
         {
             if (string.IsNullOrWhiteSpace(label)) return false;
-            var keyword = string.IsNullOrWhiteSpace(_keyword) ? "RM" : _keyword.Trim();
+            var keyword = GetEffectiveKeyword();
             return label.Trim().StartsWith(keyword, StringComparison.OrdinalIgnoreCase);
         }
 
         private (int RmNum, string RmType) ParseRmInfo(string label)
         {
-            var keyword = string.IsNullOrWhiteSpace(_keyword) ? "RM" : _keyword.Trim();
+            var keyword = GetEffectiveKeyword();
             var text = label.Trim();
-            var afterKeyword = text.StartsWith(keyword, StringComparison.OrdinalIgnoreCase) ? text[keyword.Length..].Trim() : text;
-            var numberMatch = Regex.Match(afterKeyword, @"\d+");
-            var rmNum = numberMatch.Success && int.TryParse(numberMatch.Value, out var n) ? n : 0;
-            var rmType = Regex.IsMatch(text, "cone", RegexOptions.IgnoreCase) ? "Cone"
-                : Regex.IsMatch(text, "check|chek", RegexOptions.IgnoreCase) ? "Check"
+            var cleaned = Regex.Replace(
+                    text,
+                    $"^\\s*{Regex.Escape(keyword)}\\s*[-_]?\\s*",
+                    string.Empty,
+                    RegexOptions.IgnoreCase)
+                .Trim()
+                .ToLowerInvariant();
+
+            var typeMatch = Regex.Match(cleaned, "(chek|check|cone)", RegexOptions.IgnoreCase);
+            var beforeText = typeMatch.Success ? cleaned[..typeMatch.Index] : cleaned;
+
+            var numberMatches = Regex.Matches(beforeText, @"\d+");
+            var rmNum = numberMatches.Count > 0 && int.TryParse(numberMatches[^1].Value, out var n)
+                ? n
+                : 0;
+
+            var rmType = typeMatch.Success
+                ? typeMatch.Groups[1].Value.Equals("cone", StringComparison.OrdinalIgnoreCase) ? "Cone" : "Check"
                 : "Base";
             return (rmNum, rmType);
         }
 
         private int? GetCurrentTargetRmNumber()
-            => _rmRatioRows.Count == 0 ? null : _rmRatioRows[_selectedRatioIndex].StartRmNum > 0 ? _rmRatioRows[_selectedRatioIndex].StartRmNum : null;
+            => _availableRmNumbers.Contains(_currentRmNum) ? _currentRmNum : null;
+
+        private string GetEffectiveKeyword()
+        {
+            var raw = string.IsNullOrWhiteSpace(_keyword) ? "RM" : _keyword.Trim();
+            var letters = Regex.Match(raw, @"^[A-Za-z]+");
+            if (letters.Success) return letters.Value;
+            var firstToken = raw.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+            return string.IsNullOrWhiteSpace(firstToken) ? "RM" : firstToken;
+        }
 
         private void ClearPreviewAdjustments()
         {
@@ -663,6 +776,7 @@ namespace WebUI.Pages.Process
         private sealed class DriftPlotPointVm
         {
             public int OriginalIndex { get; set; }
+            public int SampleIndex { get; set; }
             public string SolutionLabel { get; set; } = "";
             public decimal OriginalValue { get; set; }
             public decimal BaseCurrentValue { get; set; }
@@ -676,6 +790,8 @@ namespace WebUI.Pages.Process
         {
             public int StartIndex { get; set; }
             public int EndIndex { get; set; }
+            public int StartSampleIndex { get; set; }
+            public int EndSampleIndex { get; set; }
             public string RmLabel { get; set; } = "";
             public string NextRmLabel { get; set; } = "";
             public string Type { get; set; } = "";
