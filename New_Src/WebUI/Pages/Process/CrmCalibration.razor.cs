@@ -87,6 +87,8 @@ namespace WebUI.Pages.Process
         private CancellationTokenSource _refreshCts;
         private DateTime _lastRefreshTime = DateTime.MinValue;
         private readonly TimeSpan _refreshThrottleInterval = TimeSpan.FromMilliseconds(300);
+        private bool _isDisposed = false;
+        private bool _initialLoadCompleted = false;
 
         // ریجکس برای تشخیص برچسب‌های CRM (مطابق تصویر پایتون V 252b)
         private static readonly Regex CrmIdRegex = new(@"(?i)(?:\bCRM\b|\bOREAS\b|\bV\b)[^\d]*(\d+[a-zA-Z]?)", RegexOptions.Compiled);
@@ -200,9 +202,24 @@ namespace WebUI.Pages.Process
 
             // اجرای دیباگ برای بررسی داده‌ها
             await DebugElementDataSources();
+            if (_isDisposed) return;
 
             await LoadInitialDataInternalAsync();
         }
+
+        private bool IsCoreDataReady =>
+            _allElements.Any() &&
+            !string.IsNullOrWhiteSpace(_focusElement) &&
+            _crmSelectionRows.Any();
+
+        private bool IsUiBusyOrBlocked =>
+            _projectId.HasValue &&
+            (_isLoading || !IsCoreDataReady || !_initialLoadCompleted);
+
+        private string LoadingOverlayText =>
+            _isLoading
+                ? "Processing..."
+                : "Loading elements and CRM data...";
         private void OnBeforeNavigation(LocationChangingContext context)
         {
             if (_isLoading) context.PreventNavigation();
@@ -210,16 +227,39 @@ namespace WebUI.Pages.Process
 
         private async Task LoadInitialDataInternalAsync()
         {
-            if (!await _loadingLock.WaitAsync(0)) return;
+            if (_isDisposed) return;
+
             _isLoading = true;
+            if (!_isDisposed)
+                StateHasChanged();
+
+            var lockTaken = false;
             try
             {
-                await AwaitWithTimeout(LoadElements(), TimeSpan.FromSeconds(25), "Load elements");
+                lockTaken = await _loadingLock.WaitAsync(TimeSpan.FromSeconds(15));
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
+
+            if (!lockTaken || _isDisposed) return;
+            try
+            {
+                await AwaitWithTimeout(LoadElements(), TimeSpan.FromSeconds(40), "Load elements");
                 await AwaitWithTimeout(LoadCrmReferenceData(), TimeSpan.FromSeconds(25), "Load CRM references");
-                await AwaitWithTimeout(LoadCrmSelections(), TimeSpan.FromSeconds(25), "Load CRM selections");
                 await AwaitWithTimeout(LoadSecondaryPlotRowsAsync(), TimeSpan.FromSeconds(40), "Load pivot rows");
                 await AwaitWithTimeout(LoadRawCrmBaseValuesAsync(), TimeSpan.FromSeconds(60), "Load raw CRM values");
                 await AwaitWithTimeout(GetCurrentStats(), TimeSpan.FromSeconds(40), "Load current stats");
+                await AwaitWithTimeout(LoadCrmSelections(), TimeSpan.FromSeconds(25), "Load CRM selections");
+
+                if (!IsCoreDataReady)
+                {
+                    await AwaitWithTimeout(LoadElements(), TimeSpan.FromSeconds(20), "Retry load elements");
+                    await AwaitWithTimeout(LoadSecondaryPlotRowsAsync(), TimeSpan.FromSeconds(20), "Retry load pivot rows");
+                    await AwaitWithTimeout(LoadCrmSelections(), TimeSpan.FromSeconds(20), "Retry load CRM selections");
+                }
+
                 await AwaitWithTimeout(RefreshChartsAsync(), TimeSpan.FromSeconds(20), "Render charts");
             }
             catch (TimeoutException timeoutEx)
@@ -232,9 +272,15 @@ namespace WebUI.Pages.Process
             }
             finally
             {
+                _initialLoadCompleted = true;
                 _isLoading = false;
-                _loadingLock.Release();
-                StateHasChanged();
+                if (lockTaken)
+                {
+                    try { _loadingLock.Release(); } catch (ObjectDisposedException) { }
+                }
+
+                if (!_isDisposed)
+                    StateHasChanged();
             }
         }
 
@@ -1513,7 +1559,19 @@ namespace WebUI.Pages.Process
 
         private async Task SetFocusElement(string? el)
         {
-            if (!await _loadingLock.WaitAsync(TimeSpan.FromSeconds(2)))
+            if (_isDisposed) return;
+
+            bool lockTaken;
+            try
+            {
+                lockTaken = await _loadingLock.WaitAsync(TimeSpan.FromSeconds(2));
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
+
+            if (!lockTaken)
             {
                 Snackbar.Add("System is busy. Please wait...", Severity.Warning);
                 return;
@@ -1561,8 +1619,9 @@ namespace WebUI.Pages.Process
             }
             finally
             {
-                _loadingLock.Release();
-                StateHasChanged();
+                try { _loadingLock.Release(); } catch (ObjectDisposedException) { }
+                if (!_isDisposed)
+                    StateHasChanged();
             }
         }
         private async Task PrevElement()
@@ -1605,7 +1664,19 @@ namespace WebUI.Pages.Process
         private async Task RunCalibration()
         {
             if (!_projectId.HasValue) return;
-            if (!await _loadingLock.WaitAsync(0)) return;
+            if (_isDisposed) return;
+
+            bool lockTaken;
+            try
+            {
+                lockTaken = await _loadingLock.WaitAsync(0);
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
+
+            if (!lockTaken) return;
 
             _isLoading = true;
             try
@@ -1625,8 +1696,9 @@ namespace WebUI.Pages.Process
             finally
             {
                 _isLoading = false;
-                _loadingLock.Release();
-                StateHasChanged();
+                try { _loadingLock.Release(); } catch (ObjectDisposedException) { }
+                if (!_isDisposed)
+                    StateHasChanged();
             }
         }
 
@@ -1759,18 +1831,119 @@ namespace WebUI.Pages.Process
         private async Task LoadCrmReferenceData()
         {
             var r = await CrmService.GetCrmListAsync(pageSize: 0);
-            if (r.Succeeded)
+            var items = r.Data?.Items ?? new List<CrmListItemDto>();
+
+            if (r.Succeeded && items.Any())
             {
-                _crmReferenceById = r.Data.Items
+                _crmReferenceById = items
                     .GroupBy(x => x.CrmId)
                     .ToDictionary(g => g.Key, g => g.ToList());
+                return;
             }
+
+            _crmReferenceById = new Dictionary<string, List<CrmListItemDto>>(StringComparer.OrdinalIgnoreCase);
         }
 
         private async Task LoadCrmSelections()
         {
             var r = await OptimizationService.GetCrmSelectionOptionsAsync(_projectId!.Value);
-            if (r.Succeeded) _crmSelectionRows = r.Data.Items;
+            var apiRows = r.Data?.Items?.Where(x => x != null).ToList() ?? new List<CrmSelectionRowDto>();
+
+            if (r.Succeeded && apiRows.Any())
+            {
+                _crmSelectionRows = apiRows;
+                return;
+            }
+
+            var fallbackRows = BuildFallbackCrmSelectionRowsFromSecondary();
+            if (fallbackRows.Any())
+            {
+                _crmSelectionRows = fallbackRows;
+                if (r.Succeeded)
+                    Snackbar.Add("CRM options API returned empty list; fallback CRM rows loaded from data.", Severity.Warning);
+                else
+                    Snackbar.Add(r.Message ?? "CRM options API failed; fallback CRM rows loaded from data.", Severity.Warning);
+                return;
+            }
+
+            _crmSelectionRows = apiRows;
+            if (!r.Succeeded)
+                Snackbar.Add(r.Message ?? "Failed to load CRM rows.", Severity.Warning);
+        }
+
+        private List<CrmSelectionRowDto> BuildFallbackCrmSelectionRowsFromSecondary()
+        {
+            var rows = new List<CrmSelectionRowDto>();
+            if (_secondaryRows == null || _secondaryRows.Count == 0)
+                return rows;
+
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var row in _secondaryRows
+                .OrderBy(r => r.OriginalIndex)
+                .ThenBy(r => r.SetIndex))
+            {
+                var solutionLabel = row.SolutionLabel?.Trim() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(solutionLabel)) continue;
+                if (BlankLabelRegex.IsMatch(solutionLabel)) continue;
+
+                var crmMatch = CrmIdRegex.Match(solutionLabel);
+                if (!crmMatch.Success) continue;
+
+                var crmId = NormalizeCrmIdToken(crmMatch.Groups[1].Value);
+                if (string.IsNullOrWhiteSpace(crmId)) continue;
+
+                var rowKey = $"{solutionLabel}::{row.OriginalIndex}";
+                if (!seen.Add(rowKey))
+                    continue;
+
+                var options = BuildCrmMethodOptions(crmId);
+                if (!options.Any())
+                    options.Add($"V {crmId}");
+
+                rows.Add(new CrmSelectionRowDto
+                {
+                    SolutionLabel = solutionLabel,
+                    RowIndex = row.OriginalIndex,
+                    CrmId = crmId,
+                    PreferredOptions = options.ToList(),
+                    AllOptions = options.ToList(),
+                    SelectedOption = options.LastOrDefault()
+                });
+            }
+
+            return rows;
+        }
+
+        private List<string> BuildCrmMethodOptions(string crmId)
+        {
+            if (string.IsNullOrWhiteSpace(crmId))
+                return new List<string>();
+
+            var normalizedCrmId = NormalizeCrmIdToken(crmId);
+
+            var optionsFromKeys = _crmReferenceById.Keys
+                .Where(key => !string.IsNullOrWhiteSpace(key))
+                .Where(key => string.Equals(NormalizeCrmIdToken(key), normalizedCrmId, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (optionsFromKeys.Any())
+                return optionsFromKeys;
+
+            return _crmReferenceById.Values
+                .SelectMany(list => list)
+                .Where(item => !string.IsNullOrWhiteSpace(item.CrmId))
+                .Where(item => string.Equals(NormalizeCrmIdToken(item.CrmId), normalizedCrmId, StringComparison.OrdinalIgnoreCase))
+                .Select(item =>
+                    !string.IsNullOrWhiteSpace(item.AnalysisMethod)
+                        ? $"{item.CrmId.Trim()} ({item.AnalysisMethod.Trim()})"
+                        : item.CrmId.Trim())
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
 
 
@@ -2059,9 +2232,9 @@ namespace WebUI.Pages.Process
 
         public void Dispose()
         {
-            _loadingLock.Dispose();
-            _refreshCts?.Cancel();
-            _refreshCts?.Dispose();
+            _isDisposed = true;
+            try { _refreshCts?.Cancel(); } catch (ObjectDisposedException) { }
+            try { _refreshCts?.Dispose(); } catch (ObjectDisposedException) { }
         }
 
 
