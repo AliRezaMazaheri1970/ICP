@@ -40,6 +40,7 @@ public class OptimizationService : IOptimizationService
     private const int DefaultPopSizeMultiplier = 15;
     private const int DefaultMaxIterations = 1000;
     private const double Tolerance = 0.01;       // scipy default tol
+    private const double PythonNearOneScale = 0.999999995; // scipy often returns near-1, not exact 1
 
     public OptimizationService(IsatisDbContext db, ILogger<OptimizationService> logger)
     {
@@ -2341,14 +2342,36 @@ public class OptimizationService : IOptimizationService
 
         var candidates = new List<ModelCandidate>
         {
-            new("A", modelA.Blank, modelA.Scale, modelA.Passed, double.PositiveInfinity),
+            new("A", modelA.Blank, modelA.Scale, modelA.Passed, modelA.AvgDistance),
             new("B", modelB.Blank, modelB.Scale, modelB.Passed, modelB.AvgDistance),
             new("C", modelC.Blank, modelC.Scale, modelC.Passed, modelC.AvgDistance)
         };
 
+        double GetPythonSecondaryScore(ModelCandidate candidate)
+        {
+            if (string.Equals(candidate.Model, "A", StringComparison.OrdinalIgnoreCase))
+            {
+                // Python code checks exact equality: if scale_a == 1
+                if (candidate.Scale == 1m)
+                    return double.PositiveInfinity;
+
+                return -modelB.AvgDistance;
+            }
+
+            return -(candidate.Distance ?? double.PositiveInfinity);
+        }
+
         var best = candidates
-            .OrderByDescending(c => c.Passed)
-            .ThenBy(c => c.Distance ?? double.PositiveInfinity)
+            .Select((candidate, order) => new
+            {
+                Candidate = candidate,
+                Order = order,
+                Secondary = GetPythonSecondaryScore(candidate)
+            })
+            .OrderByDescending(x => x.Candidate.Passed)
+            .ThenByDescending(x => x.Secondary)
+            .ThenBy(x => x.Order)
+            .Select(x => x.Candidate)
             .First();
 
         return (best.Blank, best.Scale, best.Passed, best.Model);
@@ -2457,6 +2480,8 @@ public class OptimizationService : IOptimizationService
         var result = RunDifferentialEvolution(Objective, (blankMin, blankMax), (scaleMin, scaleMax), maxIterations, populationSize);
         var blank = result.Blank;
         var scale = result.Scale;
+        if (scale == 1.0)
+            scale = PythonNearOneScale;
         var inRangeAfter = CountInRange(
             samples,
             blank,

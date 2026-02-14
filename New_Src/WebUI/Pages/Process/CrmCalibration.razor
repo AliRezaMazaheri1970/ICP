@@ -113,16 +113,43 @@
                                 <MudText Typo="Typo.caption" Class="mt-2"><b>Blank & Scale Correction</b></MudText>
                                 <MudGrid Spacing="1">
                                     <MudItem xs="6">
-                                        <MudNumericField @bind-Value="_previewBlank" Label="Blank" Variant="Variant.Outlined" Margin="Margin.Dense" Step="0.01M" />
+                                        <MudNumericField T="decimal"
+                                                         Value="_previewBlank"
+                                                         ValueChanged="@(async (decimal v) => await OnPreviewBlankChanged(v))"
+                                                         Label="Blank"
+                                                         Variant="Variant.Outlined"
+                                                         Margin="Margin.Dense"
+                                                         Immediate="true"
+                                                         Step="0.01M" />
                                     </MudItem>
                                     <MudItem xs="6">
-                                        <MudNumericField @bind-Value="_previewScale" Label="Scale" Variant="Variant.Outlined" Margin="Margin.Dense" Step="0.01" />
+                                        <MudNumericField T="double"
+                                                         Value="_previewScale"
+                                                         ValueChanged="@(async (double v) => await OnPreviewScaleChanged(v))"
+                                                         Label="Scale"
+                                                         Variant="Variant.Outlined"
+                                                         Margin="Margin.Dense"
+                                                         Immediate="true"
+                                                         Step="0.01" />
                                     </MudItem>
                                 </MudGrid>
 
                                 <div class="px-2 mt-2">
                                     <MudSlider T="double" Value="_previewScale" ValueChanged="@(async (v) => await OnPreviewScaleChanged(v))" Min="0" Max="2" Step="0.01" Color="Color.Primary" />
                                 </div>
+                                <MudText Typo="Typo.caption" Class="mt-1">Scale: @_previewScale.ToString("F2")</MudText>
+                                <MudText Typo="Typo.caption" Class="mt-1">Blanks:</MudText>
+                                @if (_blankLabelsForFocus.Any())
+                                {
+                                    @foreach (var blankRow in _blankLabelsForFocus)
+                                    {
+                                        <MudText Typo="Typo.caption">@blankRow</MudText>
+                                    }
+                                }
+                                else
+                                {
+                                    <MudText Typo="Typo.caption">None</MudText>
+                                }
 
                                 <MudText Typo="Typo.caption" Class="mt-2"><b>Application Range</b></MudText>
 
@@ -164,10 +191,10 @@
                                 <div style="padding:10px 0;">
                                     <hr style="border: 1px solid #ccc" />
                                 </div>
-                                <MudItem xs="12">
+                                @* <MudItem xs="12"> *@
                                     @* FIX: Added T="bool" *@
-                                    <MudCheckBox T="bool" @bind-Checked="_useMultiModel" Label="Use Multi-Model (A/B/C)" Color="Color.Primary" Dense="true" />
-                                </MudItem>
+                                    @* <MudCheckBox T="bool" @bind-Checked="_useMultiModel" Label="Use Multi-Model (A/B/C)" Color="Color.Primary" Dense="true" /> *@
+                                @* </MudItem> *@
                                 <MudItem xs="12">
 
 
@@ -200,6 +227,7 @@
                                 @* Manual Actions *@
                                 <MudGrid Spacing="2">
                                     <MudItem xs="12"><MudButton OnClick="ApplyManualAsync" Variant="Variant.Filled" Color="Color.Success" FullWidth="true" Size="Size.Small">Apply</MudButton></MudItem>
+                                    <MudItem xs="12"><MudButton OnClick="ApplyOurModelAsync" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Size="Size.Small">Apply Our Model</MudButton></MudItem>
                                     <MudItem xs="6"><MudButton OnClick="ResetAll" Variant="Variant.Outlined" Color="Color.Default" FullWidth="true" Size="Size.Small">Reset</MudButton></MudItem>
                                     <MudItem xs="6"><MudButton OnClick="UndoManualAsync" Variant="Variant.Outlined" Color="Color.Error" FullWidth="true" Size="Size.Small">Undo</MudButton></MudItem>
                                 </MudGrid>

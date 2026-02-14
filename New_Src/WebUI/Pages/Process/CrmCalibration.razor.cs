@@ -40,7 +40,7 @@ namespace WebUI.Pages.Process
         private decimal _minDiff = -10m;
         private decimal _maxDiff = 10m;
         private int _maxIterations = 100;
-        private int _populationSize = 50;
+        private int _populationSize = 15;
         private bool _useMultiModel = true;
 
         // --- تنظیمات دستی (Manual) ---
@@ -51,6 +51,7 @@ namespace WebUI.Pages.Process
         private decimal? _scaleRangeMax;
         private bool _scaleAbove50Only = false;
         private string _excludedLabelsInput = string.Empty;
+        private readonly List<string> _blankLabelsForFocus = new();
 
         // متغیرهای جدید برای مدیریت فیلتر
         private string _filterText = "";
@@ -65,6 +66,7 @@ namespace WebUI.Pages.Process
         private List<CrmSelectionRowDto> _crmSelectionRows = new();
         private Dictionary<string, List<CrmListItemDto>> _crmReferenceById = new(StringComparer.OrdinalIgnoreCase);
         private List<RawCrmBaseValueRow> _rawCrmBaseValues = new();
+        private readonly List<RawBlankValueRow> _rawBlankValues = new();
 
         // --- وضعیت جدول Pivot ---
         private PivotValueMode _pivotMode = PivotValueMode.Crm;
@@ -94,7 +96,8 @@ namespace WebUI.Pages.Process
         private static readonly Regex CrmIdRegex = new(@"(?i)(?:\bCRM\b|\bOREAS\b|\bV\b)[^\d]*(\d+[a-zA-Z]?)", RegexOptions.Compiled);
         private static readonly Regex BlankLabelRegex = new(@"(?:CRM\s*)?(?:BLANK|BLNK)(?:\s+.*)?", RegexOptions.Compiled | RegexOptions.IgnoreCase);
         private static readonly Regex MultiWhitespaceRegex = new(@"\s+", RegexOptions.Compiled);
-        private static readonly Regex ElementWavelengthRegex = new(@"^([a-zA-Z]+)\s*(\d+\.?\d*)$", RegexOptions.Compiled);
+        private static readonly Regex ReplicaSuffixRegex = new(@"_(\d+)$", RegexOptions.Compiled);
+        private static readonly Regex ElementWavelengthRegex = new(@"^([a-zA-Z]+)\s*([0-9]+(?:\.[0-9]+)?)(?:_[0-9]+)?$", RegexOptions.Compiled);
 
         // ============================================================
         // مدل‌های داده داخلی (Models)
@@ -143,6 +146,14 @@ namespace WebUI.Pages.Process
             public decimal BaseValue { get; set; }
         }
 
+        private sealed class RawBlankValueRow
+        {
+            public int Sequence { get; set; }
+            public string SolutionLabel { get; set; } = "";
+            public string Element { get; set; } = "";
+            public decimal BlankValue { get; set; }
+        }
+
         // ============================================================
         // توابع کمکی برای کار با عناصر و طول موج‌ها
         // ============================================================
@@ -151,28 +162,36 @@ namespace WebUI.Pages.Process
         private static string NormalizeElementFull(string raw)
         {
             if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
-            return raw.Trim().ToLowerInvariant();
+            return StripReplicaSuffix(raw).Trim().ToLowerInvariant();
+        }
+
+        private static string StripReplicaSuffix(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+            return ReplicaSuffixRegex.Replace(raw.Trim(), string.Empty);
         }
 
         // استخراج فقط نام عنصر (بدون طول موج)
         private static string NormalizeElementName(string raw)
         {
             if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
-            var match = ElementWavelengthRegex.Match(raw.Trim());
+            var normalizedRaw = StripReplicaSuffix(raw);
+            var match = ElementWavelengthRegex.Match(normalizedRaw.Trim());
             if (match.Success)
             {
                 return match.Groups[1].Value.Trim().ToLowerInvariant();
             }
 
-            var parts = raw.Split(new[] { ' ', '_', '.' }, StringSplitOptions.RemoveEmptyEntries);
-            return parts.Length > 0 ? parts[0].Trim().ToLowerInvariant() : raw.Trim().ToLowerInvariant();
+            var parts = normalizedRaw.Split(new[] { ' ', '_', '.' }, StringSplitOptions.RemoveEmptyEntries);
+            return parts.Length > 0 ? parts[0].Trim().ToLowerInvariant() : normalizedRaw.Trim().ToLowerInvariant();
         }
 
         // استخراج طول موج از نام عنصر
         private static string NormalizeElementWavelength(string raw)
         {
             if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
-            var match = ElementWavelengthRegex.Match(raw.Trim());
+            var normalizedRaw = StripReplicaSuffix(raw);
+            var match = ElementWavelengthRegex.Match(normalizedRaw.Trim());
             if (match.Success)
             {
                 return match.Groups[2].Value.Trim();
@@ -305,6 +324,175 @@ namespace WebUI.Pages.Process
                 }
             }
             finally { _isLoading = false; }
+        }
+
+        private async Task ApplyOurModelAsync()
+        {
+            if (_projectId == null || string.IsNullOrWhiteSpace(_focusElement))
+            {
+                Snackbar.Add("Please select an element first.", Severity.Warning);
+                return;
+            }
+
+            if (_isDisposed) return;
+
+            bool lockTaken;
+            try
+            {
+                lockTaken = await _loadingLock.WaitAsync(0);
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
+
+            if (!lockTaken)
+            {
+                Snackbar.Add("System is busy. Please wait...", Severity.Info);
+                return;
+            }
+
+            _isLoading = true;
+            try
+            {
+                var request = new BlankScaleOptimizationRequest
+                {
+                    ProjectId = _projectId.Value,
+                    Elements = new List<string> { _focusElement },
+                    MinDiffPercent = _minDiff,
+                    MaxDiffPercent = _maxDiff,
+                    MaxIterations = _maxIterations,
+                    PopulationSize = _populationSize,
+                    UseMultiModel = true,
+                    PreviewOnly = true,
+                    RangeLow = _rangeLow,
+                    RangeMid = _rangeMid,
+                    RangeHigh1 = _rangeHigh1,
+                    RangeHigh2 = _rangeHigh2,
+                    RangeHigh3 = _rangeHigh3,
+                    RangeHigh4 = _rangeHigh4,
+                    ScaleRangeMin = null,
+                    ScaleRangeMax = null,
+                    ScaleAbove50Only = false,
+                    ExcludedSolutionLabels = null,
+                    CrmSelections = BuildCrmMethodSelectionByCrmId()
+                };
+
+                var result = await OptimizationService.OptimizeAsync(request);
+                if (!result.Succeeded || result.Data == null)
+                {
+                    Snackbar.Add(result.Message ?? "Model optimization failed.", Severity.Warning);
+                    return;
+                }
+
+                _result = result.Data;
+                _optimizedRows = BuildOptimizedRows(_result.OptimizedData, _focusElement);
+                ExtractElementsFromOptimizedData();
+
+                if (!TryGetElementOptimizationForFocus(result.Data, out var optimization))
+                {
+                    Snackbar.Add("Model completed, but no recommendation found for selected element.", Severity.Warning);
+                    await RefreshChartsAsync(refreshCalibration: true, refreshSecondary: true);
+                    return;
+                }
+
+                // Python behavior:
+                // blank_edit.setText(f"{recommended_blank:.3f}")  -> keep 3 decimals
+                // scale_slider.setValue(int(recommended_scale * 100)) -> truncate to 2 decimals
+                var recommendedBlank = optimization.Blank;
+                _previewBlank = Math.Round(recommendedBlank, 3, MidpointRounding.ToEven);
+
+                var recommendedScale = (double)optimization.Scale;
+                var clampedScale = Math.Clamp(recommendedScale, 0d, 2d);
+                var pythonUiScale = Math.Truncate(clampedScale * 100d) / 100d;
+                _previewScale = pythonUiScale;
+
+                await RefreshChartsAsync(refreshCalibration: true, refreshSecondary: true);
+
+                var modelUsed = string.IsNullOrWhiteSpace(optimization.SelectedModel) ? "A" : optimization.SelectedModel;
+                if (Math.Abs(pythonUiScale - recommendedScale) > 0.000001d || Math.Abs(_previewBlank - recommendedBlank) > 0.000001m)
+                {
+                    Snackbar.Add(
+                        $"Model {modelUsed} applied in preview. Blank {recommendedBlank:F6}→{_previewBlank:F3}, Scale {recommendedScale:F6}→{pythonUiScale:F2}.",
+                        Severity.Info);
+                }
+                else
+                {
+                    Snackbar.Add(
+                        $"Model {modelUsed} applied in preview. Blank={_previewBlank:F3}, Scale={_previewScale:F3}.",
+                        Severity.Success);
+                }
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Apply Our Model failed: {ex.Message}", Severity.Error);
+            }
+            finally
+            {
+                _isLoading = false;
+                try { _loadingLock.Release(); } catch (ObjectDisposedException) { }
+                if (!_isDisposed)
+                    StateHasChanged();
+            }
+        }
+
+        private Dictionary<string, string> BuildCrmMethodSelectionByCrmId()
+        {
+            var selections = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var row in _crmSelectionRows)
+            {
+                var crmId = NormalizeCrmIdToken(row.CrmId);
+                if (string.IsNullOrWhiteSpace(crmId))
+                {
+                    var crmMatch = CrmIdRegex.Match(row.SolutionLabel ?? string.Empty);
+                    if (crmMatch.Success)
+                        crmId = NormalizeCrmIdToken(crmMatch.Groups[1].Value);
+                }
+
+                if (string.IsNullOrWhiteSpace(crmId))
+                    continue;
+
+                var (_, methodHint) = ParseSelectedOption(row.SelectedOption);
+                if (string.IsNullOrWhiteSpace(methodHint))
+                    continue;
+
+                if (!selections.ContainsKey(crmId))
+                    selections[crmId] = methodHint.Trim();
+            }
+
+            return selections;
+        }
+
+        private bool TryGetElementOptimizationForFocus(BlankScaleOptimizationResult result, out ElementOptimization optimization)
+        {
+            optimization = new ElementOptimization();
+            if (result.ElementOptimizations == null || result.ElementOptimizations.Count == 0 || string.IsNullOrWhiteSpace(_focusElement))
+                return false;
+
+            if (result.ElementOptimizations.TryGetValue(_focusElement, out var direct))
+            {
+                optimization = direct;
+                return true;
+            }
+
+            var pairMatch = result.ElementOptimizations
+                .FirstOrDefault(kvp => string.Equals(kvp.Key, _focusElement, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(pairMatch.Key))
+            {
+                optimization = pairMatch.Value;
+                return true;
+            }
+
+            var valueMatch = result.ElementOptimizations.Values
+                .FirstOrDefault(item => string.Equals(item.Element, _focusElement, StringComparison.OrdinalIgnoreCase));
+            if (valueMatch != null)
+            {
+                optimization = valueMatch;
+                return true;
+            }
+
+            return false;
         }
 
         private async Task UndoManualAsync()
@@ -498,33 +686,31 @@ namespace WebUI.Pages.Process
                         crmToken = NormalizeCrmIdToken(crmFromLabel.Groups[1].Value);
                     }
 
-                    // پیدا کردن مقدار اصلی
+                    // پیدا کردن مقدار اصلی:
+                    // برای همسانی با Python اولویت با داده خام (Soln Conc / base value) است.
                     decimal rawValue = 0;
-                    bool foundRawValue = false;
+                    var foundRawValue = false;
 
-                    // اول از داده‌های بهینه‌سازی بگیر
-                    if (TryGetElementValueExact(sample.OriginalValues, _focusElement, out var rawValueMaybe) && rawValueMaybe.HasValue)
+                    if (TryDequeueRawBaseValue(solutionLabel, crmToken, rawValuesByLabel, rawValuesByCrmId, out rawValue))
+                    {
+                        foundRawValue = true;
+                        Console.WriteLine($"  Raw value from base values: {rawValue}");
+                    }
+
+                    // fallback: اگر داده خام موجود نبود، از originalValues استفاده کن.
+                    if (!foundRawValue &&
+                        TryGetElementValueExact(sample.OriginalValues, _focusElement, out var rawValueMaybe) &&
+                        rawValueMaybe.HasValue)
                     {
                         rawValue = rawValueMaybe.Value;
                         foundRawValue = true;
                         Console.WriteLine($"  Raw value from original: {rawValue}");
                     }
-                    else if (TryGetElementValueExact(sample.OptimizedValues, _focusElement, out rawValueMaybe) && rawValueMaybe.HasValue)
-                    {
-                        rawValue = rawValueMaybe.Value;
-                        foundRawValue = true;
-                        Console.WriteLine($"  Raw value from optimized: {rawValue}");
-                    }
 
-                    // اگر پیدا نکردی، از داده‌های خام بگیر
                     if (!foundRawValue)
                     {
-                        if (!TryDequeueRawBaseValue(solutionLabel, crmToken, rawValuesByLabel, rawValuesByCrmId, out rawValue))
-                        {
-                            Console.WriteLine($"  Could not find raw value for {_focusElement}");
-                            continue;
-                        }
-                        Console.WriteLine($"  Raw value from base values: {rawValue}");
+                        Console.WriteLine($"  Could not find raw value for {_focusElement}");
+                        continue;
                     }
 
                     // پیدا کردن مقدار مرجع CRM
@@ -884,13 +1070,14 @@ namespace WebUI.Pages.Process
             var correctedPoints = new List<object>();
             var xValues = new List<double>();
 
-            foreach (var row in filteredRows)
+            for (var plotIndex = 0; plotIndex < filteredRows.Count; plotIndex++)
             {
+                var row = filteredRows[plotIndex];
                 if (!TryGetElementValueExact(row.Values, _focusElement, out var valueMaybe))
                     continue;
 
                 var rawValue = valueMaybe ?? 0m;
-                var x = (double)row.OriginalIndex;
+                var x = (double)plotIndex;
                 var y = (double)rawValue;
                 var corrected = (double)((rawValue - _previewBlank) * (decimal)_previewScale);
 
@@ -1076,6 +1263,7 @@ namespace WebUI.Pages.Process
         private async Task LoadRawCrmBaseValuesAsync()
         {
             _rawCrmBaseValues.Clear();
+            _rawBlankValues.Clear();
             if (!_projectId.HasValue) return;
 
             const int pageSize = 2000;
@@ -1093,6 +1281,9 @@ namespace WebUI.Pages.Process
 
                 foreach (var rawRow in result.Data)
                 {
+                    if (TryParseRawBlankValueRow(rawRow.ColumnData, sequence, out var parsedBlank) && parsedBlank != null)
+                        _rawBlankValues.Add(parsedBlank);
+
                     if (TryParseRawCrmBaseValueRow(rawRow.ColumnData, sequence, out var parsed) && parsed != null)
                         _rawCrmBaseValues.Add(parsed);
 
@@ -1102,6 +1293,8 @@ namespace WebUI.Pages.Process
                 if (result.Data.Count < pageSize) break;
                 skip += result.Data.Count;
             }
+
+            UpdateBlankLabelsForFocusElement();
         }
 
         private static bool TryParseRawCrmBaseValueRow(string? columnData, int sequence, out RawCrmBaseValueRow? row)
@@ -1168,6 +1361,65 @@ namespace WebUI.Pages.Process
             }
         }
 
+        private static bool TryParseRawBlankValueRow(string? columnData, int sequence, out RawBlankValueRow? row)
+        {
+            row = null;
+            if (string.IsNullOrWhiteSpace(columnData)) return false;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(columnData);
+                if (doc.RootElement.ValueKind != JsonValueKind.Object) return false;
+
+                var jsonMap = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+                foreach (var prop in doc.RootElement.EnumerateObject())
+                    jsonMap[prop.Name] = prop.Value;
+
+                var solutionLabel = GetJsonString(jsonMap, "Solution Label", "SolutionLabel", "Sample ID", "SampleId", "Sample", "Label", "Name");
+                if (string.IsNullOrWhiteSpace(solutionLabel)) return false;
+                if (!BlankLabelRegex.IsMatch(solutionLabel)) return false;
+
+                var element = GetJsonString(jsonMap, "Element");
+                if (string.IsNullOrWhiteSpace(element)) return false;
+
+                var solnConc = GetJsonDecimal(jsonMap, "Soln Conc", "SolnConc");
+                var actVol = GetJsonDecimal(jsonMap, "Act Vol", "ActVol");
+                var actWgt = GetJsonDecimal(jsonMap, "Act Wgt", "ActWgt");
+                var df = GetJsonDecimal(jsonMap, "DF");
+                var corrCon = GetJsonDecimal(jsonMap, "Corr Con", "CorrCon", "Concentration", "Conc", "Calibrated Conc");
+
+                decimal? blankValue = null;
+                if (solnConc.HasValue)
+                {
+                    var factor = 1m;
+                    if (actVol.HasValue && actWgt.HasValue && actWgt.Value != 0m)
+                        factor = actVol.Value / actWgt.Value;
+
+                    if (df.HasValue)
+                        factor *= df.Value;
+
+                    blankValue = solnConc.Value * factor;
+                }
+
+                blankValue ??= corrCon ?? solnConc;
+                if (!blankValue.HasValue) return false;
+
+                row = new RawBlankValueRow
+                {
+                    Sequence = sequence,
+                    SolutionLabel = solutionLabel.Trim(),
+                    Element = element.Trim(),
+                    BlankValue = blankValue.Value
+                };
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private (Dictionary<string, Queue<decimal>> ByLabel, Dictionary<string, Queue<decimal>> ByCrmId) BuildRawBaseValueQueuesForFocusElement()
         {
             var byLabel = new Dictionary<string, Queue<decimal>>(StringComparer.OrdinalIgnoreCase);
@@ -1178,19 +1430,29 @@ namespace WebUI.Pages.Process
 
             var normalizedFocusElement = NormalizeElementFull(_focusElement);
             var focusElementName = NormalizeElementName(_focusElement);
+            var focusWavelength = NormalizeElementWavelength(_focusElement);
+            var hasFocusWavelength = !string.IsNullOrWhiteSpace(focusWavelength);
 
             foreach (var row in _rawCrmBaseValues.OrderBy(r => r.Sequence))
             {
                 var rowElementFull = NormalizeElementFull(row.Element);
                 var rowElementName = NormalizeElementName(row.Element);
+                var rowWavelength = NormalizeElementWavelength(row.Element);
 
-                // تطبیق دقیق با نام کامل عنصر و طول موج
-                bool isMatch = string.Equals(rowElementFull, normalizedFocusElement, StringComparison.OrdinalIgnoreCase);
+                var isMatch = string.Equals(rowElementFull, normalizedFocusElement, StringComparison.OrdinalIgnoreCase);
 
-                // اگر تطبیق کامل نبود، فقط با نام عنصر تطبیق ده
                 if (!isMatch)
                 {
-                    isMatch = string.Equals(rowElementName, focusElementName, StringComparison.OrdinalIgnoreCase);
+                    if (hasFocusWavelength)
+                    {
+                        isMatch =
+                            string.Equals(rowElementName, focusElementName, StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(rowWavelength, focusWavelength, StringComparison.OrdinalIgnoreCase);
+                    }
+                    else
+                    {
+                        isMatch = string.Equals(rowElementName, focusElementName, StringComparison.OrdinalIgnoreCase);
+                    }
                 }
 
                 if (!isMatch) continue;
@@ -1214,6 +1476,46 @@ namespace WebUI.Pages.Process
             }
 
             return (byLabel, byCrmId);
+        }
+
+        private void UpdateBlankLabelsForFocusElement()
+        {
+            _blankLabelsForFocus.Clear();
+
+            if (string.IsNullOrWhiteSpace(_focusElement) || !_rawBlankValues.Any())
+                return;
+
+            var normalizedFocusElement = NormalizeElementFull(_focusElement);
+            var focusElementName = NormalizeElementName(_focusElement);
+            var focusWavelength = NormalizeElementWavelength(_focusElement);
+            var hasFocusWavelength = !string.IsNullOrWhiteSpace(focusWavelength);
+
+            foreach (var row in _rawBlankValues.OrderBy(r => r.Sequence))
+            {
+                var rowElementFull = NormalizeElementFull(row.Element);
+                var rowElementName = NormalizeElementName(row.Element);
+                var rowWavelength = NormalizeElementWavelength(row.Element);
+
+                var isMatch = string.Equals(rowElementFull, normalizedFocusElement, StringComparison.OrdinalIgnoreCase);
+
+                if (!isMatch)
+                {
+                    if (hasFocusWavelength)
+                    {
+                        isMatch =
+                            string.Equals(rowElementName, focusElementName, StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(rowWavelength, focusWavelength, StringComparison.OrdinalIgnoreCase);
+                    }
+                    else
+                    {
+                        isMatch = string.Equals(rowElementName, focusElementName, StringComparison.OrdinalIgnoreCase);
+                    }
+                }
+
+                if (!isMatch) continue;
+
+                _blankLabelsForFocus.Add($"{row.SolutionLabel}: {row.BlankValue:0.###}");
+            }
         }
 
         private static bool TryDequeueRawBaseValue(
@@ -1326,6 +1628,8 @@ namespace WebUI.Pages.Process
         {
             v = null;
             if (values == null || string.IsNullOrEmpty(el)) return false;
+            static string NormalizeLookup(string raw) =>
+                MultiWhitespaceRegex.Replace((raw ?? string.Empty).Replace('_', ' ').Trim(), " ");
 
             // 1. تطبیق دقیق - مهمترین حالت
             if (values.TryGetValue(el, out v))
@@ -1341,6 +1645,33 @@ namespace WebUI.Pages.Process
             {
                 v = exactMatch.Value;
                 return true;
+            }
+
+            var normalizedTarget = NormalizeLookup(el);
+            var normalizedMatch = values.FirstOrDefault(kvp =>
+                string.Equals(NormalizeLookup(kvp.Key), normalizedTarget, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrEmpty(normalizedMatch.Key))
+            {
+                v = normalizedMatch.Value;
+                return true;
+            }
+
+            var targetName = NormalizeElementName(el);
+            var targetWave = NormalizeElementWavelength(el);
+            if (!string.IsNullOrWhiteSpace(targetWave))
+            {
+                var waveMatches = values.Where(kvp =>
+                    string.Equals(NormalizeElementName(kvp.Key), targetName, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(NormalizeElementWavelength(kvp.Key), targetWave, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                if (waveMatches.Count > 0)
+                {
+                    v = waveMatches[0].Value;
+                    return true;
+                }
+
+                return false;
             }
 
             // 3. اگر el شامل فاصله است (مثلاً "Ag 328.068")
@@ -1609,6 +1940,7 @@ namespace WebUI.Pages.Process
                     }
                 }
 
+                UpdateBlankLabelsForFocusElement();
                 await LoadSecondaryPlotRowsAsync();
                 await RefreshChartsAsync();
             }
@@ -1824,6 +2156,8 @@ namespace WebUI.Pages.Process
                 Console.WriteLine($"Focus element set to: {_focusElement}");
             }
 
+            UpdateBlankLabelsForFocusElement();
+
             Console.WriteLine("=== LoadElements END ===");
         }
 
@@ -2025,6 +2359,7 @@ namespace WebUI.Pages.Process
             {
                 Console.WriteLine($"Failed to load pivot rows: {r.Message}");
             }
+            UpdateBlankLabelsForFocusElement();
             Console.WriteLine("=== LoadSecondaryPlotRowsAsync END ===");
         }
 
@@ -2083,6 +2418,7 @@ namespace WebUI.Pages.Process
                 Console.WriteLine($"  '{key}'");
             }
 
+            UpdateBlankLabelsForFocusElement();
             Console.WriteLine("=== ExtractElementsFromOptimizedData END ===");
         }
 
@@ -2149,9 +2485,15 @@ namespace WebUI.Pages.Process
                     });
             });
 
+        private async Task OnPreviewBlankChanged(decimal v)
+        {
+            _previewBlank = v;
+            await RefreshChartsAsync(refreshCalibration: true, refreshSecondary: true);
+        }
+
         private async Task OnPreviewScaleChanged(double v)
         {
-            _previewScale = v;
+            _previewScale = Math.Clamp(v, 0d, 2d);
             await RefreshChartsAsync(refreshCalibration: true, refreshSecondary: true);
         }
 
