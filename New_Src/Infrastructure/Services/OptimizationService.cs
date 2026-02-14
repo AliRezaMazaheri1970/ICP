@@ -28,7 +28,7 @@ public class OptimizationService : IOptimizationService
     private Random _random;
     private static readonly string[] CrmIds = { "258", "252", "906", "506", "233", "255", "263", "260" };
     private static readonly Regex CrmPattern = new Regex(
-        $@"(?i)(?:(?:^|(?<=\s))(?:CRM|OREAS)?\s*({string.Join("|", CrmIds)})(?:[a-zA-Z0-9]{{0,2}})?\b)",
+        $@"(?i)(?:(?:^|(?<=\s))(?:CRM|OREAS|V)?\s*(({string.Join("|", CrmIds)})[a-zA-Z]?)(?:[a-zA-Z0-9]{{0,2}})?\b)",
         RegexOptions.Compiled);
     private static readonly Regex BlankPattern = new Regex(
         @"(?i)(?:CRM\s*)?(?:BLANK|BLNK|Blank|blnk|blank)(?:\s+.*)?",
@@ -94,7 +94,7 @@ public class OptimizationService : IOptimizationService
             if (includedCrmIds != null && includedCrmIds.Count > 0)
             {
                 matchedData = matchedData
-                    .Where(m => includedCrmIds.Contains(ExtractCrmIdNumber(m.CrmId)))
+                    .Where(m => IsCrmIncluded(includedCrmIds, m.CrmId))
                     .ToList();
             }
             if (matchedData.Count == 0)
@@ -490,13 +490,14 @@ public class OptimizationService : IOptimizationService
                 5.0m,
                 3.0m);
             var matchedData = MatchWithCrm(projectData, crmMaps, rowSelections);
+            var baselineData = CreateUncorrectedMatchedData(matchedData);
 
             if (matchedData.Count == 0)
                 return Result<BlankScaleOptimizationResult>.Fail("No matching CRM data found");
 
-            var elements = GetCommonElements(matchedData);
+            var elements = GetCommonElements(baselineData);
             var stats = CalculateStatistics(
-                matchedData,
+                baselineData,
                 elements,
                 0m,
                 1m,
@@ -527,7 +528,7 @@ public class OptimizationService : IOptimizationService
             var scales = elements.ToDictionary(e => e, _ => 1m, StringComparer.OrdinalIgnoreCase);
 
             var optimizedData = BuildOptimizedData(
-                matchedData,
+                baselineData,
                 elements,
                 blanks,
                 scales,
@@ -702,17 +703,19 @@ public class OptimizationService : IOptimizationService
         }
     }
 
-    private async Task<Dictionary<string, string>> GetCrmSelectionMapAsync(Guid projectId)
+    private async Task<Dictionary<string, CrmSelectionState>> GetCrmSelectionMapAsync(Guid projectId)
     {
         var rows = await _db.CrmSelections.AsNoTracking()
             .Where(s => s.ProjectId == projectId)
             .ToListAsync();
 
-        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var map = new Dictionary<string, CrmSelectionState>(StringComparer.OrdinalIgnoreCase);
         foreach (var row in rows)
         {
             var key = BuildRowKey(row.SolutionLabel, row.RowIndex);
-            map[key] = row.SelectedCrmKey;
+            map[key] = new CrmSelectionState(
+                row.SelectedCrmKey,
+                !string.IsNullOrWhiteSpace(row.SelectedBy));
         }
 
         return map;
@@ -721,7 +724,7 @@ public class OptimizationService : IOptimizationService
     private async Task<List<CrmSelectionRowDto>> BuildCrmSelectionRowsAsync(
         Guid projectId,
         CrmDataMaps crmMaps,
-        Dictionary<string, string> selections)
+        Dictionary<string, CrmSelectionState> selections)
     {
         var pivotRows = await LoadPivotRowsAsync(projectId);
         var result = new List<CrmSelectionRowDto>();
@@ -733,28 +736,28 @@ public class OptimizationService : IOptimizationService
             if (crmId == null)
                 continue;
 
-            if (!crmMaps.AllKeysByNumber.TryGetValue(crmId, out var allKeys) || allKeys.Count == 0)
+            var allKeys = GetCrmCandidateKeys(crmId, crmMaps);
+            if (allKeys.Count == 0)
                 continue;
 
-            var preferred = crmMaps.PreferredKeysByNumber.TryGetValue(crmId, out var pref) && pref.Count > 0
-                ? pref
-                : allKeys;
-            var preferredOrdered = preferred.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
-            var allOrdered = allKeys.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+            var allOrdered = OrderCrmKeysByPreference(allKeys, crmMaps);
+            var preferredOrdered = allOrdered
+                .Where(k => GetMethodPreferenceRank(crmMaps.KeyToMethod.GetValueOrDefault(k)) < 2)
+                .ToList();
+            if (preferredOrdered.Count == 0)
+                preferredOrdered = allOrdered.ToList();
 
             var rowKey = BuildRowKey(row.SolutionLabel, row.RowIndex);
             if (added.Contains(rowKey))
                 continue;
 
-            selections.TryGetValue(rowKey, out var selectedKey);
-            if (preferredOrdered.Count > 0)
-            {
-                if (string.IsNullOrWhiteSpace(selectedKey) ||
-                    !preferredOrdered.Contains(selectedKey, StringComparer.OrdinalIgnoreCase))
-                {
-                    selectedKey = preferredOrdered[^1];
-                }
-            }
+            selections.TryGetValue(rowKey, out var selectionState);
+            var selectedKey = ResolveSelectedCrmKey(
+                crmId,
+                selectionState?.SelectedCrmKey,
+                selectionState?.IsManual ?? false,
+                crmMaps,
+                allOrdered);
 
             result.Add(new CrmSelectionRowDto(
                 row.SolutionLabel,
@@ -772,20 +775,52 @@ public class OptimizationService : IOptimizationService
 
     private async Task SaveDefaultCrmSelectionsAsync(Guid projectId, List<CrmSelectionRowDto> rows)
     {
-        var defaults = rows
-            .Where(r => !string.IsNullOrWhiteSpace(r.SelectedOption))
-            .Select(r => new CrmSelectionItemDto(r.SolutionLabel, r.RowIndex, r.SelectedOption!))
-            .ToList();
-
-        if (defaults.Count == 0)
+        if (rows.Count == 0)
             return;
 
-        var request = new CrmSelectionSaveRequest(projectId, defaults);
-        var result = await SaveCrmSelectionsAsync(request, null);
-        if (!result.Succeeded)
+        var existing = await _db.CrmSelections
+            .Where(s => s.ProjectId == projectId)
+            .ToListAsync();
+
+        var changed = false;
+        foreach (var row in rows)
         {
-            _logger.LogWarning("Failed to auto-save default CRM selections for project {ProjectId}.", projectId);
+            if (string.IsNullOrWhiteSpace(row.SelectedOption))
+                continue;
+
+            var match = existing.FirstOrDefault(e =>
+                string.Equals(e.SolutionLabel, row.SolutionLabel, StringComparison.OrdinalIgnoreCase) &&
+                e.RowIndex == row.RowIndex);
+
+            if (match == null)
+            {
+                _db.CrmSelections.Add(new CrmSelection
+                {
+                    ProjectId = projectId,
+                    SolutionLabel = row.SolutionLabel,
+                    RowIndex = row.RowIndex,
+                    SelectedCrmKey = row.SelectedOption!,
+                    SelectedBy = null,
+                    SelectedAt = DateTime.UtcNow
+                });
+                changed = true;
+                continue;
+            }
+
+            var isManual = !string.IsNullOrWhiteSpace(match.SelectedBy);
+            if (isManual)
+                continue;
+
+            if (!string.Equals(match.SelectedCrmKey, row.SelectedOption, StringComparison.OrdinalIgnoreCase))
+            {
+                match.SelectedCrmKey = row.SelectedOption!;
+                match.SelectedAt = DateTime.UtcNow;
+                changed = true;
+            }
         }
+
+        if (changed)
+            await _db.SaveChangesAsync();
     }
 
     public async Task<object> GetDebugSamplesAsync(Guid projectId)
@@ -1377,7 +1412,11 @@ public class OptimizationService : IOptimizationService
             return null;
 
         var match = CrmPattern.Match(label);
-        return match.Success ? match.Groups[1].Value : null;
+        if (!match.Success)
+            return null;
+
+        var token = match.Groups[1].Value;
+        return string.IsNullOrWhiteSpace(token) ? null : NormalizeCrmToken(token);
     }
 
     private static string ExtractCrmIdNumber(string crmId)
@@ -1386,7 +1425,27 @@ public class OptimizationService : IOptimizationService
             return string.Empty;
 
         var match = Regex.Match(crmId, @"(\d+)", RegexOptions.IgnoreCase);
-        return match.Success ? match.Groups[1].Value : crmId;
+        return match.Success ? match.Groups[1].Value : NormalizeCrmToken(crmId);
+    }
+
+    private static string NormalizeCrmToken(string crmId)
+    {
+        return string.IsNullOrWhiteSpace(crmId)
+            ? string.Empty
+            : crmId.Trim().ToLowerInvariant();
+    }
+
+    private static bool IsCrmIncluded(HashSet<string>? includedCrmIds, string crmId)
+    {
+        if (includedCrmIds == null || includedCrmIds.Count == 0)
+            return true;
+
+        var token = NormalizeCrmToken(crmId);
+        if (includedCrmIds.Contains(token))
+            return true;
+
+        var numeric = ExtractCrmIdNumber(token);
+        return includedCrmIds.Contains(numeric);
     }
 
     private static string BuildCrmSelectionKey(CrmData crm)
@@ -1398,11 +1457,83 @@ public class OptimizationService : IOptimizationService
     private static string BuildRowKey(string solutionLabel, int rowIndex)
         => $"{solutionLabel}::{rowIndex}";
 
+    private static int GetMethodPreferenceRank(string? method)
+    {
+        if (string.IsNullOrWhiteSpace(method))
+            return 3;
+
+        if (method.Contains("4-Acid", StringComparison.OrdinalIgnoreCase))
+            return 0;
+
+        if (method.Contains("Aqua Regia", StringComparison.OrdinalIgnoreCase))
+            return 1;
+
+        if (method.Contains("Pb Fire", StringComparison.OrdinalIgnoreCase))
+            return 2;
+
+        return 3;
+    }
+
+    private static List<string> OrderCrmKeysByPreference(IEnumerable<string> keys, CrmDataMaps crmMaps)
+    {
+        return keys
+            .Where(k => !string.IsNullOrWhiteSpace(k))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(k => GetMethodPreferenceRank(crmMaps.KeyToMethod.GetValueOrDefault(k)))
+            .ThenBy(k => k, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static List<string> GetCrmCandidateKeys(string crmId, CrmDataMaps crmMaps)
+    {
+        if (string.IsNullOrWhiteSpace(crmId))
+            return new List<string>();
+
+        if (crmMaps.AllKeysByNumber.TryGetValue(crmId, out var exact) && exact.Count > 0)
+            return exact;
+
+        var numeric = ExtractCrmIdNumber(crmId);
+        if (!string.IsNullOrWhiteSpace(numeric) &&
+            crmMaps.AllKeysByNumber.TryGetValue(numeric, out var byNumeric) &&
+            byNumeric.Count > 0)
+            return byNumeric;
+
+        return new List<string>();
+    }
+
+    private static string? ResolveSelectedCrmKey(
+        string crmId,
+        string? selectedKey,
+        bool isManualSelection,
+        CrmDataMaps crmMaps,
+        List<string> candidateKeysOrdered)
+    {
+        if (candidateKeysOrdered.Count == 0)
+            candidateKeysOrdered = OrderCrmKeysByPreference(GetCrmCandidateKeys(crmId, crmMaps), crmMaps);
+        if (candidateKeysOrdered.Count == 0)
+            return null;
+
+        var bestPreferred = candidateKeysOrdered.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(bestPreferred))
+            return candidateKeysOrdered[0];
+
+        if (string.IsNullOrWhiteSpace(selectedKey) ||
+            !candidateKeysOrdered.Contains(selectedKey, StringComparer.OrdinalIgnoreCase))
+            return bestPreferred;
+
+        if (isManualSelection)
+            return selectedKey;
+
+        var selectedRank = GetMethodPreferenceRank(crmMaps.KeyToMethod.GetValueOrDefault(selectedKey));
+        var bestRank = GetMethodPreferenceRank(crmMaps.KeyToMethod.GetValueOrDefault(bestPreferred));
+        return selectedRank <= bestRank ? selectedKey : bestPreferred;
+    }
+
     private Dictionary<string, decimal> ComputeBestBlankValues(
         List<PivotRow> rows,
         CrmDataMaps crmMaps,
         HashSet<string>? includedCrmIds,
-        Dictionary<string, string>? rowSelections,
+        Dictionary<string, CrmSelectionState>? rowSelections,
         decimal rangeLow,
         decimal rangeMid,
         decimal rangeHigh1,
@@ -1439,15 +1570,20 @@ public class OptimizationService : IOptimizationService
             var crmId = ExtractCrmId(row.SolutionLabel);
             if (crmId == null)
                 continue;
-            if (includedCrmIds != null && includedCrmIds.Count > 0 && !includedCrmIds.Contains(crmId))
+            if (!IsCrmIncluded(includedCrmIds, crmId))
                 continue;
 
             var rowKey = BuildRowKey(row.SolutionLabel, row.RowIndex);
             string? selectedKey = null;
-            if (rowSelections != null && rowSelections.TryGetValue(rowKey, out var selectionValue))
-                selectedKey = selectionValue;
-            if (string.IsNullOrWhiteSpace(selectedKey))
-                crmMaps.DefaultKeyByNumber.TryGetValue(crmId, out selectedKey);
+            var isManual = false;
+            if (rowSelections != null && rowSelections.TryGetValue(rowKey, out var selection))
+            {
+                selectedKey = selection.SelectedCrmKey;
+                isManual = selection.IsManual;
+            }
+
+            var allOrdered = OrderCrmKeysByPreference(GetCrmCandidateKeys(crmId, crmMaps), crmMaps);
+            selectedKey = ResolveSelectedCrmKey(crmId, selectedKey, isManual, crmMaps, allOrdered);
 
             if (string.IsNullOrWhiteSpace(selectedKey) || !crmMaps.ByKey.TryGetValue(selectedKey!, out var crmValues))
                 continue;
@@ -1716,7 +1852,7 @@ public class OptimizationService : IOptimizationService
         Guid projectId,
         CrmDataMaps crmMaps,
         HashSet<string>? includedCrmIds,
-        Dictionary<string, string>? rowSelections,
+        Dictionary<string, CrmSelectionState>? rowSelections,
         decimal rangeLow,
         decimal rangeMid,
         decimal rangeHigh1,
@@ -1747,7 +1883,7 @@ public class OptimizationService : IOptimizationService
             var crmId = ExtractCrmId(row.SolutionLabel);
             if (crmId == null)
                 continue;
-            if (includedCrmIds != null && includedCrmIds.Count > 0 && !includedCrmIds.Contains(crmId))
+            if (!IsCrmIncluded(includedCrmIds, crmId))
                 continue;
 
             if (row.Values.Count == 0)
@@ -1787,8 +1923,11 @@ public class OptimizationService : IOptimizationService
             if (string.IsNullOrWhiteSpace(crm.CrmId))
                 continue;
 
-            var number = ExtractCrmIdNumber(crm.CrmId);
-            if (string.IsNullOrWhiteSpace(number))
+            var crmToken = ExtractCrmId(crm.CrmId);
+            if (string.IsNullOrWhiteSpace(crmToken))
+                crmToken = ExtractCrmIdNumber(crm.CrmId);
+
+            if (string.IsNullOrWhiteSpace(crmToken))
                 continue;
 
             var key = BuildCrmSelectionKey(crm);
@@ -1809,17 +1948,17 @@ public class OptimizationService : IOptimizationService
 
             byKey[key] = new Dictionary<string, decimal>(values, StringComparer.OrdinalIgnoreCase);
 
-            if (!allKeysByNumber.TryGetValue(number, out var allList))
+            if (!allKeysByNumber.TryGetValue(crmToken, out var allList))
             {
                 allList = new List<string>();
-                allKeysByNumber[number] = allList;
+                allKeysByNumber[crmToken] = allList;
             }
             allList.Add(key);
 
-            if (!methodOrderByNumber.TryGetValue(number, out var methodList))
+            if (!methodOrderByNumber.TryGetValue(crmToken, out var methodList))
             {
                 methodList = new List<string>();
-                methodOrderByNumber[number] = methodList;
+                methodOrderByNumber[crmToken] = methodList;
             }
             if (!string.IsNullOrWhiteSpace(crm.AnalysisMethod) &&
                 !methodList.Contains(crm.AnalysisMethod, StringComparer.OrdinalIgnoreCase))
@@ -1830,10 +1969,10 @@ public class OptimizationService : IOptimizationService
             if (!string.IsNullOrWhiteSpace(crm.AnalysisMethod) &&
                 preferredMethods.Any(m => string.Equals(m, crm.AnalysisMethod, StringComparison.OrdinalIgnoreCase)))
             {
-                if (!preferredKeysByNumber.TryGetValue(number, out var prefList))
+                if (!preferredKeysByNumber.TryGetValue(crmToken, out var prefList))
                 {
                     prefList = new List<string>();
-                    preferredKeysByNumber[number] = prefList;
+                    preferredKeysByNumber[crmToken] = prefList;
                 }
                 prefList.Add(key);
             }
@@ -1844,41 +1983,33 @@ public class OptimizationService : IOptimizationService
         foreach (var kvp in allKeysByNumber)
         {
             var number = kvp.Key;
-            var allKeys = kvp.Value.OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToList();
-            var prefKeys = preferredKeysByNumber.TryGetValue(number, out var pref)
-                ? pref.OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToList()
-                : new List<string>();
-            var methodOrder = methodOrderByNumber.TryGetValue(number, out var methods)
-                ? methods
-                : new List<string>();
+            var allKeys = kvp.Value
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(k => GetMethodPreferenceRank(keyToMethod.GetValueOrDefault(k)))
+                .ThenBy(k => k, StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
             string? selected = null;
-            if (crmSelections != null && crmSelections.TryGetValue(number, out var selectedMethod))
+            if (crmSelections != null)
             {
-                selected = allKeys.FirstOrDefault(k =>
-                    string.Equals(keyToMethod.GetValueOrDefault(k), selectedMethod, StringComparison.OrdinalIgnoreCase));
-            }
-
-            if (string.IsNullOrWhiteSpace(selected))
-            {
-                string? chosenMethod = null;
-                if (methodOrder.Count > 0)
+                string? selectedMethod = null;
+                if (crmSelections.TryGetValue(number, out var byToken))
+                    selectedMethod = byToken;
+                else
                 {
-                    chosenMethod = methodOrder.FirstOrDefault(m =>
-                        preferredMethods.Any(p => string.Equals(p, m, StringComparison.OrdinalIgnoreCase)))
-                        ?? methodOrder[0];
+                    var numericKey = ExtractCrmIdNumber(number);
+                    if (!string.IsNullOrWhiteSpace(numericKey) && crmSelections.TryGetValue(numericKey, out var byNumeric))
+                        selectedMethod = byNumeric;
                 }
 
-                if (!string.IsNullOrWhiteSpace(chosenMethod))
+                if (!string.IsNullOrWhiteSpace(selectedMethod))
                 {
-                    var matches = allKeys
-                        .Where(k => string.Equals(keyToMethod.GetValueOrDefault(k), chosenMethod, StringComparison.OrdinalIgnoreCase))
-                        .ToList();
-                    selected = matches.LastOrDefault();
+                    selected = allKeys.FirstOrDefault(k =>
+                        string.Equals(keyToMethod.GetValueOrDefault(k), selectedMethod, StringComparison.OrdinalIgnoreCase));
                 }
             }
 
-            selected ??= allKeys.LastOrDefault();
+            selected ??= allKeys.FirstOrDefault();
 
             if (!string.IsNullOrWhiteSpace(selected))
                 defaultKeyByNumber[number] = selected!;
@@ -1890,7 +2021,7 @@ public class OptimizationService : IOptimizationService
     private List<MatchedSample> MatchWithCrm(
         List<RmSampleData> projectData,
         CrmDataMaps crmMaps,
-        Dictionary<string, string>? rowSelections)
+        Dictionary<string, CrmSelectionState>? rowSelections)
     {
         var result = new List<MatchedSample>();
         if (projectData.Count == 0 || crmMaps.ByKey.Count == 0) return result;
@@ -1902,9 +2033,16 @@ public class OptimizationService : IOptimizationService
                 continue;
 
             var rowKey = BuildRowKey(sample.SolutionLabel, sample.RowIndex);
-            var selectedKey = rowSelections != null && rowSelections.TryGetValue(rowKey, out var sk) ? sk : null;
-            if (string.IsNullOrWhiteSpace(selectedKey))
-                crmMaps.DefaultKeyByNumber.TryGetValue(sampleCrmId, out selectedKey);
+            var isManual = false;
+            string? selectedKey = null;
+            if (rowSelections != null && rowSelections.TryGetValue(rowKey, out var selection))
+            {
+                selectedKey = selection.SelectedCrmKey;
+                isManual = selection.IsManual;
+            }
+
+            var allOrdered = OrderCrmKeysByPreference(GetCrmCandidateKeys(sampleCrmId, crmMaps), crmMaps);
+            selectedKey = ResolveSelectedCrmKey(sampleCrmId, selectedKey, isManual, crmMaps, allOrdered);
             if (string.IsNullOrWhiteSpace(selectedKey) || !crmMaps.ByKey.TryGetValue(selectedKey!, out var crmValuesBySymbol))
                 continue;
 
@@ -1996,7 +2134,7 @@ public class OptimizationService : IOptimizationService
                 var corrected = applyCorrection
                     ? (sv.Value - blankVal + blankAdjust) * scale
                     : sv.Value;
-                var diff = ((corrected - cv.Value) / cv.Value) * 100m;
+                var diff = ((cv.Value - corrected) / cv.Value) * 100m;
 
                 diffs.Add(diff);
 
@@ -2052,7 +2190,7 @@ public class OptimizationService : IOptimizationService
             var corrected = applyCorrection
                 ? (sv.Value - blankVal + blankAdjust) * scale
                 : sv.Value;
-            var diff = ((corrected - cv.Value) / cv.Value) * 100m;
+            var diff = ((cv.Value - corrected) / cv.Value) * 100m;
             diffs.Add(diff);
         }
 
@@ -2194,8 +2332,8 @@ public class OptimizationService : IOptimizationService
                 optimizedValues[element] = optimized;
 
                 var correctedBefore = applyCorrection ? (original - blankVal) : original;
-                var db = ((correctedBefore - cv.Value) / cv.Value) * 100m;
-                var da = ((optimized - cv.Value) / cv.Value) * 100m;
+                var db = ((cv.Value - correctedBefore) / cv.Value) * 100m;
+                var da = ((cv.Value - optimized) / cv.Value) * 100m;
 
                 diffBefore[element] = db;
                 diffAfter[element] = da;
@@ -2231,6 +2369,29 @@ public class OptimizationService : IOptimizationService
                 passBefore,
                 passAfter
             ));
+        }
+
+        return result;
+    }
+
+    private static List<MatchedSample> CreateUncorrectedMatchedData(List<MatchedSample> data)
+    {
+        var result = new List<MatchedSample>(data.Count);
+        foreach (var sample in data)
+        {
+            var zeroBlanks = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var key in sample.SampleValues.Keys)
+                zeroBlanks[key] = 0m;
+            foreach (var key in sample.BlankValues.Keys)
+                zeroBlanks[key] = 0m;
+
+            result.Add(new MatchedSample(
+                sample.SolutionLabel,
+                sample.RowIndex,
+                sample.CrmId,
+                new Dictionary<string, decimal?>(sample.SampleValues, StringComparer.OrdinalIgnoreCase),
+                new Dictionary<string, decimal?>(sample.CrmValues, StringComparer.OrdinalIgnoreCase),
+                zeroBlanks));
         }
 
         return result;
@@ -2995,6 +3156,10 @@ public class OptimizationService : IOptimizationService
         Dictionary<string, List<string>> AllKeysByNumber,
         Dictionary<string, List<string>> PreferredKeysByNumber,
         Dictionary<string, string?> KeyToMethod);
+
+    private sealed record CrmSelectionState(
+        string SelectedCrmKey,
+        bool IsManual);
 
     private sealed record RmSampleData(
         string SolutionLabel,

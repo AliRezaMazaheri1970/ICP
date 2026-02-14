@@ -269,14 +269,15 @@ namespace WebUI.Pages.Process
                 await AwaitWithTimeout(LoadCrmReferenceData(), TimeSpan.FromSeconds(25), "Load CRM references");
                 await AwaitWithTimeout(LoadSecondaryPlotRowsAsync(), TimeSpan.FromSeconds(40), "Load pivot rows");
                 await AwaitWithTimeout(LoadRawCrmBaseValuesAsync(), TimeSpan.FromSeconds(60), "Load raw CRM values");
-                await AwaitWithTimeout(GetCurrentStats(), TimeSpan.FromSeconds(40), "Load current stats");
                 await AwaitWithTimeout(LoadCrmSelections(), TimeSpan.FromSeconds(25), "Load CRM selections");
+                await AwaitWithTimeout(GetCurrentStats(), TimeSpan.FromSeconds(40), "Load current stats");
 
                 if (!IsCoreDataReady)
                 {
                     await AwaitWithTimeout(LoadElements(), TimeSpan.FromSeconds(20), "Retry load elements");
                     await AwaitWithTimeout(LoadSecondaryPlotRowsAsync(), TimeSpan.FromSeconds(20), "Retry load pivot rows");
                     await AwaitWithTimeout(LoadCrmSelections(), TimeSpan.FromSeconds(20), "Retry load CRM selections");
+                    await AwaitWithTimeout(GetCurrentStats(), TimeSpan.FromSeconds(20), "Retry load current stats");
                 }
 
                 await AwaitWithTimeout(RefreshChartsAsync(), TimeSpan.FromSeconds(20), "Render charts");
@@ -2242,7 +2243,7 @@ namespace WebUI.Pages.Process
                     CrmId = crmId,
                     PreferredOptions = options.ToList(),
                     AllOptions = options.ToList(),
-                    SelectedOption = options.LastOrDefault()
+                    SelectedOption = options.FirstOrDefault()
                 });
             }
 
@@ -2260,7 +2261,8 @@ namespace WebUI.Pages.Process
                 .Where(key => !string.IsNullOrWhiteSpace(key))
                 .Where(key => string.Equals(NormalizeCrmIdToken(key), normalizedCrmId, StringComparison.OrdinalIgnoreCase))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(GetCrmMethodPriority)
+                .ThenBy(key => key, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
             if (optionsFromKeys.Any())
@@ -2276,8 +2278,18 @@ namespace WebUI.Pages.Process
                         : item.CrmId.Trim())
                 .Where(item => !string.IsNullOrWhiteSpace(item))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(GetCrmMethodPriority)
+                .ThenBy(item => item, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+        }
+
+        private static int GetCrmMethodPriority(string? option)
+        {
+            if (string.IsNullOrWhiteSpace(option)) return 3;
+            if (option.Contains("4-Acid", StringComparison.OrdinalIgnoreCase)) return 0;
+            if (option.Contains("Aqua Regia", StringComparison.OrdinalIgnoreCase)) return 1;
+            if (option.Contains("Pb Fire", StringComparison.OrdinalIgnoreCase)) return 2;
+            return 3;
         }
 
 
@@ -2470,6 +2482,7 @@ namespace WebUI.Pages.Process
             {
                 r.SelectedOption = v;
                 if (_projectId != null)
+                {
                     await OptimizationService.SaveCrmSelectionsAsync(new CrmSelectionSaveRequest
                     {
                         ProjectId = _projectId.Value,
@@ -2483,6 +2496,9 @@ namespace WebUI.Pages.Process
                             }
                         }
                     });
+                    await GetCurrentStats();
+                    await RefreshChartsAsync(refreshCalibration: true, refreshSecondary: true);
+                }
             });
 
         private async Task OnPreviewBlankChanged(decimal v)
