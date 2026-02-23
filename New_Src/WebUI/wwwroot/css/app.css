@@ -362,5 +362,23 @@ html, body {
    
 }
 
+/* Calibration Pro specific styles */
+.calibration-pro-hero {
+    background: linear-gradient(90deg, #e6f4ea 0%, #f1f8f4 100%);
+    border-radius: 10px;
+}
+
+.calib-action {
+    background: linear-gradient(90deg, #2e7d32, #66bb6a);
+    color: #fff;
+    font-weight: 700;
+}
+
+.calibration-placeholder {
+    border: 1px dashed rgba(0,0,0,0.08);
+    border-radius: 6px;
+    background: #fff;
+}
+
 
 

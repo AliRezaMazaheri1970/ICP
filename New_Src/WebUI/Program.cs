@@ -3,6 +3,8 @@ using Application.Services;
 using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using MudBlazor.Services;
+using System.Diagnostics;
+using System.Linq;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -126,5 +128,28 @@ app.MapFallbackToPage("/_Host");
 // ============================================
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 logger.LogInformation("WebUI started. API Base URL: {ApiUrl}", apiBaseUrl);
+
+// In Development, try to open the browser automatically after the app has started.
+if (app.Environment.IsDevelopment())
+{
+    var url = app.Urls.FirstOrDefault() ?? builder.Configuration["applicationUrl"] ?? "https://localhost:7115";
+    app.Lifetime.ApplicationStarted.Register(() =>
+    {
+        try
+        {
+            logger.LogInformation("Attempting to open browser at {Url}", url);
+            var psi = new ProcessStartInfo
+            {
+                FileName = url,
+                UseShellExecute = true
+            };
+            Process.Start(psi);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to launch browser automatically.");
+        }
+    });
+}
 
 app.Run();

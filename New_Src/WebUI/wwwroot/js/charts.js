@@ -75,6 +75,23 @@ function createChart(canvasId, config) {
             };
         }
 
+        // If dataset points include a 'count' property, add a tooltip callback to display it
+        try {
+            const hasCount = config.data && Array.isArray(config.data.datasets) && config.data.datasets.some(d => Array.isArray(d.data) && d.data.some(pt => pt && pt.count));
+            if (hasCount) {
+                config.options.plugins.tooltip = config.options.plugins.tooltip || {};
+                config.options.plugins.tooltip.callbacks = config.options.plugins.tooltip.callbacks || {};
+                config.options.plugins.tooltip.callbacks.label = function(context) {
+                    const p = context.raw || context.parsed || {};
+                    const value = (p && (p.y !== undefined ? p.y : context.parsed ? context.parsed.y : ''));
+                    const cnt = p && p.count ? ` (n=${p.count})` : '';
+                    return `${context.dataset.label}: ${value}${cnt}`;
+                };
+            }
+        } catch (e) {
+            console.warn('[createChart] tooltip augmentation failed', e);
+        }
+
         chartInstances[canvasId] = new Chart(ctx, config);
         console.log(`✓ Chart "${canvasId}" created successfully`);
     } catch (error) {

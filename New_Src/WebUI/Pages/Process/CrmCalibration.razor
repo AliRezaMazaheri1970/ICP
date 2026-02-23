@@ -6,7 +6,7 @@
 @inject PivotService PivotService
 @inject CorrectionService CorrectionService
 @inject ISnackbar Snackbar
-
+@inject IJSRuntime JS
 
 <PageTitle>ICP - CRM Calibration</PageTitle>
 <NavigationLock OnBeforeInternalNavigation="OnBeforeNavigation" ConfirmExternalNavigation="_isLoading" />
@@ -188,9 +188,9 @@
                                     <MudButton OnClick="OpenRangesDialog" Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Tune">Ranges</MudButton>
                                 </MudStack>
                                 @* Params Items *@
-                                <div style="padding:10px 0;">
+                                @* <div style="padding:10px 0;">
                                     <hr style="border: 1px solid #ccc" />
-                                </div>
+                                </div> *@
                                 @* <MudItem xs="12"> *@
                                     @* FIX: Added T="bool" *@
                                     @* <MudCheckBox T="bool" @bind-Checked="_useMultiModel" Label="Use Multi-Model (A/B/C)" Color="Color.Primary" Dense="true" /> *@
@@ -226,20 +226,20 @@
                             <MudStack Spacing="2">
                                 @* Manual Actions *@
                                 <MudGrid Spacing="2">
-                                    <MudItem xs="12"><MudButton OnClick="ApplyManualAsync" Variant="Variant.Filled" Color="Color.Success" FullWidth="true" Size="Size.Small">Apply</MudButton></MudItem>
+                                    <MudItem xs="12"><MudButton OnClick="ApplyManualAsync" Variant="Variant.Filled" Color="Color.Success" FullWidth="true" Size="Size.Small">Correct</MudButton></MudItem>
                                     <MudItem xs="12"><MudButton OnClick="ApplyOurModelAsync" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Size="Size.Small">Apply Our Model</MudButton></MudItem>
                                     <MudItem xs="6"><MudButton OnClick="ResetAll" Variant="Variant.Outlined" Color="Color.Default" FullWidth="true" Size="Size.Small">Reset</MudButton></MudItem>
                                     <MudItem xs="6"><MudButton OnClick="UndoManualAsync" Variant="Variant.Outlined" Color="Color.Error" FullWidth="true" Size="Size.Small">Undo</MudButton></MudItem>
                                 </MudGrid>
 
-                                <MudDivider />
+                                @* <MudDivider /> *@
 
                                 @* Global Actions *@
-                                <MudGrid Spacing="1">
+                                @* <MudGrid Spacing="1">
                                     <MudItem xs="12">
                                         <MudButton OnClick="RunCalibration" Variant="Variant.Outlined" Color="Color.Primary" FullWidth="true" Size="Size.Small">Calibration</MudButton>
                                     </MudItem>
-                                </MudGrid>
+                                </MudGrid> *@
                             </MudStack>
                         </div>
                         </fieldset>
@@ -414,9 +414,21 @@
                                                                 </MudItem>
 
                                                                 <MudItem xs="12" md="2" Class="d-flex justify-end">
-                                                                    <MudButton Style="height:3rem;" Variant="Variant.Outlined" OnClick="ResetPivotColumns" StartIcon="@Icons.Material.Filled.RestartAlt">
+                                                                    <MudButton Style="height:3rem; padding: 0 15px;" Variant="Variant.Outlined" OnClick="ResetPivotColumns" StartIcon="@Icons.Material.Filled.RestartAlt">
                                                                         Reset
                                                                     </MudButton>
+                                                                    <MudButton Style="height:3rem; padding: 0 15px;" Variant="Variant.Outlined" OnClick="ResetPivotColumns" StartIcon="@Icons.Material.Filled.Download">
+                                                                        Export
+                                                                    </MudButton>
+                                                                    @* <MudButton Variant="Variant.Filled"
+                                                                               Color="Color.Primary"
+                                                                               StartIcon="@Icons.Material.Filled.Download"
+                                                                               OnClick="ExportData"
+                                                                               Class="btn-pivot"
+                                                                                Disabled="@(_pivotData == null || _isExport)" 
+                                                                               >
+                                                                        Export
+                                                                    </MudButton> *@
                                                                 </MudItem>
 
                                                             </MudGrid>

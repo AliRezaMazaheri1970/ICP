@@ -2659,5 +2659,40 @@ namespace WebUI.Pages.Process
 
             Console.WriteLine("=== DebugElementDataSources END ===");
         }
+        private AdvancedPivotResultDto? _pivotData;
+        private bool _isExport = false;
+        private int _decimalPlaces = 2;
+        private bool _useOxide = false;
+        private bool _useInt = false;
+        private async Task ExportData()
+        {
+            if (_projectId == null || _pivotData == null) return;
+            _isExport = true;
+            var request = new PivotRequest
+            {
+                ProjectId = _projectId.Value,
+                UseOxide = _useOxide,
+                DecimalPlaces = _decimalPlaces
+            };
+            var result = await PivotService.ExportToCsvAsync(request);
+            if (result.Succeeded && result.Data != null)
+            {
+                var fileName = $"{_projectName ?? "export"}_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
+                await DownloadFile(result.Data, fileName, "text/csv");
+                Snackbar.Add("Data exported successfully", Severity.Success);
+                _isExport = false;
+            }
+            else
+            {
+                Snackbar.Add(result.Message ?? "Export failed", Severity.Error);
+                _isExport = false;
+            }
+        }
+
+        private async Task DownloadFile(byte[] data, string fileName, string contentType)
+        {
+            var base64 = Convert.ToBase64String(data);
+            await JS.InvokeVoidAsync("downloadFile", fileName, contentType, base64);
+        }
     }
 }

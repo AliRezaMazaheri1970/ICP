@@ -1,0 +1,724 @@
+@page "/process/calibration-pro"
+@using WebUI.Services
+@inject ProjectService ProjectService
+@inject PivotService PivotService
+@using System.Text.Json
+@using System.Linq
+@using Microsoft.AspNetCore.Components
+@using Microsoft.Extensions.Logging
+@inject ILogger<CalibrationPro> _logger
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+
+@* Loading overlay state handled by _isLoading *@
+
+<PageTitle>ICP - Calibration Pro</PageTitle>
+
+@* --- Loading Overlay (modal spinner like CRM page) --- *@
+<MudOverlay Visible="IsUiBusyOrBlocked" DarkBackground="true" Absolute="true" ZIndex="9999">
+    <MudPaper Class="pa-4 d-flex flex-column align-center gap-3" Elevation="4" Style="position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);">
+        <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+        <MudText>Loading</MudText>
+    </MudPaper>
+</MudOverlay>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4 mb-5">
+    <MudPaper Elevation="0" Class="pa-4 mb-4 custom-card-all">
+        <div class="justify-space-between align-center">
+            <div class="mb-4">
+                <MudText Typo="Typo.h4" Class="fw-bold h4-title">Calibration Pro</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary p-description">Advanced RM calibration and drift-correction tools</MudText>
+            </div>
+            <ProcessNav CurrentStep="calibrationpro" />
+        </div>
+    </MudPaper>
+
+    @if (!_projectId.HasValue)
+    {
+        <MudAlert Severity="Severity.Warning" ContentAlignment="HorizontalAlignment.Center" Class="mb-4">
+            <MudText>No project selected. Please select a project from the Projects section.</MudText>
+        </MudAlert>
+    }
+
+    <MudGrid>
+        <MudItem xs="12" md="3" lg="3">
+            <MudCard Elevation="2" Class="h-100">
+                <MudCardContent>
+                    <fieldset disabled="@IsUiBusyOrBlocked" style="border:0;margin:0;padding:0;min-width:0;">
+
+                        <div class="pa-3 bg-gray-50 border-b">
+                            <MudText Typo="Typo.subtitle2" Color="Color.Primary"><b>Shared Settings</b></MudText>
+                            <MudSelect T="string" Label="File" Variant="Variant.Outlined" Class="mt-2">
+                                <MudSelectItem T="string">All Files</MudSelectItem>
+                            </MudSelect>
+
+                                                    <MudSelect T="string" Label="Element" Variant="Variant.Outlined" Class="mt-2" @bind-Value="_selectedElement">
+                                                        @if (_elements == null || _elements.Count == 0)
+                                                        {
+                                                            <MudSelectItem T="string">Ag 328.068</MudSelectItem>
+                                                        }
+                                                        else
+                                                        {
+                                                            @foreach (var el in _elements)
+                                                            {
+                                                                <MudSelectItem T="string" Value="@el">@el</MudSelectItem>
+                                                            }
+                                                        }
+                                                    </MudSelect>
+
+                            <MudButtonGroup Variant="Variant.Outlined" Size="Size.Small" Class="d-flex mt-2">
+                                <MudButton OnClick="PrevElement" StartIcon="@Icons.Material.Filled.ChevronLeft" Class="flex-grow-1" Disabled="@IsUiBusyOrBlocked">Prev</MudButton>
+                                <MudButton OnClick="NextElement" EndIcon="@Icons.Material.Filled.ChevronRight" Class="flex-grow-1" Disabled="@IsUiBusyOrBlocked">Next</MudButton>
+                            </MudButtonGroup>
+                        </div>
+
+                        <MudDivider Class="my-2" />
+
+                        <div class="pa-3 bg-gray-50 border-b">
+                            <MudText Typo="Typo.subtitle2" Color="Color.Primary"><b>CRM Verification</b></MudText>
+                            <MudGrid Class="mt-2">
+                                <MudItem xs="12">
+                                    <MudCheckBox T="bool" @bind-Checked="_cert" Label="Certificate" Color="Color.Primary" />
+                                    <MudCheckBox T="bool" @bind-Checked="_crm" Label="CRM" Color="Color.Primary" Class="ms-2" />
+                                </MudItem>
+                                <MudItem xs="6">
+                                    <MudNumericField T="double" Label="Min" Value="@_minVal" ValueChanged="@(v => _minVal = v)" Variant="Variant.Outlined" />
+                                </MudItem>
+                                <MudItem xs="6">
+                                    <MudNumericField T="double" Label="Max" Value="@_maxVal" ValueChanged="@(v => _maxVal = v)" Variant="Variant.Outlined" />
+                                </MudItem>
+                            </MudGrid>
+
+                            <MudGrid Class="mt-2" Spacing="1">
+                                <MudItem xs="6"><MudButton Color="Color.Success" Variant="Variant.Filled" FullWidth="true">Apply Our Model</MudButton></MudItem>
+                                <MudItem xs="6"><MudButton Color="Color.Default" Variant="Variant.Outlined" FullWidth="true">Report</MudButton></MudItem>
+                                <MudItem xs="6"><MudButton Color="Color.Primary" Variant="Variant.Outlined" FullWidth="true">Select CRMs</MudButton></MudItem>
+                                <MudItem xs="6"><MudButton Color="Color.Error" Variant="Variant.Outlined" FullWidth="true">Undo CRM</MudButton></MudItem>
+                            </MudGrid>
+                        </div>
+
+                        <MudDivider Class="my-2" />
+
+                        <div class="pa-3">
+                            <MudText Typo="Typo.subtitle2" Color="Color.Primary"><b>RM Drift Correction</b></MudText>
+                            <MudTextField T="string" Label="Keyword: RM" Variant="Variant.Outlined" Class="mt-2" />
+
+                            <MudGrid Class="mt-2">
+                                <MudItem xs="6"><MudButton Color="Color.Primary" Variant="Variant.Outlined">Check RM</MudButton></MudItem>
+                                <MudItem xs="6"><MudButton Color="Color.Default" Variant="Variant.Outlined">Reset to Original</MudButton></MudItem>
+                            </MudGrid>
+
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-2">
+                                <MudText Typo="Typo.caption">Manual Slope</MudText>
+                                <MudNumericField T="double" Value="@_manualSlope" ValueChanged="@(v => _manualSlope = v)" Variant="Variant.Outlined" Class="ms-auto" />
+                            </MudStack>
+
+                            <MudStack Row="true" Spacing="1" Class="mt-2">
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@ApplySlope">Apply Slope</MudButton>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Default">Auto Flat</MudButton>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Default">Auto Zero Slope</MudButton>
+                            </MudStack>
+
+                            <MudDivider Class="my-2" />
+                            <MudText Typo="Typo.caption">Calibration Range: [Not Set]</MudText>
+                        </div>
+
+                        </fieldset>
+                    </MudCardContent>
+                </MudCard>
+        </MudItem>
+
+        <!-- Middle column: Tables (RM Points + All Acquisition Data) -->
+        <MudItem xs="12" md="4" lg="4">
+            <MudStack Spacing="3">
+                <MudPaper Elevation="2" Class="pa-3" Style="min-height:260px;">
+                            <MudText Typo="Typo.h6">RM Points — Current RM Only</MudText>
+                            <div class="mt-2 mb-2 d-flex align-center" style="gap:8px;">
+                                <MudCheckBox T="bool" Checked="_filterCrmOnly" CheckedChanged="@((bool v) => { _filterCrmOnly = v; OnFilterChanged(); })" Label="CRM only" />
+                                <MudCheckBox T="bool" Checked="_filterRmOnly" CheckedChanged="@((bool v) => { _filterRmOnly = v; OnFilterChanged(); })" Label="RM points only" />
+                                <MudText Typo="Typo.caption" Class="ms-2">Index:</MudText>
+                                <MudNumericField T="int?" Value="@_indexFrom" ValueChanged="@((int? v) => { _indexFrom = v; OnFilterChanged(); })" Placeholder="from" Variant="Variant.Outlined" Style="width:90px;" />
+                                <MudNumericField T="int?" Value="@_indexTo" ValueChanged="@((int? v) => { _indexTo = v; OnFilterChanged(); })" Placeholder="to" Variant="Variant.Outlined" Style="width:90px;" />
+                                <MudTextField T="string" Value="@_elementFilter" ValueChanged="@((string v) => { _elementFilter = v; OnFilterChanged(); })" Placeholder="Element filter" Variant="Variant.Outlined" Style="min-width:140px;" />
+                                <MudButton Variant="Variant.Text" OnClick="ClearFilters">Clear</MudButton>
+                            </div>
+                            <div class="mt-2" style="height:260px;overflow:auto;">
+                                <MudTable Items="_filteredRmRows" Dense="true" Hover="true">
+                            <HeaderContent>
+                                <MudTh>Solution</MudTh>
+                                <MudTh>Element</MudTh>
+                                <MudTh>Type</MudTh>
+                                <MudTh>Intensity</MudTh>
+                                <MudTh>Corrected</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd DataLabel="Solution">@context.SolutionLabel</MudTd>
+                                <MudTd DataLabel="Element">@context.Element</MudTd>
+                                <MudTd DataLabel="Type">@context.Type</MudTd>
+                                <MudTd DataLabel="Intensity">@((context.Intensity.HasValue)? context.Intensity.Value.ToString("F2") : "---")</MudTd>
+                                <MudTd DataLabel="Corrected">@((context.CorrCon.HasValue)? context.CorrCon.Value.ToString("F2") : "---")</MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    </div>
+                </MudPaper>
+
+                <MudPaper Elevation="2" Class="pa-3" Style="min-height:320px;">
+                    <MudText Typo="Typo.h6">All Acquisition Data — Original + New Value</MudText>
+                    <div class="mt-2" style="height:320px;overflow:auto;">
+                        <MudTable Items="_filteredAcqRows" Dense="true" Hover="true">
+                            <HeaderContent>
+                                <MudTh>#</MudTh>
+                                <MudTh>Solution</MudTh>
+                                <MudTh>Element</MudTh>
+                                <MudTh>Type</MudTh>
+                                <MudTh>Intensity</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd DataLabel="#">@context.Index</MudTd>
+                                <MudTd DataLabel="Solution">@context.SolutionLabel</MudTd>
+                                <MudTd DataLabel="Element">@context.Element</MudTd>
+                                <MudTd DataLabel="Type">@context.Type</MudTd>
+                                <MudTd DataLabel="Intensity">@((context.Intensity.HasValue)? context.Intensity.Value.ToString("F2") : "---")</MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    </div>
+                </MudPaper>
+            </MudStack>
+        </MudItem>
+
+        <!-- Right column: Plots -->
+        <MudItem xs="12" md="5" lg="5">
+            <MudStack Spacing="3">
+                <MudPaper Elevation="2" Class="pa-4 height-75">
+                    <MudText Typo="Typo.h6">Full Drift Plot — All Samples + All RMs</MudText>
+                    <div class="mt-2" style="height:360px;">
+                        <canvas id="fullDriftChart" style="width:100%;height:100%;"></canvas>
+                    </div>
+                </MudPaper>
+
+                <MudPaper Elevation="2" Class="pa-4 height-segmants">
+                    <MudText Typo="Typo.h6">Verification Plot — CRM_Check Standards</MudText>
+                    <div class="mt-2" style="height:200px;">
+                        <canvas id="verificationChart" style="width:100%;height:100%;"></canvas>
+                    </div>
+                </MudPaper>
+            </MudStack>
+        </MudItem>
+    </MudGrid>
+</MudContainer>
+
+@code {
+    private bool _isLoading = false;
+    private bool IsUiBusyOrBlocked => _isLoading;
+    private double _manualSlope = -0.00122325;
+    private bool _cert = false;
+    private bool _crm = true;
+    private double _minVal = 0.0;
+    private double _maxVal = 1000.0;
+
+    // Elements for the Element select
+    private List<string> _elements = new();
+    private string? _selectedElement;
+
+    [SupplyParameterFromQuery]
+    public Guid? projectId { get; set; }
+
+    private Guid? _projectId;
+    private readonly List<RawRowVm> _acqRows = new();
+    private readonly List<RawRowVm> _rmRows = new();
+
+    private sealed class RawRowVm
+    {
+        public int Index { get; set; }
+        public string SolutionLabel { get; set; } = "";
+        public string Element { get; set; } = "";
+        public string Type { get; set; } = "";
+        public decimal? Intensity { get; set; }
+        public decimal? CorrCon { get; set; }
+    }
+
+    // Filters
+    private bool _filterCrmOnly = false;
+    private bool _filterRmOnly = false;
+    private int? _indexFrom = null;
+    private int? _indexTo = null;
+    private string _elementFilter = string.Empty;
+
+    // Filtered views used by MudTable and charts
+    private List<RawRowVm> _filteredAcqRows = new();
+    private List<RawRowVm> _filteredRmRows = new();
+
+    // Chart update control
+    private CancellationTokenSource? _chartUpdateCts;
+    private bool _isUpdatingCharts = false;
+    private bool _disposed = false;
+
+    private void ClearFilters()
+    {
+        _filterCrmOnly = false; _filterRmOnly = false; _indexFrom = null; _indexTo = null; _elementFilter = string.Empty;
+        ApplyFilters();
+    }
+
+    private void OnFilterChanged()
+    {
+        ApplyFilters();
+    }
+
+    private void ApplyFilters()
+    {
+        IEnumerable<RawRowVm> a = _acqRows;
+        if (_filterCrmOnly)
+        {
+            a = a.Where(r => !string.IsNullOrWhiteSpace(r.SolutionLabel) && r.SolutionLabel.StartsWith("CRM", StringComparison.OrdinalIgnoreCase) || (!string.IsNullOrWhiteSpace(r.Type) && r.Type.IndexOf("crm", StringComparison.OrdinalIgnoreCase) >= 0));
+        }
+        if (!string.IsNullOrWhiteSpace(_elementFilter))
+        {
+            a = a.Where(r => !string.IsNullOrWhiteSpace(r.Element) && r.Element.IndexOf(_elementFilter, StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+        if (_indexFrom.HasValue) a = a.Where(r => r.Index >= _indexFrom.Value);
+        if (_indexTo.HasValue) a = a.Where(r => r.Index <= _indexTo.Value);
+
+        _filteredAcqRows = a.ToList();
+
+        IEnumerable<RawRowVm> r = _rmRows;
+        if (_filterCrmOnly)
+        {
+            r = r.Where(rr => !string.IsNullOrWhiteSpace(rr.SolutionLabel) && rr.SolutionLabel.StartsWith("CRM", StringComparison.OrdinalIgnoreCase) || (!string.IsNullOrWhiteSpace(rr.Type) && rr.Type.IndexOf("crm", StringComparison.OrdinalIgnoreCase) >= 0));
+        }
+        if (!string.IsNullOrWhiteSpace(_elementFilter))
+        {
+            r = r.Where(rr => !string.IsNullOrWhiteSpace(rr.Element) && rr.Element.IndexOf(_elementFilter, StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+        if (_indexFrom.HasValue) r = r.Where(rr => rr.Index >= _indexFrom.Value);
+        if (_indexTo.HasValue) r = r.Where(rr => rr.Index <= _indexTo.Value);
+        if (_filterRmOnly)
+        {
+            // keep only rows where Type indicates RM or label contains RM
+            r = r.Where(rr => (!string.IsNullOrWhiteSpace(rr.Type) && rr.Type.IndexOf("rm", StringComparison.OrdinalIgnoreCase) >= 0) || (!string.IsNullOrWhiteSpace(rr.SolutionLabel) && rr.SolutionLabel.IndexOf("RM", StringComparison.OrdinalIgnoreCase) >= 0));
+        }
+
+        _filteredRmRows = r.ToList();
+
+        // update charts to reflect filter
+        _ = UpdateChartsAsync();
+        StateHasChanged();
+    }
+    private void PrevElement()
+    {
+        // placeholder
+        Snackbar.Add("Prev element", Severity.Info);
+    }
+
+    private void NextElement()
+    {
+        // placeholder
+        Snackbar.Add("Next element", Severity.Info);
+    }
+
+    private void ApplySlope()
+    {
+        Snackbar.Add($"Applied slope: {_manualSlope:F6}", Severity.Success);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var next = projectId ?? ProjectService.CurrentProjectId;
+        if (next == _projectId) return;
+        _projectId = next;
+        _acqRows.Clear(); _rmRows.Clear();
+        if (_projectId.HasValue)
+        {
+            await InvokeAsync(() => { _isLoading = true; StateHasChanged(); });
+            try
+            {
+                // Load both raw rows and available elements for dropdown
+                await LoadRawRowsAsync();
+                await LoadElementsAsync();
+            }
+            finally
+            {
+                await InvokeAsync(() => { _isLoading = false; StateHasChanged(); });
+            }
+        }
+    }
+
+    private async Task LoadElementsAsync()
+    {
+        if (_projectId == null) return;
+        try
+        {
+            var res = await PivotService.GetElementsAsync(_projectId.Value);
+            if (res.Succeeded && res.Data != null)
+            {
+                _elements = res.Data;
+                if (string.IsNullOrWhiteSpace(_selectedElement)) _selectedElement = _elements.FirstOrDefault();
+            }
+            else
+            {
+                Snackbar.Add(res.Message ?? "Failed to load elements", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error loading elements: {ex.Message}", Severity.Error);
+        }
+        StateHasChanged();
+    }
+
+    private async Task LoadRawRowsAsync()
+    {
+        try
+        {
+            const int pageSize = 2000;
+            var skip = 0;
+            var all = new List<WebUI.Services.RawDataDto>();
+
+            while (true)
+            {
+                var res = await ProjectService.GetProjectRawRowsAsync(_projectId!.Value, skip, pageSize);
+                if (!res.Succeeded || res.Data == null)
+                {
+                    Snackbar.Add(res.Message ?? "Failed to load raw rows", Severity.Warning);
+                    break;
+                }
+
+                all.AddRange(res.Data);
+                if (res.Data.Count < pageSize) break;
+                skip += res.Data.Count;
+            }
+
+            // Parse rows on a background thread to avoid blocking the Blazor circuit/UI
+            var parsedList = await Task.Run(() =>
+            {
+                var list = new List<RawRowVm>();
+                var idxLocal = 1;
+                foreach (var row in all)
+                {
+                    var p = TryParseRow(row.ColumnData);
+                    var vm = new RawRowVm
+                    {
+                        Index = idxLocal++,
+                        SolutionLabel = p.solutionLabel ?? string.Empty,
+                        Element = p.element ?? string.Empty,
+                        Type = p.type ?? string.Empty,
+                        Intensity = p.intensity,
+                        CorrCon = p.corrCon
+                    };
+                    list.Add(vm);
+                }
+                return list;
+            });
+
+            // Update collections on the Blazor renderer (Dispatcher) to avoid cross-thread UI access
+            await InvokeAsync(() =>
+            {
+                _acqRows.Clear(); _rmRows.Clear();
+                foreach (var vm in parsedList)
+                {
+                    _acqRows.Add(vm);
+                    if (!string.IsNullOrWhiteSpace(vm.Type) && vm.Type.IndexOf("rm", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        _rmRows.Add(vm);
+                    }
+                    else if (!string.IsNullOrWhiteSpace(vm.SolutionLabel) && vm.SolutionLabel.IndexOf("RM", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        _rmRows.Add(vm);
+                    }
+                }
+
+                // apply filters after initial load (this schedules chart update)
+                ApplyFilters();
+                StateHasChanged();
+            });
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error loading rows: {ex.Message}", Severity.Error);
+        }
+
+        // After loading rows, update charts
+        await UpdateChartsAsync();
+    }
+
+    private (string? solutionLabel, string? element, string? type, decimal? intensity, decimal? corrCon) TryParseRow(string columnData)
+    {
+        if (string.IsNullOrWhiteSpace(columnData)) return (null, null, null, null, null);
+        try
+        {
+            using var doc = JsonDocument.Parse(columnData);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return (null, null, null, null, null);
+
+            var map = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+            foreach (var prop in doc.RootElement.EnumerateObject()) map[prop.Name] = prop.Value;
+
+            string? GetString(params string[] keys)
+            {
+                foreach (var key in keys)
+                {
+                    if (map.TryGetValue(key, out var v))
+                    {
+                        if (v.ValueKind == JsonValueKind.String) return v.GetString();
+                        if (v.ValueKind == JsonValueKind.Number && v.TryGetDecimal(out var n)) return n.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    }
+                }
+                return null;
+            }
+
+            decimal? GetDecimal(params string[] keys)
+            {
+                foreach (var key in keys)
+                {
+                    if (!map.TryGetValue(key, out var v)) continue;
+                    if (v.ValueKind == JsonValueKind.Number && v.TryGetDecimal(out var n)) return n;
+                    if (v.ValueKind == JsonValueKind.String)
+                    {
+                        var s = v.GetString();
+                        if (decimal.TryParse(s, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var parsed)) return parsed;
+                    }
+                }
+                return null;
+            }
+
+            var solution = GetString("Solution Label", "SolutionLabel", "Sample ID", "SampleId", "Sample", "Label", "Name");
+            var element = GetString("Element");
+            var type = GetString("Type");
+            var intensity = GetDecimal("Int", "Intensity", "Net Intensity", "CPS", "Counts", "Signal");
+            var corr = GetDecimal("Corr Con", "CorrCon", "Concentration", "Conc", "Calibrated Conc", "Result");
+
+            return (solution, element, type, intensity, corr);
+        }
+        catch
+        {
+            return (null, null, null, null, null);
+        }
+    }
+
+    private async Task UpdateChartsAsync()
+    {
+        if (_disposed) return;
+
+        // debounce: cancel any pending chart update and schedule a new one
+        _chartUpdateCts?.Cancel();
+        _chartUpdateCts = new CancellationTokenSource();
+        var ct = _chartUpdateCts.Token;
+
+        try
+        {
+            // small delay to batch rapid calls
+            await Task.Delay(150, ct);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+
+        if (ct.IsCancellationRequested || _disposed) return;
+
+        if (_isUpdatingCharts) return;
+
+        _isUpdatingCharts = true;
+
+        try
+        {
+            // Full drift plot: x = index, dataset = intensity values (all rows)
+            // Limit number of points sent to the chart to avoid freezing the browser.
+            List<RawRowVm> SampleRows(List<RawRowVm> src, int maxPoints)
+            {
+                if (src == null || src.Count == 0) return new List<RawRowVm>();
+                if (src.Count <= maxPoints) return new List<RawRowVm>(src);
+                var result = new List<RawRowVm>(maxPoints);
+                double step = (double)src.Count / maxPoints;
+                for (int i = 0; i < maxPoints; i++)
+                {
+                    int idx = (int)Math.Floor(i * step);
+                    if (idx < 0) idx = 0;
+                    if (idx >= src.Count) idx = src.Count - 1;
+                    result.Add(src[idx]);
+                }
+                return result;
+            }
+
+            const int maxChartPoints = 1000; // reduced to avoid browser freeze
+            var sampledAll = SampleRows(_acqRows, maxChartPoints);
+            // Aggregate sampled points into bins to preserve visual pattern while reducing point count
+            int targetBins = Math.Min(800, sampledAll.Count == 0 ? 1 : sampledAll.Count);
+            if (targetBins < 1) targetBins = 1;
+            int totalCountAll = sampledAll.Count;
+            var allBins = new List<(int count, double sum, double minX, double maxX)>();
+            for (int i = 0; i < targetBins; i++) allBins.Add((0, 0.0, double.MaxValue, double.MinValue));
+            if (sampledAll.Count > 0)
+            {
+                double minIndex = sampledAll.First().Index;
+                double maxIndex = sampledAll.Last().Index;
+                double span = Math.Max(1.0, maxIndex - minIndex + 1);
+                for (int i = 0; i < sampledAll.Count; i++)
+                {
+                    var r = sampledAll[i];
+                    double x = r.Index;
+                    double y = r.Intensity.HasValue ? (double)r.Intensity.Value : double.NaN;
+                    int bin = (int)Math.Floor((x - minIndex) / span * targetBins);
+                    if (bin < 0) bin = 0;
+                    if (bin >= targetBins) bin = targetBins - 1;
+                    var b = allBins[bin];
+                    b.count += 1;
+                    if (!double.IsNaN(y)) b.sum += y;
+                    b.minX = Math.Min(b.minX, x);
+                    b.maxX = Math.Max(b.maxX, x);
+                    allBins[bin] = b;
+                }
+            }
+
+            var allDataPoints = new List<object>();
+            var allPointRadii = new List<int>();
+            for (int i = 0; i < allBins.Count; i++)
+            {
+                var b = allBins[i];
+                if (b.count == 0) continue;
+                double xCenter = (b.minX == double.MaxValue) ? i : (b.minX + b.maxX) / 2.0;
+                double yAvg = b.count > 0 ? b.sum / b.count : 0.0;
+                // radius scaled by sqrt of count to keep visibility but avoid huge circles
+                int radius = Math.Max(1, (int)Math.Round(Math.Sqrt(b.count)));
+                allDataPoints.Add(new { x = xCenter, y = yAvg, count = b.count });
+                allPointRadii.Add(radius);
+            }
+
+            var sampledRm = SampleRows(_rmRows, Math.Min(500, maxChartPoints));
+            var rmDataPoints = new List<object>();
+            foreach (var r in sampledRm)
+            {
+                var yVal = r.Intensity.HasValue ? (double)r.Intensity.Value : (double?)null;
+                rmDataPoints.Add(new { x = r.Index, y = yVal });
+            }
+
+            var crmRows = _acqRows.Where(r => !string.IsNullOrWhiteSpace(r.SolutionLabel) && (r.SolutionLabel.StartsWith("CRM", StringComparison.OrdinalIgnoreCase) || r.Type?.IndexOf("crm", StringComparison.OrdinalIgnoreCase) >= 0)).ToList();
+            var sampledCrm = SampleRows(crmRows, 500);
+            var crmDataPoints = new List<object>();
+            foreach (var r in sampledCrm)
+            {
+                var yVal = r.Intensity.HasValue ? (double)r.Intensity.Value : (double?)null;
+                crmDataPoints.Add(new { x = r.Index, y = yVal });
+            }
+
+            var fullChartJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                type = "scatter",
+                data = new
+                {
+                    datasets = new object[] {
+                            new {
+                                label = "All Samples",
+                                data = allDataPoints,
+                                showLine = false,
+                                backgroundColor = "rgba(33,150,243,0.6)",
+                                borderColor = "rgba(33,150,243,1)",
+                                pointRadius = allPointRadii.ToArray(),
+                                pointHoverRadius = 4,
+                                hitRadius = 2
+                            },
+                            new {
+                                label = "RM Points",
+                                data = rmDataPoints,
+                                showLine = false,
+                                backgroundColor = "rgba(244,67,54,0.9)",
+                                borderColor = "rgba(244,67,54,1)",
+                                pointRadius = 4,
+                                pointHoverRadius = 6
+                            }
+                        }
+                },
+                options = new
+                {
+                    animation = false,
+                    maintainAspectRatio = false,
+                    responsive = true,
+                    plugins = new { legend = new { display = true } },
+                    scales = new { 
+                        x = new { type = "linear", title = new { display = true, text = "Acquisition Order" } }, 
+                        y = new { title = new { display = true, text = "Intensity (CPS)" } } 
+                    }
+                }
+            });
+
+            var verificationChartJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                type = "scatter",
+                data = new
+                {
+                    datasets = new object[] {
+                            new {
+                                label = "CRM / Check Standards",
+                                data = crmDataPoints,
+                                showLine = false,
+                                backgroundColor = "rgba(76,175,80,0.9)",
+                                borderColor = "rgba(76,175,80,1)",
+                                pointRadius = 3,
+                                pointHoverRadius = 5
+                            }
+                        }
+                },
+                options = new
+                {
+                    maintainAspectRatio = false,
+                    responsive = true,
+                    plugins = new { legend = new { display = true } },
+                    scales = new { 
+                        x = new { type = "linear", title = new { display = true, text = "Acquisition Order" } }, 
+                        y = new { title = new { display = true, text = "Concentration / Intensity" } } 
+                    }
+                }
+            });
+
+            // Parse JSON back to object for JS interop
+            var fullConfig = JsonDocument.Parse(fullChartJson).RootElement;
+            var verificationConfig = JsonDocument.Parse(verificationChartJson).RootElement;
+
+            try
+            {
+                await JS.InvokeVoidAsync("createChart", "fullDriftChart", fullConfig);
+            }
+            catch (Exception jsEx)
+            {
+                _logger?.LogWarning(jsEx, "JS interop failed for fullDriftChart");
+            }
+
+            try
+            {
+                await JS.InvokeVoidAsync("createChart", "verificationChart", verificationConfig);
+            }
+            catch (Exception jsEx)
+            {
+                _logger?.LogWarning(jsEx, "JS interop failed for verificationChart");
+            }
+
+            try
+            {
+                Snackbar.Add($"Charts updated: {_acqRows.Count} rows, {_rmRows.Count} RM points", Severity.Success);
+            }
+            catch { }
+        }
+        catch (Exception ex)
+        {
+            try { Snackbar.Add($"Failed to render charts: {ex.Message}", Severity.Error); } catch { }
+        }
+        finally
+        {
+            _isUpdatingCharts = false;
+        }
+    }
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        try
+        {
+            _chartUpdateCts?.Cancel();
+            _chartUpdateCts?.Dispose();
+        }
+        catch { }
+
+        // small delay to allow pending JS interop to settle
+        await Task.Yield();
+    }
+}
+
+@code {
+}
