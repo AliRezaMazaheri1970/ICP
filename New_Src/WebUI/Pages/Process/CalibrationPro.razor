@@ -38,24 +38,68 @@
 
         <MudPaper Elevation="0" Class="pa-3 mb-3 custom-card d-flex align-center flex-wrap gap-2">
             <MudText Typo="Typo.subtitle1" Color="Color.Primary" Class="fw-bold mr-2">Shared Settings</MudText>
-            <MudSelect T="string" Label="File" Variant="Variant.Outlined" Dense="true" Margin="Margin.Dense" Style="width:250px">
-                <MudSelectItem Value="@("All Files")" />
+            <MudSelect T="string"
+                       Label="File"
+                       Variant="Variant.Outlined"
+                       Dense="true"
+                       Margin="Margin.Dense"
+                       Style="width:250px"
+                       Value="_selectedFile"
+                       ValueChanged="OnFileChanged">
+                @foreach (var f in _files)
+                {
+                    <MudSelectItem Value="@f" />
+                }
             </MudSelect>
-            <MudSelect T="string" Label="Element" Variant="Variant.Outlined" Dense="true" Margin="Margin.Dense" Style="width:150px">
-                <MudSelectItem Value="@("Ag 328.068")" />
+            <MudSelect T="string"
+                       Label="Element"
+                       Variant="Variant.Outlined"
+                       Dense="true"
+                       Margin="Margin.Dense"
+                       Style="width:150px"
+                       Value="_selectedElement"
+                       ValueChanged="OnElementChanged">
+                @foreach (var el in _elements)
+                {
+                    <MudSelectItem Value="@el" />
+                }
             </MudSelect>
             
-            <MudText Class="mx-2">Current RM: <span style="color:#007bff; font-weight:bold;">1</span></MudText>
+            <MudText Class="mx-2">Current RM: <span style="color:#007bff; font-weight:bold;">@CurrentRmLabel</span></MudText>
             
-            <MudButton Variant="Variant.Filled" Class="dark-green-btn px-4">PREVIOUS RM</MudButton>
-            <MudButton Variant="Variant.Filled" Class="dark-green-btn px-4">NEXT RM</MudButton>
+            <MudButton Variant="Variant.Filled"
+                       Class="dark-green-btn px-4"
+                       OnClick="PrevRm">
+                PREVIOUS RM
+            </MudButton>
+            <MudButton Variant="Variant.Filled"
+                       Class="dark-green-btn px-4"
+                       OnClick="NextRm">
+                NEXT RM
+            </MudButton>
             
-            <MudTextField T="string" Placeholder="e.g. CRM001, Check, Sample..." Variant="Variant.Outlined" Dense="true" Margin="Margin.Dense" Label="Filter Solution" Style="width:200px" />
+            <MudTextField T="string"
+                          Placeholder="e.g. CRM001, Check, Sample..."
+                          Variant="Variant.Outlined"
+                          Dense="true"
+                          Margin="Margin.Dense"
+                          Label="Filter Solution"
+                          Style="width:200px"
+                          Value="_filterSolution"
+                          ValueChanged="OnFilterSolutionChanged" />
             
             <MudSpacer />
             
-            <MudButton Variant="Variant.Filled" Class="red-btn px-4">RESET ALL</MudButton>
-            <MudButton Variant="Variant.Filled" Class="green-btn px-4">CALIBRATION</MudButton>
+            <MudButton Variant="Variant.Filled"
+                       Class="red-btn px-4"
+                       OnClick="ResetAll">
+                RESET ALL
+            </MudButton>
+            <MudButton Variant="Variant.Filled"
+                       Class="green-btn px-4"
+                       OnClick="RunCalibrationAsync">
+                CALIBRATION
+            </MudButton>
         </MudPaper>
 
         <MudGrid Spacing="2">
@@ -76,11 +120,31 @@
                         </MudGrid>
                         
                         <div class="d-flex align-center gap-2 mt-2">
-                            <MudTextField T="double" Label="Blank" Value="0.0" Variant="Variant.Outlined" Dense="true" Margin="Margin.Dense" />
-                            <MudButton Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small">Reset BS</MudButton>
+                            <MudTextField T="string"
+                                          Label="Blank"
+                                          Variant="Variant.Outlined"
+                                          Dense="true"
+                                          Margin="Margin.Dense"
+                                          Value="@_previewBlank.ToString()"
+                                          ValueChanged="UpdatePreviewBlank" />
+                            <MudButton Variant="Variant.Filled"
+                                       Class="dark-green-btn"
+                                       Size="Size.Small"
+                                       OnClick="ResetBlankAndScale">
+                                Reset BS
+                            </MudButton>
                         </div>
                         
-                        <MudSlider T="double" Value="1.0" Min="0" Max="2" Step="0.01" Color="Color.Primary" Class="mt-2">Scale: 1.00</MudSlider>
+                        <MudSlider T="double"
+                                   Min="0"
+                                   Max="2"
+                                   Step="0.01"
+                                   Color="Color.Primary"
+                                   Class="mt-2"
+                                   Value="@_previewScale"
+                                   ValueChanged="UpdatePreviewScale">
+                            Scale: @_previewScale.ToString("0.00")
+                        </MudSlider>
 
                         <MudGrid Spacing="1" Class="mt-2">
                             <MudItem xs="4"><MudButton FullWidth="true" Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small">Ranges</MudButton></MudItem>
@@ -126,7 +190,7 @@
                 <MudStack Spacing="2">
                     <MudPaper Class="pa-3 custom-card">
                         <div class="section-header">RM Points — Current RM Only</div>
-                        <MudTable Items="@Elements" Dense="true" Hover="true" Bordered="true" FixedHeader="true" Height="350px">
+                        <MudTable Items="@VisibleRmPoints" Dense="true" Hover="true" Bordered="true" FixedHeader="true" Height="350px">
                             <HeaderContent>
                                 <MudTh>RM Label</MudTh>
                                 <MudTh>File</MudTh>
@@ -139,11 +203,11 @@
                             <RowTemplate>
                                 <MudTd>@context.Label</MudTd>
                                 <MudTd>File 1</MudTd>
-                                <MudTd>RM 1-49</MudTd>
+                                <MudTd>@GetNextRmLabel(context)</MudTd>
                                 <MudTd><span style="color:green; font-weight:bold;">Base</span></MudTd>
-                                <MudTd>@context.Orig</MudTd>
-                                <MudTd>@context.Curr</MudTd>
-                                <MudTd>1.00</MudTd>
+                                <MudTd>@FormatValue(context.Orig)</MudTd>
+                                <MudTd>@FormatValue(context.Curr)</MudTd>
+                                <MudTd>@GetRatio(context)</MudTd>
                             </RowTemplate>
                         </MudTable>
                     </MudPaper>
