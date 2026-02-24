@@ -228,19 +228,17 @@
             <MudItem xs="12" md="4">
                 <MudStack Spacing="2">
                     <MudPaper Class="pa-3 custom-card">
-                        <div class="section-header">Full Drift Plot — All Samples + All RMs</div>
-                        <div style="height:350px; background:white; border:1px solid #eee; position:relative;">
-                             <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); color:#ccc;">[Chart Visualization Area]</div>
-                             <img src="chart_placeholder_drift.png" style="width:100%; height:100%; object-fit:contain;" />
-                        </div>
+                        <MudText Typo="Typo.h6">Full Drift Plot — All Samples + All RMs</MudText>
+                    <div class="mt-2" style="height:360px;">
+                        <canvas id="fullDriftChart" style="width:100%;height:100%;"></canvas>
+                    </div>
                     </MudPaper>
 
                     <MudPaper Class="pa-3 custom-card">
-                        <div class="section-header">Verification Plot — CRM_Check Standards</div>
-                        <div style="height:350px; background:white; border:1px solid #eee; position:relative;">
-                             <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); color:#ccc;">[Verification Graph]</div>
-                             <img src="chart_placeholder_verify.png" style="width:100%; height:100%; object-fit:contain;" />
-                        </div>
+                       <MudText Typo="Typo.h6">Verification Plot — CRM_Check Standards</MudText>
+                    <div class="mt-2" style="height:200px;">
+                        <canvas id="verificationChart" style="width:100%;height:100%;"></canvas>
+                    </div>
                     </MudPaper>
                 </MudStack>
             </MudItem>
