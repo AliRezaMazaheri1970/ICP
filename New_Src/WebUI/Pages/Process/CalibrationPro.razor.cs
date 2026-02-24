@@ -416,5 +416,61 @@ namespace WebUI.Pages.Process
             try { await JS.InvokeVoidAsync("destroyChart", "verificationChart"); await JS.InvokeVoidAsync("createChart", "verificationChart", chartConfig); }
             catch (Exception ex) { _logger.LogError(ex, "Error rendering Verification chart"); }
         }
+
+
+
+        // مقادیر پیش‌فرض تلورانس
+        private decimal _rangeLow = 2.0m;
+        private decimal _rangeMid = 20.0m;
+        private decimal _rangeHigh1 = 10.0m;
+        private decimal _rangeHigh2 = 8.0m;
+        private decimal _rangeHigh3 = 5.0m;
+        private decimal _rangeHigh4 = 3.0m;
+
+        private async Task OpenRangesDialogAsync()
+        {
+            var parameters = new DialogParameters
+            {
+                { "RangeLow", _rangeLow },
+                { "RangeMid", _rangeMid },
+                { "RangeHigh1", _rangeHigh1 },
+                { "RangeHigh2", _rangeHigh2 },
+                { "RangeHigh3", _rangeHigh3 },
+                { "RangeHigh4", _rangeHigh4 }
+            };
+
+            var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+
+            // دیالوگ را باز میکند
+            var dialog = await DialogService.ShowAsync<RangesDialog>("Acceptable Ranges", parameters, options);
+            var result = await dialog.Result;
+
+            if (!result.Canceled && result.Data is decimal[] newRanges)
+            {
+                // گرفتن مقادیر جدید از دیالوگ
+                _rangeLow = newRanges[0];
+                _rangeMid = newRanges[1];
+                _rangeHigh1 = newRanges[2];
+                _rangeHigh2 = newRanges[3];
+                _rangeHigh3 = newRanges[4];
+                _rangeHigh4 = newRanges[5];
+
+                Snackbar.Add("Acceptable ranges updated.", Severity.Success);
+                // بروزرسانی چارت ها با مقادیر جدید
+                await UpdateChartsAsync();
+            }
+        }
+
+        // تابع محاسبه تلورانس (همان منطق پایتون)
+        private double GetToleranceValue(double value)
+        {
+            double absVal = Math.Abs(value);
+            if (absVal < 10) return (double)_rangeLow;
+            if (absVal < 100) return value * ((double)_rangeMid / 100.0);
+            if (absVal < 1000) return value * ((double)_rangeHigh1 / 100.0);
+            if (absVal < 10000) return value * ((double)_rangeHigh2 / 100.0);
+            if (absVal < 100000) return value * ((double)_rangeHigh3 / 100.0);
+            return value * ((double)_rangeHigh4 / 100.0);
+        }
     }
 }

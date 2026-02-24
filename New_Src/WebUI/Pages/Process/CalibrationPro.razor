@@ -11,6 +11,7 @@
 @inject IJSRuntime JS
 @using MudBlazor
 @inject WebUI.Services.CrmService CrmService
+@inject IDialogService DialogService
 
 <style>
     /* استایل‌های اختصاصی برای شباهت ۱۰۰ درصدی به تصویر */
@@ -148,7 +149,7 @@
                         </MudSlider>
 
                         <MudGrid Spacing="1" Class="mt-2">
-                            <MudItem xs="4"><MudButton FullWidth="true" Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small">Ranges</MudButton></MudItem>
+                            <MudItem xs="4"><MudButton FullWidth="true" Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small" OnClick="OpenRangesDialogAsync">Ranges</MudButton></MudItem>
                             <MudItem xs="4"><MudButton FullWidth="true" Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small">Exclude</MudButton></MudItem>
                             <MudItem xs="4"><MudButton FullWidth="true" Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small">Select CRMs</MudButton></MudItem>
                             <MudItem xs="6"><MudButton FullWidth="true" Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small">Undo CRM</MudButton></MudItem>
