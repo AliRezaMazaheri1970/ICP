@@ -87,6 +87,26 @@ public class PaginatedResult<T>
     public int TotalPages => (int)Math.Ceiling(TotalCount / (double)PageSize);
 }
 
+public class CrmVerificationDataDto
+{
+    [JsonPropertyName("crmId")]
+    public string CrmId { get; set; } = "";
+
+    [JsonPropertyName("solutionLabel")]
+    public string SolutionLabel { get; set; } = "";
+
+    [JsonPropertyName("certificateValue")]
+    public double CertificateValue { get; set; }
+
+    [JsonPropertyName("sampleValue")]
+    public double SampleValue { get; set; }
+
+    [JsonPropertyName("lowerBound")]
+    public double LowerBound { get; set; }
+
+    [JsonPropertyName("upperBound")]
+    public double UpperBound { get; set; }
+}
 // ============================================
 // CRM Service
 // ============================================
@@ -298,6 +318,35 @@ public class CrmService
         {
             _httpClient.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        }
+    }
+
+    public async Task<ServiceResult<List<CrmVerificationDataDto>>> GetVerificationChartDataAsync(Guid projectId, string element)
+    {
+        try
+        {
+            SetAuthHeader();
+            // این مسیر باید در API شما ساخته شود
+            var url = $"crm/verification-chart?projectId={projectId}&element={Uri.EscapeDataString(element)}";
+            var response = await _httpClient.GetAsync(url);
+            var content = await response.Content.ReadAsStringAsync();
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = JsonSerializer.Deserialize<ApiResult<List<CrmVerificationDataDto>>>(content,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                if (result?.Succeeded == true && result.Data != null)
+                    return ServiceResult<List<CrmVerificationDataDto>>.Success(result.Data);
+
+                return ServiceResult<List<CrmVerificationDataDto>>.Fail(result?.Message ?? "Failed");
+            }
+            return ServiceResult<List<CrmVerificationDataDto>>.Fail($"Server error: {response.StatusCode}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting verification chart data");
+            return ServiceResult<List<CrmVerificationDataDto>>.Fail($"Error: {ex.Message}");
         }
     }
 }

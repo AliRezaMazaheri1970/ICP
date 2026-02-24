@@ -1,52 +1,51 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
 using MudBlazor;
-using System.Text.Json;
 using WebUI.Services;
 
 namespace WebUI.Pages.Process
 {
     public partial class CalibrationPro
     {
+        // ==========================================
+        // Models
+        // ==========================================
         public class RMElement
         {
             public string Label { get; set; } = string.Empty;
             public double Orig { get; set; }
             public double Curr { get; set; }
-            /// <summary>شماره گروه RM از لیبل (مثلاً RM 1-15 → 1) برای فیلتر Current RM Only.</summary>
             public int RmGroup { get; set; }
-            /// <summary>ترتیب اکتساب برای مرتب‌سازی مثل پایتون.</summary>
             public int OriginalIndex { get; set; }
         }
 
-        /// <summary>همه نقطه‌های RM برای المنت فعلی؛ جدول فقط زیرمجموعهٔ گروه RM فعلی را نشان می‌دهد.</summary>
-        private List<RMElement> Elements { get; set; } = new()
+        public class SamplePoint
         {
-            new RMElement { Label = "RM 1-15", Orig = -0.04, Curr = -0.04, RmGroup = 1, OriginalIndex = 0 },
-            new RMElement { Label = "RM 1-49", Orig = -0.98, Curr = -0.98, RmGroup = 1, OriginalIndex = 1 },
-            new RMElement { Label = "RM 1-70", Orig = -1.41, Curr = -1.41, RmGroup = 1, OriginalIndex = 2 },
-            new RMElement { Label = "RM 1-98", Orig = -0.29, Curr = -0.29, RmGroup = 1, OriginalIndex = 3 },
-            new RMElement { Label = "RM 1-122", Orig = -0.17, Curr = -0.17, RmGroup = 1, OriginalIndex = 4 }
-        };
+            public string Label { get; set; } = string.Empty;
+            public double Orig { get; set; }
+            public int OriginalIndex { get; set; }
+        }
 
-        /// <summary>شماره‌های گروه RM یکتا و مرتب؛ Current RM = _rmGroupNumbers[_currentRmIndex].</summary>
-        private List<int> _rmGroupNumbers { get; set; } = new() { 1 };
-
-        // Element / file selection (top shared settings)
+        // ==========================================
+        // Properties & State
+        // ==========================================
+        private List<RMElement> Elements { get; set; } = new();
+        private List<SamplePoint> _allSamplePoints = new();
+        private List<int> _rmGroupNumbers { get; set; } = new();
         private List<string> _elements = new();
         private string? _selectedElement;
         private List<string> _files = new();
         private string? _selectedFile = "All Files";
 
-        /// <summary>ایندکس گروه RM فعلی (مثل پایتون: Current RM: 1, 2, 3, ...).</summary>
         private int _currentRmIndex = 0;
-
-        // Shared preview parameters (blank / scale / filter)
         private double _previewBlank = 0.0;
         private double _previewScale = 1.0;
         private string _filterSolution = string.Empty;
-
         private bool _isLoading;
 
         private int? CurrentRmGroupNumber =>
@@ -54,16 +53,16 @@ namespace WebUI.Pages.Process
                 ? _rmGroupNumbers[_currentRmIndex]
                 : null;
 
-        /// <summary>فقط نقطه‌های RM گروه فعلی — مطابق «RM Points — Current RM Only» در پایتون.</summary>
         private List<RMElement> VisibleRmPoints =>
             CurrentRmGroupNumber is int g
                 ? Elements.Where(e => e.RmGroup == g).OrderBy(e => e.OriginalIndex).ToList()
                 : new List<RMElement>();
 
-        private string CurrentRmLabel =>
-            CurrentRmGroupNumber is int n ? n.ToString() : "-";
+        private string CurrentRmLabel => CurrentRmGroupNumber is int n ? n.ToString() : "-";
 
-        /// <summary>اولین عدد بعد از «RM» در لیبل = شماره گروه (مثلاً RM 1-15 → 1، RM 2-20 → 2).</summary>
+        // ==========================================
+        // Table UI Helper Methods (رفع ارورهای شما)
+        // ==========================================
         private static int ParseRmGroupFromLabel(string label)
         {
             if (string.IsNullOrWhiteSpace(label)) return 1;
@@ -71,15 +70,12 @@ namespace WebUI.Pages.Process
             return m.Success && int.TryParse(m.Groups[1].Value, out var num) ? num : 1;
         }
 
-        /// <summary>برای نمایش یکسان مقادیر عددی در جدول RM Points.</summary>
         private static string FormatValue(double value) =>
             double.IsNaN(value) || double.IsInfinity(value) ? "—" : value.ToString("0.00");
 
-        /// <summary>نسبت Current/Original مثل پایتون؛ اگر Orig=0 مقدار N/A.</summary>
         private static string GetRatio(RMElement row) =>
             Math.Abs(row.Orig) < 1e-12 ? "N/A" : (row.Curr / row.Orig).ToString("0.00");
 
-        /// <summary>برچسب «Next RM» در جدول فعلی (فقط گروه فعلی).</summary>
         private string GetNextRmLabel(RMElement context)
         {
             var visible = VisibleRmPoints;
@@ -88,92 +84,22 @@ namespace WebUI.Pages.Process
             return visible[idx + 1].Label;
         }
 
-        private async Task LoadRmTableForCurrentElementAsync(Guid projectId)
-        {
-            if (string.IsNullOrWhiteSpace(_selectedElement))
-                return;
-
-            var request = new AdvancedPivotRequest(
-                ProjectId: projectId,
-                SelectedElements: new List<string> { _selectedElement },
-                Page: 1,
-                PageSize: 2000
-            );
-
-            var pivotResult = await PivotService.GetAdvancedPivotTableAsync(request);
-            if (!pivotResult.Succeeded || pivotResult.Data is null)
-                return;
-
-            // مثل پایتون: فقط ردیف‌هایی که با "RM" شروع می‌شوند (نه CRM)
-            // find_rm.py: pivot_df['Solution Label'].str.match(rf'^{keyword}', ...)
-            var rmRows = pivotResult.Data.Rows
-                .Where(r => !string.IsNullOrEmpty(r.SolutionLabel) &&
-                    r.SolutionLabel.Trim().StartsWith("RM", StringComparison.OrdinalIgnoreCase) &&
-                    !r.SolutionLabel.Trim().StartsWith("CRM", StringComparison.OrdinalIgnoreCase))
-                .ToList();
-
-            if (rmRows.Count == 0)
-            {
-                Elements = new List<RMElement>();
-                _rmGroupNumbers = new List<int>();
-                _currentRmIndex = 0;
-                return;
-            }
-
-            // ترتیب اکتساب مثل پایتون (بر اساس originalIndex)
-            var ordered = rmRows.OrderBy(r => r.OriginalIndex).ToList();
-
-            Elements = ordered
-                .Select((r, i) =>
-                {
-                    double value = 0;
-                    if (r.Values != null &&
-                        r.Values.TryGetValue(_selectedElement, out var v) &&
-                        v.HasValue)
-                    {
-                        value = (double)v.Value;
-                    }
-
-                    int rmGroup = ParseRmGroupFromLabel(r.SolutionLabel);
-
-                    return new RMElement
-                    {
-                        Label = r.SolutionLabel,
-                        Orig = value,
-                        Curr = value,
-                        RmGroup = rmGroup,
-                        OriginalIndex = r.OriginalIndex
-                    };
-                })
-                .ToList();
-
-            // لیست یکتای گروه‌ها برای PREVIOUS/NEXT RM (مثل پایتون)
-            _rmGroupNumbers = Elements.Select(e => e.RmGroup).Distinct().OrderBy(x => x).ToList();
-            _currentRmIndex = _rmGroupNumbers.Count > 0 ? 0 : -1;
-        }
-
+        // ==========================================
+        // Lifecycle & Data Loading
+        // ==========================================
         protected override async Task OnInitializedAsync()
         {
             _isLoading = true;
             try
             {
-                // اگر پروژه‌ای انتخاب نشده باشد، همان داده‌های نمایشی اولیه استفاده می‌شوند
                 if (ProjectService.CurrentProjectId is Guid projectId)
                 {
-                    // عناصر و RM‌ها را شبیه منطق پایتون از Pivot می‌خوانیم
-                    var request = new AdvancedPivotRequest(
-                        ProjectId: projectId,
-                        Page: 1,
-                        PageSize: 2000
-                    );
-
+                    var request = new AdvancedPivotRequest(ProjectId: projectId, Page: 1, PageSize: 5000);
                     var pivotResult = await PivotService.GetAdvancedPivotTableAsync(request);
                     if (pivotResult.Succeeded && pivotResult.Data is not null)
                     {
                         _elements = pivotResult.Data.Metadata?.AllElements ?? new List<string>();
                         _selectedElement ??= _elements.FirstOrDefault();
-
-                        // فایل‌ها فقط برای نمایش drop-down؛ فعلاً از متادیتا می‌خوانیم اگر موجود بود
                         _files = new List<string> { "All Files" };
 
                         if (_selectedElement is not null)
@@ -194,96 +120,301 @@ namespace WebUI.Pages.Process
             }
         }
 
-        // --- Top shared settings actions (Python parity style) ---
-
-        private void OnFileChanged(string? value)
+        protected override async Task OnAfterRenderAsync(bool firstRender)
         {
-            _selectedFile = value;
-            // در نسخه‌ی وب فعلاً فقط فیلتر نمایشی است؛ منطق دقیق per-file
-            // مشابه پایتون در سرور پیاده‌سازی خواهد شد.
+            if (firstRender)
+            {
+                await UpdateChartsAsync();
+            }
         }
 
+        private async Task LoadRmTableForCurrentElementAsync(Guid projectId)
+        {
+            if (string.IsNullOrWhiteSpace(_selectedElement)) return;
+
+            var request = new AdvancedPivotRequest(ProjectId: projectId, SelectedElements: new List<string> { _selectedElement }, Page: 1, PageSize: 5000);
+            var pivotResult = await PivotService.GetAdvancedPivotTableAsync(request);
+
+            if (!pivotResult.Succeeded || pivotResult.Data is null) return;
+
+            var allRows = pivotResult.Data.Rows.ToList();
+
+            var rmRows = allRows
+                .Where(r => !string.IsNullOrEmpty(r.SolutionLabel) &&
+                    r.SolutionLabel.Trim().StartsWith("RM", StringComparison.OrdinalIgnoreCase) &&
+                    !r.SolutionLabel.Trim().StartsWith("CRM", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(r => r.OriginalIndex).ToList();
+
+            _allSamplePoints = allRows
+                .Where(r => !string.IsNullOrEmpty(r.SolutionLabel) &&
+                    !r.SolutionLabel.Trim().StartsWith("RM", StringComparison.OrdinalIgnoreCase) &&
+                    !r.SolutionLabel.Trim().StartsWith("CRM", StringComparison.OrdinalIgnoreCase) &&
+                    !r.SolutionLabel.Trim().StartsWith("Blank", StringComparison.OrdinalIgnoreCase))
+                .Select(r => {
+                    double value = 0;
+                    if (r.Values != null && r.Values.TryGetValue(_selectedElement, out var v) && v.HasValue)
+                        value = Convert.ToDouble(v.Value);
+                    return new SamplePoint { Label = r.SolutionLabel, Orig = value, OriginalIndex = r.OriginalIndex };
+                }).Where(s => s.Orig > 0).ToList();
+
+            if (rmRows.Count == 0)
+            {
+                Elements = new List<RMElement>();
+                _rmGroupNumbers = new List<int>();
+                _currentRmIndex = 0;
+                await UpdateChartsAsync();
+                return;
+            }
+
+            Elements = rmRows.Select(r =>
+            {
+                double value = 0;
+                if (r.Values != null && r.Values.TryGetValue(_selectedElement, out var v) && v.HasValue)
+                    value = Convert.ToDouble(v.Value);
+
+                return new RMElement
+                {
+                    Label = r.SolutionLabel,
+                    Orig = value,
+                    Curr = value,
+                    RmGroup = ParseRmGroupFromLabel(r.SolutionLabel),
+                    OriginalIndex = r.OriginalIndex
+                };
+            }).ToList();
+
+            _rmGroupNumbers = Elements.Select(e => e.RmGroup).Distinct().OrderBy(x => x).ToList();
+            _currentRmIndex = _rmGroupNumbers.Count > 0 ? 0 : -1;
+
+            await UpdateChartsAsync();
+        }
+
+        // ==========================================
+        // Event Handlers
+        // ==========================================
+        private async Task OnFileChanged(string? value) { _selectedFile = value; await UpdateChartsAsync(); }
         private async Task OnElementChanged(string? value)
         {
             _selectedElement = value;
-
-            if (ProjectService.CurrentProjectId is Guid projectId &&
-                !string.IsNullOrWhiteSpace(_selectedElement))
+            if (ProjectService.CurrentProjectId is Guid projectId && !string.IsNullOrWhiteSpace(_selectedElement))
             {
                 await LoadRmTableForCurrentElementAsync(projectId);
                 StateHasChanged();
             }
         }
+        private async Task OnFilterSolutionChanged(string value) { _filterSolution = value ?? string.Empty; await UpdateChartsAsync(); }
+        private async Task PrevRm() { if (_rmGroupNumbers != null && _currentRmIndex > 0) { _currentRmIndex--; await UpdateChartsAsync(); } }
+        private async Task NextRm() { if (_rmGroupNumbers != null && _currentRmIndex < _rmGroupNumbers.Count - 1) { _currentRmIndex++; await UpdateChartsAsync(); } }
+        private async Task ResetAll() { foreach (var el in Elements) el.Curr = el.Orig; _previewBlank = 0.0; _previewScale = 1.0; _filterSolution = string.Empty; await UpdateChartsAsync(); }
+        private async Task RunCalibrationAsync() { await Task.Yield(); Snackbar.Add("Calibration run is not implemented on the server yet.", Severity.Warning); }
+        private async Task UpdatePreviewBlank(string value) { if (!double.TryParse(value, out _previewBlank)) _previewBlank = 0.0; await UpdateChartsAsync(); }
+        private async Task UpdatePreviewScale(double value) { _previewScale = value; await UpdateChartsAsync(); }
+        private async Task ResetBlankAndScale() { _previewBlank = 0.0; _previewScale = 1.0; await UpdateChartsAsync(); }
 
-        private void OnFilterSolutionChanged(string value)
+        // ==========================================
+        // Chart Generation Logic (Exact Python Logic)
+        // ==========================================
+        private async Task UpdateChartsAsync()
         {
-            _filterSolution = value ?? string.Empty;
-            // این فیلتر بعداً برای جدول‌های پشتی (pivot) و نمودارها استفاده می‌شود
-            // مشابه handler_apply_solution_filter در نسخه‌ی پایتونی.
+            await UpdateDriftChartAsync();
+            await UpdateVerificationChartAsync();
         }
 
-        private void PrevRm()
+        private async Task UpdateDriftChartAsync()
         {
-            if (_rmGroupNumbers == null || _rmGroupNumbers.Count == 0)
-                return;
-            if (_currentRmIndex > 0)
-                _currentRmIndex--;
-        }
-
-        private void NextRm()
-        {
-            if (_rmGroupNumbers == null || _rmGroupNumbers.Count == 0)
-                return;
-            if (_currentRmIndex < _rmGroupNumbers.Count - 1)
-                _currentRmIndex++;
-        }
-
-        private void ResetAll()
-        {
-            foreach (var el in Elements)
+            var rmPointsToDraw = VisibleRmPoints.Any() ? VisibleRmPoints : Elements;
+            if (!rmPointsToDraw.Any())
             {
-                el.Curr = el.Orig;
+                await JS.InvokeVoidAsync("destroyChart", "fullDriftChart");
+                return;
             }
 
-            _previewBlank = 0.0;
-            _previewScale = 1.0;
-            _filterSolution = string.Empty;
+            var rmData = rmPointsToDraw.Select(e => new { x = (double?)e.OriginalIndex, y = (double?)e.Curr, label = e.Label }).ToList();
 
-            Snackbar.Add("All calibration changes reset to original values.", Severity.Info);
-        }
+            var minIndex = rmPointsToDraw.Min(r => r.OriginalIndex);
+            var maxIndex = rmPointsToDraw.Max(r => r.OriginalIndex);
+            var relevantSamples = _allSamplePoints.Where(s => s.OriginalIndex >= minIndex && s.OriginalIndex <= maxIndex).ToList();
 
-        private async Task RunCalibrationAsync()
-        {
-            // این متد معادل run_calibration / start_check_rm_thread در پایتون است.
-            // در وب نسخه‌ی کامل نیاز به API سمت سرور دارد؛ فعلاً یک placeholder است
-            // که بعداً به endpoint واقعی متصل می‌شود.
-            await Task.Yield();
-            Snackbar.Add("Calibration run is not implemented on the server yet.", Severity.Warning);
-        }
+            var originalData = relevantSamples.Select(e => new { x = (double?)e.OriginalIndex, y = (double?)e.Orig, label = e.Label }).ToList();
 
-        // --- CRM verification preview (blank / scale) ---
-
-        private void UpdatePreviewBlank(string value)
-        {
-            if (!double.TryParse(value, out _previewBlank))
+            var correctedData = new List<object>();
+            for (int i = 0; i < rmPointsToDraw.Count - 1; i++)
             {
-                _previewBlank = 0.0;
+                var prevRm = rmPointsToDraw[i];
+                var nextRm = rmPointsToDraw[i + 1];
+
+                var segmentSamples = relevantSamples.Where(s => s.OriginalIndex > prevRm.OriginalIndex && s.OriginalIndex < nextRm.OriginalIndex).ToList();
+
+                double prevRatio = prevRm.Orig != 0 ? prevRm.Curr / prevRm.Orig : 1.0;
+                double currentRatio = nextRm.Orig != 0 ? nextRm.Curr / nextRm.Orig : 1.0;
+
+                int n = segmentSamples.Count;
+                if (n > 0)
+                {
+                    double z = (currentRatio - prevRatio) / n;
+                    for (int j = 0; j < n; j++)
+                    {
+                        double ratio = (z * (j + 1)) + prevRatio;
+                        double adjusted = segmentSamples[j].Orig - _previewBlank;
+                        double scaled = adjusted * _previewScale;
+                        double correctedY = scaled * ratio;
+
+                        correctedData.Add(new { x = (double?)segmentSamples[j].OriginalIndex, y = (double?)correctedY, label = segmentSamples[j].Label });
+                    }
+                }
             }
-            // در نسخه‌ی کامل اینجا باید نمودارها و جداول به‌روزرسانی شوند
-            // مشابه update_preview_params در کد پایتون.
+
+            var chartConfig = new
+            {
+                type = "scatter",
+                data = new
+                {
+                    datasets = new object[]
+                    {
+                        new { label = "RM Points", data = rmData, backgroundColor = "#2E7D32", pointStyle = "circle", pointRadius = 6 },
+                        new { label = "Original Values", data = originalData, backgroundColor = "#F44336", borderColor = "#D32F2F", pointStyle = "crossRot", pointRadius = 6, borderWidth = 2 },
+                        new { label = "Corrected Values", data = correctedData, backgroundColor = "#2196F3", borderColor = "#1976D2", pointStyle = "circle", pointRadius = 4 }
+                    }
+                },
+                //options = new
+                //{
+                //    responsive = true,
+                //    maintainAspectRatio = false,
+                //    plugins = new { title = new { display = true, text = $"Drift Plot — {_selectedElement ?? "Unknown"}" } },
+                //    scales = new { x = new { type = "linear", position = "bottom", title = new { display = true, text = "Original Index" } }, y = new { title = new { display = true, text = "Value" } } }
+                //}
+                options = new
+                {
+                    responsive = true,
+                    maintainAspectRatio = false,
+                    plugins = new
+                    {
+                        title = new { display = true, text = $"Title of your chart" },
+                        // ------- این بلوک زوم را اضافه کنید -------
+                        zoom = new
+                        {
+                            zoom = new
+                            {
+                                wheel = new { enabled = true }, // فعال کردن زوم با اسکرول موس
+                                pinch = new { enabled = true }, // فعال کردن زوم با دو انگشت در موبایل
+                                mode = "xy" // اجازه زوم در هر دو محور X و Y
+                            },
+                            pan = new
+                            {
+                                enabled = true, // فعال کردن جابجایی در چارت (Pan)
+                                mode = "xy" // جابجایی در هر دو محور
+                            }
+                        }
+                        // ---------------------------------------------
+                    },
+                    scales = new { /* اسکیل های قبلی شما */ }
+                }
+            };
+
+            try { await JS.InvokeVoidAsync("destroyChart", "fullDriftChart"); await JS.InvokeVoidAsync("createChart", "fullDriftChart", chartConfig); }
+            catch (Exception ex) { _logger.LogError(ex, "Error rendering Drift chart"); }
         }
 
-        private void UpdatePreviewScale(double value)
+        private async Task UpdateVerificationChartAsync()
         {
-            _previewScale = value;
-            // در نسخه‌ی کامل اینجا باید نمودارها و جداول به‌روزرسانی شوند.
-        }
+            if (ProjectService.CurrentProjectId is not Guid projectId || string.IsNullOrWhiteSpace(_selectedElement)) return;
 
-        private void ResetBlankAndScale()
-        {
-            _previewBlank = 0.0;
-            _previewScale = 1.0;
-            Snackbar.Add("Blank and scale set to defaults.", Severity.Info);
+            var diffResult = await CrmService.CalculateDiffAsync(projectId, null, -10m, 10m);
+
+            if (!diffResult.Succeeded || diffResult.Data == null || !diffResult.Data.Any())
+            {
+                await JS.InvokeVoidAsync("destroyChart", "verificationChart");
+                return;
+            }
+
+            var crmPoints = new List<dynamic>();
+            foreach (var crm in diffResult.Data)
+            {
+                var elemDiff = crm.Differences.FirstOrDefault(d => d.Element.Equals(_selectedElement, StringComparison.OrdinalIgnoreCase));
+                if (elemDiff != null)
+                {
+                    double crmVal = Convert.ToDouble(elemDiff.CrmValue);
+                    double measuredVal = Convert.ToDouble(elemDiff.MeasuredValue);
+                    double rangeVal = crmVal * 0.1;
+
+                    crmPoints.Add(new
+                    {
+                        CrmId = crm.CrmId,
+                        Label = crm.SolutionLabel,
+                        SampleVal = measuredVal,
+                        CertVal = crmVal,
+                        LowerBound = crmVal - rangeVal,
+                        UpperBound = crmVal + rangeVal
+                    });
+                }
+            }
+
+            if (!crmPoints.Any()) { await JS.InvokeVoidAsync("destroyChart", "verificationChart"); return; }
+
+            var uniqueCrmIds = crmPoints.Select(c => (string)c.CrmId).ToArray();
+            var certPoints = crmPoints.Select((c, i) => new { x = (double?)i, y = (double?)c.CertVal }).ToList();
+            var samplePoints = crmPoints.Select((c, i) => new { x = (double?)i, y = (double?)c.SampleVal }).ToList();
+
+            var rangeData = new List<object>();
+            for (int i = 0; i < crmPoints.Count; i++)
+            {
+                rangeData.Add(new { x = (double?)(i - 0.2), y = (double?)crmPoints[i].LowerBound });
+                rangeData.Add(new { x = (double?)(i + 0.2), y = (double?)crmPoints[i].LowerBound });
+                rangeData.Add(new { x = (double?)null, y = (double?)null });
+                rangeData.Add(new { x = (double?)(i - 0.2), y = (double?)crmPoints[i].UpperBound });
+                rangeData.Add(new { x = (double?)(i + 0.2), y = (double?)crmPoints[i].UpperBound });
+                rangeData.Add(new { x = (double?)null, y = (double?)null });
+            }
+
+            var chartConfig = new
+            {
+                type = "scatter",
+                data = new
+                {
+                    datasets = new object[]
+                    {
+                        new { label = "Certificate Value", data = certPoints, backgroundColor = "green", pointStyle = "circle", pointRadius = 6 },
+                        new { label = "Sample Value", data = samplePoints, backgroundColor = "blue", pointStyle = "triangle", rotation = 180, pointRadius = 7 },
+                        new { label = "Acceptable Range", data = rangeData, borderColor = "red", borderWidth = 2, showLine = true, pointRadius = 0, fill = false, spanGaps = false }
+                    }
+                },
+                //options = new
+                //{
+                //    responsive = true,
+                //    maintainAspectRatio = false,
+                //    xLabels = uniqueCrmIds,
+                //    plugins = new { title = new { display = true, text = $"Verification Plot - {_selectedElement}" } },
+                //    scales = new { x = new { type = "linear", position = "bottom", min = -0.5, max = uniqueCrmIds.Length - 0.5 }, y = new { title = new { display = true, text = "Value" } } }
+                //}
+                options = new
+                {
+                    responsive = true,
+                    maintainAspectRatio = false,
+                    plugins = new
+                    {
+                        title = new { display = true, text = $"Title of your chart" },
+                        // ------- این بلوک زوم را اضافه کنید -------
+                        zoom = new
+                        {
+                            zoom = new
+                            {
+                                wheel = new { enabled = true }, // فعال کردن زوم با اسکرول موس
+                                pinch = new { enabled = true }, // فعال کردن زوم با دو انگشت در موبایل
+                                mode = "xy" // اجازه زوم در هر دو محور X و Y
+                            },
+                            pan = new
+                            {
+                                enabled = true, // فعال کردن جابجایی در چارت (Pan)
+                                mode = "xy" // جابجایی در هر دو محور
+                            }
+                        }
+                        // ---------------------------------------------
+                    },
+                    scales = new { /* اسکیل های قبلی شما */ }
+                }
+            };
+
+            try { await JS.InvokeVoidAsync("destroyChart", "verificationChart"); await JS.InvokeVoidAsync("createChart", "verificationChart", chartConfig); }
+            catch (Exception ex) { _logger.LogError(ex, "Error rendering Verification chart"); }
         }
     }
 }
