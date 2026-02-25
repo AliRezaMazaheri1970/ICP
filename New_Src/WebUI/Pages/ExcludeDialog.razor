@@ -1,0 +1,142 @@
+﻿@using MudBlazor
+
+<style>
+    .desktop-dialog .mud-dialog-title { display: none; } 
+    .desktop-dialog .mud-dialog-content { padding: 0 !important; }
+    .desktop-dialog .mud-dialog-actions { padding: 0 !important; border: none; }
+
+    .desktop-window {
+        background-color: #f0f0f0;
+        border: 1px solid #7a7a7a;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        font-size: 13px;
+        color: #000;
+        border-radius: 0 !important;
+    }
+    .desktop-header {
+        background-color: #ffffff;
+        padding: 8px 12px;
+        border-bottom: 1px solid #d0d0d0;
+        font-weight: bold;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+    }
+    .desktop-body {
+        padding: 10px 12px;
+        background-color: #f0f0f0;
+    }
+    .desktop-grid-container {
+        background-color: #fff;
+        border: 1px solid #828790;
+        height: 250px;
+        overflow-y: auto;
+        margin-bottom: 12px;
+    }
+    .desktop-grid {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    .desktop-grid th {
+        background-color: #f5f5f5;
+        border-bottom: 1px solid #d0d0d0;
+        border-right: 1px solid #d0d0d0;
+        padding: 4px 8px;
+        text-align: left;
+        font-weight: normal;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+    }
+    .desktop-grid td {
+        border-bottom: 1px solid #eee;
+        border-right: 1px solid #eee;
+        padding: 4px 8px;
+    }
+    .desktop-grid tr:hover {
+        background-color: #cce8ff;
+    }
+    .desktop-input-group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .desktop-input {
+        flex-grow: 1;
+        border: 1px solid #828790;
+        padding: 3px 6px;
+        font-size: 13px;
+        outline: none;
+        background: #fff;
+    }
+    .desktop-input:focus {
+        border-color: #0078d7;
+    }
+    .desktop-footer {
+        padding: 10px 12px;
+        background-color: #f0f0f0;
+        border-top: 1px solid #dfdfdf;
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+    }
+    .desktop-btn {
+        background-color: #e1e1e1;
+        border: 1px solid #adadad;
+        padding: 4px 24px;
+        font-size: 13px;
+        cursor: pointer;
+        color: #000;
+    }
+    .desktop-btn:hover {
+        background-color: #e5f1fb;
+        border-color: #0078d7;
+    }
+</style>
+
+<MudDialog Class="desktop-dialog desktop-window" DisableSidePadding="true">
+    <DialogContent>
+        <div class="desktop-header">
+            Exclude Data
+        </div>
+        <div class="desktop-body">
+            <div class="desktop-grid-container">
+                <table class="desktop-grid">
+                    <thead>
+                        <tr>
+                            <th>Solution Label</th>
+                            <th>value</th>
+                            <th style="width: 80px; text-align: center;">Exclude</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (Items != null)
+                        {
+                            foreach (var item in Items)
+                            {
+                                <tr>
+                                    <td>@item.Name</td>
+                                    <td>@item.Value</td>
+                                    <td style="text-align: center;">
+                                        <input type="checkbox" @bind="item.IsExcluded" style="cursor: pointer;" />
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="desktop-input-group">
+                <label>Reason:</label>
+                <input type="text" class="desktop-input" @bind="ExcludeReason" />
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <div class="desktop-footer">
+            <button class="desktop-btn" @onclick="Submit">OK</button>
+            <button class="desktop-btn" @onclick="Cancel">Cancel</button>
+        </div>
+    </DialogActions>
+</MudDialog>

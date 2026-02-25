@@ -150,8 +150,8 @@
 
                         <MudGrid Spacing="1" Class="mt-2">
                             <MudItem xs="4"><MudButton FullWidth="true" Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small" OnClick="OpenRangesDialogAsync">Ranges</MudButton></MudItem>
-                            <MudItem xs="4"><MudButton FullWidth="true" Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small">Exclude</MudButton></MudItem>
-                            <MudItem xs="4"><MudButton FullWidth="true" Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small">Select CRMs</MudButton></MudItem>
+                            <MudItem xs="4"><MudButton FullWidth="true" Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small" OnClick="OpenExcludeDialog">Exclude</MudButton></MudItem>
+                            <MudItem xs="4"><MudButton FullWidth="true" Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small" OnClick="OpenSelectCrmsDialog">Select CRMs</MudButton></MudItem>
                             <MudItem xs="6"><MudButton FullWidth="true" Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small">Undo CRM</MudButton></MudItem>
                             <MudItem xs="6"><MudButton FullWidth="true" Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small">Correct CRM</MudButton></MudItem>
                             <MudItem xs="6"><MudButton FullWidth="true" Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small">Apply Our Model</MudButton></MudItem>
@@ -192,27 +192,7 @@
                 <MudStack Spacing="2">
                     <MudPaper Class="pa-3 custom-card">
                         <div class="section-header">RM Points — Current RM Only</div>
-                        @* <MudTable Items="@VisibleRmPoints" Dense="true" Hover="true" Bordered="true" FixedHeader="true" Height="350px">
-                            <HeaderContent>
-                                <MudTh>RM Label</MudTh>
-                                <MudTh>File</MudTh>
-                                <MudTh>Next RM</MudTh>
-                                <MudTh>Type</MudTh>
-                                <MudTh>Original Value</MudTh>
-                                <MudTh>Current Value</MudTh>
-                                <MudTh>Ratio</MudTh>
-                            </HeaderContent>
-                            <RowTemplate>
-                                <MudTd>@context.Label</MudTd>
-                                <MudTd>File 1</MudTd>
-                                <MudTd>@GetNextRmLabel(context)</MudTd>
-                                <MudTd><span style="color:green; font-weight:bold;">Base</span></MudTd>
-                                <MudTd>@FormatValue(context.Orig)</MudTd>
-                                <MudTd>@FormatValue(context.Curr)</MudTd>
-                                <MudTd>@GetRatio(context)</MudTd>
-                            </RowTemplate>
-                        </MudTable> *@
-
+                   
     <MudTable T="RMElement"
           Items="@VisibleRmPoints"
           Dense="true"
@@ -249,14 +229,6 @@
 
                     <MudPaper Class="pa-3 custom-card">
                         <div class="section-header">All Acquisition Data — Original + New Value</div>
-                        @* <MudTable Items="@(new List<string>())" Dense="true" Bordered="true" Height="250px" Placeholder="No data available">
-                            <HeaderContent>
-                                <MudTh>Solution Label</MudTh>
-                                <MudTh>Original Value</MudTh>
-                                <MudTh>Corrected Value</MudTh>
-                            </HeaderContent>
-                        </MudTable> *@
-
                         <MudTable Items="@_selectedSegmentSamples"
           Dense="true"
           Bordered="true"

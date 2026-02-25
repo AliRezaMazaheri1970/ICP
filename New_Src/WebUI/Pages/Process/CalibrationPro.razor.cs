@@ -36,6 +36,7 @@ namespace WebUI.Pages.Process
         // ==========================================
         private List<RMElement> Elements { get; set; } = new();
         private List<SamplePoint> _allSamplePoints = new();
+        private Dictionary<string, bool> IncludedCrms { get; set; } = new();
         private List<int> _rmGroupNumbers { get; set; } = new();
         private List<string> _elements = new();
         private string? _selectedElement;
@@ -137,7 +138,21 @@ namespace WebUI.Pages.Process
 
             if (!pivotResult.Succeeded || pivotResult.Data is null) return;
 
+
             var allRows = pivotResult.Data.Rows.ToList();
+
+            var crmLabels = allRows
+                .Where(r => !string.IsNullOrEmpty(r.SolutionLabel) &&
+                            r.SolutionLabel.Trim().StartsWith("CRM", StringComparison.OrdinalIgnoreCase))
+                .Select(r => r.SolutionLabel)
+                .Distinct()
+                .ToList();
+
+            foreach (var label in crmLabels)
+            {
+                if (!IncludedCrms.ContainsKey(label))
+                    IncludedCrms[label] = true;
+            }
 
             var rmRows = allRows
                 .Where(r => !string.IsNullOrEmpty(r.SolutionLabel) &&
@@ -275,13 +290,6 @@ namespace WebUI.Pages.Process
                         new { label = "Corrected Values", data = correctedData, backgroundColor = "#2196F3", borderColor = "#1976D2", pointStyle = "circle", pointRadius = 4 }
                     }
                 },
-                //options = new
-                //{
-                //    responsive = true,
-                //    maintainAspectRatio = false,
-                //    plugins = new { title = new { display = true, text = $"Drift Plot — {_selectedElement ?? "Unknown"}" } },
-                //    scales = new { x = new { type = "linear", position = "bottom", title = new { display = true, text = "Original Index" } }, y = new { title = new { display = true, text = "Value" } } }
-                //}
                 options = new
                 {
                     responsive = true,
@@ -294,14 +302,14 @@ namespace WebUI.Pages.Process
                         {
                             zoom = new
                             {
-                                wheel = new { enabled = true }, // فعال کردن زوم با اسکرول موس
-                                pinch = new { enabled = true }, // فعال کردن زوم با دو انگشت در موبایل
-                                mode = "xy" // اجازه زوم در هر دو محور X و Y
+                                wheel = new { enabled = true }, 
+                                pinch = new { enabled = true }, 
+                                mode = "xy" 
                             },
                             pan = new
                             {
-                                enabled = true, // فعال کردن جابجایی در چارت (Pan)
-                                mode = "xy" // جابجایی در هر دو محور
+                                enabled = true, 
+                                mode = "xy" 
                             }
                         }
                         // ---------------------------------------------
@@ -329,6 +337,10 @@ namespace WebUI.Pages.Process
             var crmPoints = new List<dynamic>();
             foreach (var crm in diffResult.Data)
             {
+                if (IncludedCrms.TryGetValue(crm.SolutionLabel, out bool isIncluded) && !isIncluded)
+                {
+                    continue;
+                }
                 var elemDiff = crm.Differences.FirstOrDefault(d => d.Element.Equals(_selectedElement, StringComparison.OrdinalIgnoreCase));
                 if (elemDiff != null)
                 {
@@ -377,14 +389,6 @@ namespace WebUI.Pages.Process
                         new { label = "Acceptable Range", data = rangeData, borderColor = "red", borderWidth = 2, showLine = true, pointRadius = 0, fill = false, spanGaps = false }
                     }
                 },
-                //options = new
-                //{
-                //    responsive = true,
-                //    maintainAspectRatio = false,
-                //    xLabels = uniqueCrmIds,
-                //    plugins = new { title = new { display = true, text = $"Verification Plot - {_selectedElement}" } },
-                //    scales = new { x = new { type = "linear", position = "bottom", min = -0.5, max = uniqueCrmIds.Length - 0.5 }, y = new { title = new { display = true, text = "Value" } } }
-                //}
                 options = new
                 {
                     responsive = true,
@@ -392,19 +396,19 @@ namespace WebUI.Pages.Process
                     plugins = new
                     {
                         title = new { display = true, text = $"Title of your chart" },
-                        // ------- این بلوک زوم را اضافه کنید -------
+                   
                         zoom = new
                         {
                             zoom = new
                             {
-                                wheel = new { enabled = true }, // فعال کردن زوم با اسکرول موس
-                                pinch = new { enabled = true }, // فعال کردن زوم با دو انگشت در موبایل
-                                mode = "xy" // اجازه زوم در هر دو محور X و Y
+                                wheel = new { enabled = true }, 
+                                pinch = new { enabled = true }, 
+                                mode = "xy" 
                             },
                             pan = new
                             {
-                                enabled = true, // فعال کردن جابجایی در چارت (Pan)
-                                mode = "xy" // جابجایی در هر دو محور
+                                enabled = true, 
+                                mode = "xy" 
                             }
                         }
                         // ---------------------------------------------
@@ -418,8 +422,6 @@ namespace WebUI.Pages.Process
         }
 
 
-
-        // مقادیر پیش‌فرض تلورانس
         private decimal _rangeLow = 2.0m;
         private decimal _rangeMid = 20.0m;
         private decimal _rangeHigh1 = 10.0m;
@@ -441,13 +443,12 @@ namespace WebUI.Pages.Process
 
             var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true };
 
-            // دیالوگ را باز میکند
             var dialog = await DialogService.ShowAsync<RangesDialog>("Acceptable Ranges", parameters, options);
             var result = await dialog.Result;
 
             if (!result.Canceled && result.Data is decimal[] newRanges)
             {
-                // گرفتن مقادیر جدید از دیالوگ
+                
                 _rangeLow = newRanges[0];
                 _rangeMid = newRanges[1];
                 _rangeHigh1 = newRanges[2];
@@ -456,12 +457,130 @@ namespace WebUI.Pages.Process
                 _rangeHigh4 = newRanges[5];
 
                 Snackbar.Add("Acceptable ranges updated.", Severity.Success);
-                // بروزرسانی چارت ها با مقادیر جدید
+             
                 await UpdateChartsAsync();
             }
         }
+        private async Task OpenExcludeDialog()
+        {
+            var allItems = new List<WebUI.Pages.ExcludeItemModel>();
 
-        // تابع محاسبه تلورانس (همان منطق پایتون)
+            if (Elements != null)
+            {
+                allItems.AddRange(Elements.Select(e => new WebUI.Pages.ExcludeItemModel
+                {
+                    Id = $"RM_{e.OriginalIndex}", 
+                    Name = e.Label ?? "Unknown",
+                    Value = Math.Round(e.Orig, 4),
+                    IsExcluded = false 
+                }));
+            }
+
+            if (_allSamplePoints != null)
+            {
+                allItems.AddRange(_allSamplePoints.Select(s => new WebUI.Pages.ExcludeItemModel
+                {
+                    Id = $"Sample_{s.OriginalIndex}",
+                    Name = s.Label ?? "Unknown",
+                    Value = Math.Round(s.Orig, 4),
+                    IsExcluded = false
+                }));
+            }
+
+            var excludeItems = allItems.OrderBy(x => x.Name).ToList();
+
+            var parameters = new DialogParameters<WebUI.Pages.ExcludeDialog>
+    {
+        { x => x.Items, excludeItems }
+    };
+
+            var options = new DialogOptions
+            {
+                CloseOnEscapeKey = true,
+                MaxWidth = MaxWidth.Small,
+                FullWidth = true,
+                NoHeader = true,
+                CloseButton = false
+            };
+
+            var dialog = await DialogService.ShowAsync<WebUI.Pages.ExcludeDialog>("", parameters, options);
+            var result = await dialog.Result;
+
+            if (result != null && !result.Canceled && result.Data is WebUI.Pages.ExcludeResult excludeResult)
+            {
+                if (excludeResult.ExcludedItems != null && excludeResult.ExcludedItems.Any())
+                {
+                    foreach (var item in excludeResult.ExcludedItems)
+                    {
+                        if (item.Id.StartsWith("RM_"))
+                        {
+                            var originalId = item.Id.Replace("RM_", "");
+                            var elementToRemove = Elements?.FirstOrDefault(e => e.OriginalIndex.ToString() == originalId);
+                            if (elementToRemove != null) Elements?.Remove(elementToRemove);
+                        }
+                        else if (item.Id.StartsWith("Sample_"))
+                        {
+                            var originalId = item.Id.Replace("Sample_", "");
+                            var sampleToRemove = _allSamplePoints?.FirstOrDefault(s => s.OriginalIndex.ToString() == originalId);
+                            if (sampleToRemove != null) _allSamplePoints?.Remove(sampleToRemove);
+                        }
+                    }
+
+
+                    UpdateVisibleRmPoints();
+                    StateHasChanged();
+
+                    Snackbar.Add($"{excludeResult.ExcludedItems.Count} آیتم از محاسبات حذف شد.", Severity.Success);
+                }
+            }
+        }
+
+        private async Task OpenSelectCrmsDialog()
+        {
+            var crmItems = new List<WebUI.Pages.CrmSelectionModel>();
+
+            foreach (var crm in IncludedCrms.OrderBy(x => x.Key))
+            {
+                var displayLabel = crm.Key.Contains('_')
+                    ? crm.Key.Substring(0, crm.Key.LastIndexOf('_'))
+                    : crm.Key;
+
+                crmItems.Add(new WebUI.Pages.CrmSelectionModel
+                {
+                    Id = crm.Key,
+                    Label = displayLabel,
+                    IsIncluded = crm.Value
+                });
+            }
+
+            var onSelectionChanged = EventCallback.Factory.Create(this, async () =>
+            {
+             
+                foreach (var crm in crmItems)
+                {
+                    if (IncludedCrms.ContainsKey(crm.Id))
+                    {
+                        IncludedCrms[crm.Id] = crm.IsIncluded;
+                    }
+                }
+                await UpdateChartsAsync();
+                StateHasChanged();
+            });
+
+            var parameters = new DialogParameters<WebUI.Pages.SelectCrmsDialog>
+    {
+        { x => x.Items, crmItems },
+        { x => x.OnSelectionChanged, onSelectionChanged } 
+    };
+
+            var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true, NoHeader = true, CloseButton = false };
+
+            var dialog = await DialogService.ShowAsync<WebUI.Pages.SelectCrmsDialog>("", parameters, options);
+
+            await dialog.Result;
+        }
+
+
         private double GetToleranceValue(double value)
         {
             double absVal = Math.Abs(value);
