@@ -192,7 +192,7 @@
                 <MudStack Spacing="2">
                     <MudPaper Class="pa-3 custom-card">
                         <div class="section-header">RM Points — Current RM Only</div>
-                        <MudTable Items="@VisibleRmPoints" Dense="true" Hover="true" Bordered="true" FixedHeader="true" Height="350px">
+                        @* <MudTable Items="@VisibleRmPoints" Dense="true" Hover="true" Bordered="true" FixedHeader="true" Height="350px">
                             <HeaderContent>
                                 <MudTh>RM Label</MudTh>
                                 <MudTh>File</MudTh>
@@ -211,18 +211,73 @@
                                 <MudTd>@FormatValue(context.Curr)</MudTd>
                                 <MudTd>@GetRatio(context)</MudTd>
                             </RowTemplate>
-                        </MudTable>
+                        </MudTable> *@
+
+    <MudTable T="RMElement"
+          Items="@VisibleRmPoints"
+          Dense="true"
+          Hover="true"
+          Bordered="true"
+          FixedHeader="true"
+          Height="350px"
+          SelectedItem="@_selectedRmRow"
+          SelectedItemChanged="OnRmSelected"
+          SelectOnRowClick="true">
+
+    <HeaderContent>
+        <MudTh>RM Label</MudTh>
+        <MudTh>File</MudTh>
+        <MudTh>Next RM</MudTh>
+        <MudTh>Type</MudTh>
+        <MudTh>Original Value</MudTh>
+        <MudTh>Current Value</MudTh>
+        <MudTh>Ratio</MudTh>
+    </HeaderContent>
+
+    <RowTemplate>
+        <MudTd>@context.Label</MudTd>
+        <MudTd>File 1</MudTd>
+        <MudTd>@GetNextRmLabel(context)</MudTd>
+        <MudTd><span style="color:green; font-weight:bold;">Base</span></MudTd>
+        <MudTd>@FormatValue(context.Orig)</MudTd>
+        <MudTd>@FormatValue(context.Curr)</MudTd>
+        <MudTd>@GetRatio(context)</MudTd>
+    </RowTemplate>
+
+</MudTable>
                     </MudPaper>
 
                     <MudPaper Class="pa-3 custom-card">
                         <div class="section-header">All Acquisition Data — Original + New Value</div>
-                        <MudTable Items="@(new List<string>())" Dense="true" Bordered="true" Height="250px" Placeholder="No data available">
+                        @* <MudTable Items="@(new List<string>())" Dense="true" Bordered="true" Height="250px" Placeholder="No data available">
                             <HeaderContent>
                                 <MudTh>Solution Label</MudTh>
                                 <MudTh>Original Value</MudTh>
                                 <MudTh>Corrected Value</MudTh>
                             </HeaderContent>
-                        </MudTable>
+                        </MudTable> *@
+
+                        <MudTable Items="@_selectedSegmentSamples"
+          Dense="true"
+          Bordered="true"
+          Height="250px">
+
+    <HeaderContent>
+        <MudTh>Solution Label</MudTh>
+        <MudTh>Original Value</MudTh>
+        <MudTh>Corrected Value</MudTh>
+    </HeaderContent>
+
+    <RowTemplate>
+        <MudTd>@context.Label</MudTd>
+        <MudTd>@FormatValue(context.Orig)</MudTd>
+        <MudTd>@FormatValue(GetCorrectedValue(context))</MudTd>
+    </RowTemplate>
+
+    <NoRecordsContent>
+        <MudText Class="pa-3">Select an RM row to view acquisition data</MudText>
+    </NoRecordsContent>
+</MudTable>
                     </MudPaper>
                 </MudStack>
             </MudItem>

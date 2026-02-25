@@ -472,5 +472,86 @@ namespace WebUI.Pages.Process
             if (absVal < 100000) return value * ((double)_rangeHigh3 / 100.0);
             return value * ((double)_rangeHigh4 / 100.0);
         }
+
+        private RMElement? _selectedRmRow;
+        private List<SamplePoint> _selectedSegmentSamples = new();
+
+        
+        private void OnRmSelected(RMElement? selected)
+        {
+            if (selected == null)
+            {
+                _selectedSegmentSamples.Clear();
+                return;
+            }
+
+            _selectedRmRow = selected;
+
+            var allOrdered = Elements
+                .OrderBy(e => e.OriginalIndex)
+                .ToList();
+
+            var index = allOrdered.IndexOf(selected);
+
+            if (index < 0 || index >= allOrdered.Count - 1)
+            {
+                _selectedSegmentSamples.Clear();
+                return;
+            }
+
+            var currentRm = allOrdered[index];
+            var nextRm = allOrdered[index + 1];
+
+            _selectedSegmentSamples = _allSamplePoints
+                .Where(s => s.OriginalIndex > currentRm.OriginalIndex &&
+                            s.OriginalIndex < nextRm.OriginalIndex)
+                .OrderBy(s => s.OriginalIndex)
+                .ToList();
+        }
+        private double GetCorrectedValue(SamplePoint sample)
+        {
+            if (_selectedRmRow == null)
+                return sample.Orig;
+
+            var visible = VisibleRmPoints;
+            var index = visible.IndexOf(_selectedRmRow);
+
+            if (index < 0 || index >= visible.Count - 1)
+                return sample.Orig;
+
+            var prevRm = visible[index];
+            var nextRm = visible[index + 1];
+
+            double prevRatio = prevRm.Orig != 0 ? prevRm.Curr / prevRm.Orig : 1.0;
+            double nextRatio = nextRm.Orig != 0 ? nextRm.Curr / nextRm.Orig : 1.0;
+
+            var segmentSamples = _selectedSegmentSamples;
+            int n = segmentSamples.Count;
+            if (n == 0) return sample.Orig;
+
+            int sampleIndex = segmentSamples.IndexOf(sample);
+            if (sampleIndex < 0) return sample.Orig;
+
+            double z = (nextRatio - prevRatio) / n;
+            double ratio = (z * (sampleIndex + 1)) + prevRatio;
+
+            double adjusted = sample.Orig - _previewBlank;
+            double scaled = adjusted * _previewScale;
+
+            return scaled * ratio;
+        }
+
+        private List<RMElement> _visibleRmPoints = new();
+
+        private void UpdateVisibleRmPoints()
+        {
+            if (CurrentRmGroupNumber is int g)
+                _visibleRmPoints = Elements
+                    .Where(e => e.RmGroup == g)
+                    .OrderBy(e => e.OriginalIndex)
+                    .ToList();
+            else
+                _visibleRmPoints = new();
+        }
     }
 }
