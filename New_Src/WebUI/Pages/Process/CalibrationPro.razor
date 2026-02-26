@@ -109,11 +109,11 @@
                 <MudStack Spacing="2">
                     <MudPaper Class="pa-3 custom-card border-left-green">
                         <div class="section-header">CRM Verification</div>
-                        <div class="d-flex gap-4 mb-2">
+                        @* <div class="d-flex gap-4 mb-2">
                             <MudCheckBox T="bool" Label="Certificate" Dense="true" Color="Color.Primary" Checked="true" />
                             <MudCheckBox T="bool" Label="CRM" Dense="true" Color="Color.Primary" Checked="true" />
                             <MudCheckBox T="bool" Label="Acceptable Range" Dense="true" Color="Color.Primary" Checked="true" />
-                        </div>
+                        </div> *@
                         <MudCheckBox T="bool" Label="Scale >50% Only" Dense="true" Class="mb-2" />
                         
                         <MudGrid Spacing="1">
@@ -159,7 +159,7 @@
                         </MudGrid>
                     </MudPaper>
 
-                    <MudPaper Class="pa-3 custom-card" Style="background-color: #f9fff9;">
+                    @* <MudPaper Class="pa-3 custom-card" Style="background-color: #f9fff9;">
                         <div class="section-header">RM Drift Correction</div>
                         <MudGrid Spacing="1" Class="align-end">
                             <MudItem xs="5"><MudTextField T="string" Label="Keyword" Value="@("RM")" Variant="Variant.Outlined" Dense="true" Margin="Margin.Dense" /></MudItem>
@@ -184,7 +184,50 @@
                             <MudItem xs="4"><MudButton FullWidth="true" Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small">Auto Zero Slope</MudButton></MudItem>
                             <MudItem xs="4"><MudButton FullWidth="true" Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small">Undo RM</MudButton></MudItem>
                         </MudGrid>
-                    </MudPaper>
+                    </MudPaper> *@
+
+                    <MudPaper Class="pa-3 custom-card mb-3">
+    <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight: bold; color: #1A3C34;">
+        RM Drift Correction
+    </MudText>
+
+    <MudStack Spacing="2">
+        <div class="d-flex align-center gap-2">
+            <MudText Typo="Typo.body2" Style="white-space: nowrap;">Keyword:</MudText>
+            <MudTextField @bind-Value="_rmKeyword" Variant="Variant.Outlined" Margin="Margin.Dense" Style="background-color: white; width: 80px;" />
+            <MudButton Variant="Variant.Filled" Size="Size.Small" OnClick="CheckRmAsync" Style="background-color: #e0e0e0; color: black; text-transform: none;">Check RM</MudButton>
+            <MudSpacer />
+            <MudButton Variant="Variant.Filled" Size="Size.Small" OnClick="ResetToOriginalAsync" Style="background-color: #e0e0e0; color: black; text-transform: none;">Reset to Original</MudButton>
+        </div>
+
+        <div class="d-flex flex-wrap gap-4 mt-1">
+            <MudCheckBox T="bool" @bind-Value="_perFileRmReference" Label="Per File RM Reference" Color="Color.Primary" Dense="true" />
+            <MudCheckBox T="bool" @bind-Value="_globalOptimize" Label="Global Optimize (Ignore Checks)" Color="Color.Primary" Dense="true" />
+        </div>
+        <div class="mt-n2">
+            <MudCheckBox T="bool" @bind-Value="_stepwiseChanges" Label="Stepwise Changes" Color="Color.Primary" Dense="true" />
+        </div>
+
+        <div class="d-flex align-center gap-2 mt-1">
+            <MudText Typo="Typo.body2" Style="white-space: nowrap;">Manual Slope:</MudText>
+            <MudNumericField @bind-Value="_manualSlope" Variant="Variant.Outlined" Margin="Margin.Dense" Format="F8" Style="background-color: white; width: 130px;" />
+            <MudButton Variant="Variant.Filled" Size="Size.Small" OnClick="ApplySlopeAsync" Style="background-color: #e0e0e0; color: black; text-transform: none;">Apply Slope</MudButton>
+        </div>
+
+        <MudPaper Elevation="0" Class="pa-2 mt-1" Style="background-color: #E8F5E9; border-radius: 6px; border: 1px solid #C8E6C9;">
+            <MudText Typo="Typo.body2" Style="font-weight: bold; color: #1A3C34;">
+                Current Slope: @(_currentSlope.ToString("F8"))
+            </MudText>
+        </MudPaper>
+
+        <div class="d-flex gap-2 mt-2">
+            <MudButton Variant="Variant.Filled" Size="Size.Small" OnClick="AutoFlatAsync" Class="flex-grow-1" Style="background-color: #e0e0e0; color: black; text-transform: none;">Auto Flat</MudButton>
+            <MudButton Variant="Variant.Filled" Size="Size.Small" OnClick="AutoZeroSlopeAsync" Class="flex-grow-1" Style="background-color: #e0e0e0; color: black; text-transform: none;">Auto Zero Slope</MudButton>
+            <MudButton Variant="Variant.Filled" Size="Size.Small" OnClick="UndoRmAsync" Class="flex-grow-1" Style="background-color: #e0e0e0; color: black; text-transform: none;">Undo RM</MudButton>
+        </div>
+    </MudStack>
+</MudPaper>
+
                 </MudStack>
             </MudItem>
 

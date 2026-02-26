@@ -154,11 +154,19 @@ namespace WebUI.Pages.Process
                     IncludedCrms[label] = true;
             }
 
+            //var rmRows = allRows
+            //    .Where(r => !string.IsNullOrEmpty(r.SolutionLabel) &&
+            //        r.SolutionLabel.Trim().StartsWith("RM", StringComparison.OrdinalIgnoreCase) &&
+            //        !r.SolutionLabel.Trim().StartsWith("CRM", StringComparison.OrdinalIgnoreCase))
+            //    .OrderBy(r => r.OriginalIndex).ToList();
+
+            // این خط جایگزین منطق قبلی در متد LoadRmTableForCurrentElementAsync شود
             var rmRows = allRows
                 .Where(r => !string.IsNullOrEmpty(r.SolutionLabel) &&
-                    r.SolutionLabel.Trim().StartsWith("RM", StringComparison.OrdinalIgnoreCase) &&
-                    !r.SolutionLabel.Trim().StartsWith("CRM", StringComparison.OrdinalIgnoreCase))
+                            r.SolutionLabel.Trim().StartsWith(_rmKeyword, StringComparison.OrdinalIgnoreCase) && // استفاده از کیورد داینامیک
+                            !r.SolutionLabel.Trim().StartsWith("CRM", StringComparison.OrdinalIgnoreCase))
                 .OrderBy(r => r.OriginalIndex).ToList();
+
 
             _allSamplePoints = allRows
                 .Where(r => !string.IsNullOrEmpty(r.SolutionLabel) &&
@@ -326,95 +334,145 @@ namespace WebUI.Pages.Process
         {
             if (ProjectService.CurrentProjectId is not Guid projectId || string.IsNullOrWhiteSpace(_selectedElement)) return;
 
-            var diffResult = await CrmService.CalculateDiffAsync(projectId, null, -10m, 10m);
+            // Load fresh pivot data to get all solution labels per CRM (like Python)
+            var request = new AdvancedPivotRequest(ProjectId: projectId, SelectedElements: new List<string> { _selectedElement }, Page: 1, PageSize: 5000);
+            var pivotResult = await PivotService.GetAdvancedPivotTableAsync(request);
 
-            if (!diffResult.Succeeded || diffResult.Data == null || !diffResult.Data.Any())
+            if (!pivotResult.Succeeded || pivotResult.Data?.Rows == null || !pivotResult.Data.Rows.Any())
             {
                 await JS.InvokeVoidAsync("destroyChart", "verificationChart");
                 return;
             }
 
-            var crmPoints = new List<dynamic>();
-            foreach (var crm in diffResult.Data)
-            {
-                if (IncludedCrms.TryGetValue(crm.SolutionLabel, out bool isIncluded) && !isIncluded)
-                {
-                    continue;
-                }
-                var elemDiff = crm.Differences.FirstOrDefault(d => d.Element.Equals(_selectedElement, StringComparison.OrdinalIgnoreCase));
-                if (elemDiff != null)
-                {
-                    double crmVal = Convert.ToDouble(elemDiff.CrmValue);
-                    double measuredVal = Convert.ToDouble(elemDiff.MeasuredValue);
-                    double rangeVal = crmVal * 0.1;
+            var pivotRows = pivotResult.Data.Rows.ToList();
+            _logger.LogInformation($"[VerificationChart] Loaded {pivotRows.Count} pivot rows, element: {_selectedElement}");
 
-                    crmPoints.Add(new
-                    {
-                        CrmId = crm.CrmId,
-                        Label = crm.SolutionLabel,
-                        SampleVal = measuredVal,
-                        CertVal = crmVal,
-                        LowerBound = crmVal - rangeVal,
-                        UpperBound = crmVal + rangeVal
-                    });
-                }
+            // Extract all CRM solution labels and their values
+            var crmRows = pivotRows.Where(r => !string.IsNullOrEmpty(r.SolutionLabel) && r.SolutionLabel.Contains("CRM", StringComparison.OrdinalIgnoreCase)).ToList();
+            _logger.LogInformation($"[VerificationChart] Found {crmRows.Count} CRM rows");
+
+            if (!crmRows.Any())
+            {
+                await JS.InvokeVoidAsync("destroyChart", "verificationChart");
+                return;
             }
 
-            if (!crmPoints.Any()) { await JS.InvokeVoidAsync("destroyChart", "verificationChart"); return; }
+            // Helper to extract numeric ID
+            string ExtractCrmId(string label) => System.Text.RegularExpressions.Regex.Match(label ?? "", @"(?i)(?:\bCRM\b|\bOREAS\b)?[\s-]*(\d+[a-zA-Z]?)").Groups[1].Value is string id && !string.IsNullOrEmpty(id) ? id : label ?? "";
 
-            var uniqueCrmIds = crmPoints.Select(c => (string)c.CrmId).ToArray();
-            var certPoints = crmPoints.Select((c, i) => new { x = (double?)i, y = (double?)c.CertVal }).ToList();
-            var samplePoints = crmPoints.Select((c, i) => new { x = (double?)i, y = (double?)c.SampleVal }).ToList();
+            // Group by CRM ID preserving insertion order
+            var crmIdToLabels = new Dictionary<string, List<string>>();
+            var crmIdOrder = new List<string>();
 
+            foreach (var row in crmRows)
+            {
+                string id = ExtractCrmId(row.SolutionLabel);
+                if (!crmIdToLabels.ContainsKey(id))
+                {
+                    crmIdToLabels[id] = new List<string>();
+                    crmIdOrder.Add(id);
+                }
+                if (!crmIdToLabels[id].Contains(row.SolutionLabel))
+                    crmIdToLabels[id].Add(row.SolutionLabel);
+            }
+
+            _logger.LogInformation($"[VerificationChart] CRM IDs: {string.Join(", ", crmIdOrder.Select(id => $"{id}({crmIdToLabels[id].Count})"))}");
+
+            var xLabels = crmIdOrder.Select(id => $"V {id}").ToArray();
+            var certPoints = new List<object>();
+            var samplePoints = new List<object>();
             var rangeData = new List<object>();
-            for (int i = 0; i < crmPoints.Count; i++)
+            var allY = new List<double>();
+
+            // Get certificate values from API (once)
+            var diffResult = await CrmService.CalculateDiffAsync(projectId, null, -10m, 10m);
+            var crmDiffMap = new Dictionary<string, (double CertVal, double LowerBound, double UpperBound)>();
+            if (diffResult.Succeeded && diffResult.Data != null)
             {
-                rangeData.Add(new { x = (double?)(i - 0.2), y = (double?)crmPoints[i].LowerBound });
-                rangeData.Add(new { x = (double?)(i + 0.2), y = (double?)crmPoints[i].LowerBound });
-                rangeData.Add(new { x = (double?)null, y = (double?)null });
-                rangeData.Add(new { x = (double?)(i - 0.2), y = (double?)crmPoints[i].UpperBound });
-                rangeData.Add(new { x = (double?)(i + 0.2), y = (double?)crmPoints[i].UpperBound });
-                rangeData.Add(new { x = (double?)null, y = (double?)null });
+                foreach (var crmDiff in diffResult.Data)
+                {
+                    string id = ExtractCrmId(crmDiff.SolutionLabel);
+                    var elemDiff = crmDiff.Differences.FirstOrDefault(d => d.Element.Equals(_selectedElement, StringComparison.OrdinalIgnoreCase));
+                    if (elemDiff != null)
+                    {
+                        double certVal = Convert.ToDouble(elemDiff.CrmValue);
+                        double rangeVal = Math.Abs(certVal) * 0.1;
+                        crmDiffMap[id] = (certVal, certVal - rangeVal, certVal + rangeVal);
+                    }
+                }
             }
+
+            // For each CRM ID, for each solution label in that group, extract sample value and plot with certificate
+            for (int xi = 0; xi < crmIdOrder.Count; xi++)
+            {
+                string crmId = crmIdOrder[xi];
+                var labelList = crmIdToLabels[crmId];
+
+                // Get certificate values for this CRM once
+                double? certVal = null;
+                double? low = null;
+                double? up = null;
+                if (crmDiffMap.TryGetValue(crmId, out var cert))
+                {
+                    certVal = cert.CertVal;
+                    low = cert.LowerBound;
+                    up = cert.UpperBound;
+                }
+
+                // For each solution label under this CRM ID, plot its sample value
+                foreach (var solLabel in labelList)
+                {
+                    var row = crmRows.FirstOrDefault(r => r.SolutionLabel == solLabel);
+                    if (row == null) continue;
+
+                    // Get sample value from pivot
+                    double? sampleVal = null;
+                    if (row.Values != null && row.Values.TryGetValue(_selectedElement, out var val) && val.HasValue)
+                    {
+                        try { sampleVal = Convert.ToDouble(val.Value); } catch { }
+                    }
+
+                    // Add certificate point (same for all solution labels under this CRM ID)
+                    if (certVal.HasValue)
+                    {
+                        certPoints.Add(new { x = (double?)xi, y = (double?)certVal.Value });
+                        allY.Add(certVal.Value);
+                    }
+
+                    // Add sample point (one per solution label)
+                    if (sampleVal.HasValue)
+                    {
+                        samplePoints.Add(new { x = (double?)xi, y = (double?)sampleVal.Value });
+                        allY.Add(sampleVal.Value);
+                    }
+
+                    // Track bounds for y-range
+                    if (low.HasValue) allY.Add(low.Value);
+                    if (up.HasValue) allY.Add(up.Value);
+                }
+
+                // Add range lines once per CRM ID
+                if (low.HasValue && up.HasValue)
+                {
+                    rangeData.Add(new { x = (double?)(xi - 0.2), y = (double?)low.Value });
+                    rangeData.Add(new { x = (double?)(xi + 0.2), y = (double?)low.Value });
+                    rangeData.Add(new { x = (double?)null, y = (double?)null });
+                    rangeData.Add(new { x = (double?)(xi - 0.2), y = (double?)up.Value });
+                    rangeData.Add(new { x = (double?)(xi + 0.2), y = (double?)up.Value });
+                    rangeData.Add(new { x = (double?)null, y = (double?)null });
+                }
+            }
+
+            double? yMin = allY.Any() ? allY.Min() : (double?)null;
+            double? yMax = allY.Any() ? allY.Max() : (double?)null;
+
+            _logger.LogInformation($"[VerificationChart] Data: cert={certPoints.Count}, sample={samplePoints.Count}, range={rangeData.Count}, yMin={yMin}, yMax={yMax}");
 
             var chartConfig = new
             {
                 type = "scatter",
-                data = new
-                {
-                    datasets = new object[]
-                    {
-                        new { label = "Certificate Value", data = certPoints, backgroundColor = "green", pointStyle = "circle", pointRadius = 6 },
-                        new { label = "Sample Value", data = samplePoints, backgroundColor = "blue", pointStyle = "triangle", rotation = 180, pointRadius = 7 },
-                        new { label = "Acceptable Range", data = rangeData, borderColor = "red", borderWidth = 2, showLine = true, pointRadius = 0, fill = false, spanGaps = false }
-                    }
-                },
-                options = new
-                {
-                    responsive = true,
-                    maintainAspectRatio = false,
-                    plugins = new
-                    {
-                        title = new { display = true, text = $"Title of your chart" },
-                   
-                        zoom = new
-                        {
-                            zoom = new
-                            {
-                                wheel = new { enabled = true }, 
-                                pinch = new { enabled = true }, 
-                                mode = "xy" 
-                            },
-                            pan = new
-                            {
-                                enabled = true, 
-                                mode = "xy" 
-                            }
-                        }
-                        // ---------------------------------------------
-                    },
-                    scales = new { /* اسکیل های قبلی شما */ }
-                }
+                data = new { datasets = new object[] { new { label = "Certificate Value", data = certPoints, backgroundColor = "green", pointStyle = "circle", pointRadius = 6 }, new { label = "Sample Value", data = samplePoints, backgroundColor = "blue", pointStyle = "triangle", rotation = 180, pointRadius = 7 }, new { label = "Acceptable Range", data = rangeData, borderColor = "red", borderWidth = 2, showLine = true, pointRadius = 0, fill = false, spanGaps = false } } },
+                options = new { responsive = true, maintainAspectRatio = false, plugins = new { title = new { display = true, text = $"Verification Values for {_selectedElement}" }, zoom = new { zoom = new { wheel = new { enabled = true }, pinch = new { enabled = true }, mode = "xy" }, pan = new { enabled = true, mode = "xy" } }, legend = new { display = true } }, xLabels = xLabels, scales = (yMin.HasValue && yMax.HasValue) ? new { x = new { min = -0.5, max = (double?)(crmIdOrder.Count - 0.5) }, y = new { min = (double?)(yMin.Value - (yMax.Value - yMin.Value) * 0.1), max = (double?)(yMax.Value + (yMax.Value - yMin.Value) * 0.1) } } : null }
             };
 
             try { await JS.InvokeVoidAsync("destroyChart", "verificationChart"); await JS.InvokeVoidAsync("createChart", "verificationChart", chartConfig); }
@@ -671,6 +729,206 @@ namespace WebUI.Pages.Process
                     .ToList();
             else
                 _visibleRmPoints = new();
+            UpdateCurrentSlope();
+        }
+        // ==========================================
+        // RM Drift Correction State & Methods
+        // ==========================================
+        private string _rmKeyword = "RM";
+        private bool _perFileRmReference = true;
+        private bool _globalOptimize = false;
+        private bool _stepwiseChanges = false;
+        private double _manualSlope = 0.0;
+        private double _currentSlope = 0.0;
+
+        // استک برای پیاده‌سازی قابلیت Undo مشابه پایتون
+        private Stack<string> _undoStack = new();
+
+        // متد ذخیره وضعیت فعلی برای Undo
+        private void SaveStateForUndo()
+        {
+            // استفاده از JSON برای کپی عمیق (Deep Copy) از لیست تا در صورت تغییر مقادیر مرجع خراب نشوند
+            var serialized = System.Text.Json.JsonSerializer.Serialize(Elements);
+            _undoStack.Push(serialized);
+        }
+
+        // محاسبه شیب خط فعلی نقاط RM بر اساس فرمول رگرسیون خطی
+        private void UpdateCurrentSlope()
+        {
+            var pts = VisibleRmPoints;
+            int n = pts.Count;
+
+            if (n < 2)
+            {
+                _currentSlope = 0.0;
+                return;
+            }
+
+            double sumX = 0.0;
+            double sumY = 0.0;
+
+            // ۱. ابتدا میانگین‌ها را حساب می‌کنیم
+            foreach (var p in pts)
+            {
+                sumX += p.OriginalIndex;
+                sumY += p.Curr;
+            }
+
+            double meanX = sumX / n;
+            double meanY = sumY / n;
+
+            // ۲. محاسبه کوواریانس و واریانس (روش دقیق آماری مشابه numpy)
+            double numerator = 0.0;
+            double denominator = 0.0;
+
+            foreach (var p in pts)
+            {
+                double xDiff = p.OriginalIndex - meanX;
+                double yDiff = p.Curr - meanY;
+
+                numerator += xDiff * yDiff;
+                denominator += xDiff * xDiff;
+            }
+
+            // جلوگیری از تقسیم بر صفر در مواردی که x ها یکسان هستند
+            if (Math.Abs(denominator) < 1e-12)
+            {
+                _currentSlope = 0.0;
+            }
+            else
+            {
+                _currentSlope = numerator / denominator;
+            }
+        }
+
+        // دکمه Check RM (بر اساس کیوردی که در اینپوت تایپ شده لیست را فیلتر می‌کند)
+        private async Task CheckRmAsync()
+        {
+            if (string.IsNullOrWhiteSpace(_rmKeyword)) return;
+
+            if (ProjectService.CurrentProjectId is Guid projectId)
+            {
+                Snackbar.Add($"Reloading and filtering RM points by keyword: {_rmKeyword}...", Severity.Info);
+                await LoadRmTableForCurrentElementAsync(projectId);
+            }
+        }
+
+        // دکمه Reset to Original
+        private async Task ResetToOriginalAsync()
+        {
+            SaveStateForUndo();
+            if (Elements != null && Elements.Any())
+            {
+                foreach (var el in Elements)
+                {
+                    el.Curr = el.Orig; // مقادیر تصحیح شده به حالت اول برمی‌گردند
+                }
+                UpdateCurrentSlope();
+                await UpdateChartsAsync();
+                StateHasChanged();
+                Snackbar.Add("Reset to original applied.", Severity.Success);
+            }
+        }
+
+        // دکمه Apply Slope (دقیقاً معادل apply_slope_from_spin در پایتون)
+        private async Task ApplySlopeAsync()
+        {
+            var pts = VisibleRmPoints;
+            if (pts.Count < 2) return;
+
+            SaveStateForUndo();
+            UpdateCurrentSlope();
+
+            // این بخش دقیقاً معادل کدهای پایتون شماست:
+            // slope, _ = np.polyfit(x_n, y_n, 1)
+            // first_x = x_n[0]
+            // y_n -= slope * (x_n - first_x)  --> برای صفر کردن
+            // اینجا ما به شیب هدف (ManualSlope) می‌رسیم
+
+            double deltaSlope = _currentSlope - _manualSlope;
+            double firstX = pts[0].OriginalIndex; // چرخش حول اولین نقطه RM
+
+            foreach (var p in pts)
+            {
+                // فرمول اصلاح نقطه‌ها بر اساس شیب جدید
+                p.Curr = p.Curr - (deltaSlope * (p.OriginalIndex - firstX));
+            }
+
+            // آپدیت مجدد شیب برای نمایش در UI
+            UpdateCurrentSlope();
+
+            await UpdateChartsAsync();
+            StateHasChanged();
+
+            Snackbar.Add($"Target slope applied: {_manualSlope:F8}", Severity.Success);
+        }
+
+        // دکمه Auto Zero Slope
+        private async Task AutoZeroSlopeAsync()
+        {
+            var pts = VisibleRmPoints;
+            if (pts.Count < 2) return;
+
+            SaveStateForUndo();
+            UpdateCurrentSlope();
+
+            double slopeToRemove = _currentSlope;
+            double firstX = pts[0].OriginalIndex;
+
+            // کپی مستقیم از لاجیک auto_optimize_slope_to_zero پایتون
+            foreach (var p in pts)
+            {
+                p.Curr = p.Curr - (slopeToRemove * (p.OriginalIndex - firstX));
+            }
+
+            _manualSlope = 0.0;
+            UpdateCurrentSlope();
+            await UpdateChartsAsync();
+            StateHasChanged();
+
+            Snackbar.Add("Slope successfully set to zero.", Severity.Success);
+        }
+
+        // دکمه Auto Flat
+        private async Task AutoFlatAsync()
+        {
+            var pts = VisibleRmPoints;
+            if (pts.Count == 0) return;
+
+            SaveStateForUndo();
+
+            // تمام نقاط هم‌ارز مقدار اولین نقطه می‌شوند تا کاملاً صاف شوند
+            double firstVal = pts[0].Curr;
+            foreach (var p in pts)
+            {
+                p.Curr = firstVal;
+            }
+
+            UpdateCurrentSlope();
+            await UpdateChartsAsync();
+            StateHasChanged();
+            Snackbar.Add("Optimized to flat.", Severity.Success);
+        }
+
+        // دکمه Undo RM
+        private async Task UndoRmAsync()
+        {
+            if (_undoStack.Count > 0)
+            {
+                var previousState = _undoStack.Pop();
+                Elements = System.Text.Json.JsonSerializer.Deserialize<List<RMElement>>(previousState) ?? new();
+
+                UpdateVisibleRmPoints();
+                UpdateCurrentSlope();
+                await UpdateChartsAsync();
+                StateHasChanged();
+
+                Snackbar.Add("Last RM changes undone.", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add("No changes to undo.", Severity.Warning);
+            }
         }
     }
 }
