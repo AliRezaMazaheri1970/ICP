@@ -26,7 +26,7 @@
 <PageTitle>ICP - Calibration Pro</PageTitle>
 
 
-<div class="main-container">
+@* <div class="main-container"> *@
     <MudContainer MaxWidth="MaxWidth.ExtraExtraLarge" Class="mt-4 mb-5">
             <MudPaper Elevation="0" Class="pa-4 mb-4 custom-card-all">
         <div class="justify-space-between align-center">
@@ -109,11 +109,6 @@
                 <MudStack Spacing="2">
                     <MudPaper Class="pa-3 custom-card border-left-green">
                         <div class="section-header">CRM Verification</div>
-                        @* <div class="d-flex gap-4 mb-2">
-                            <MudCheckBox T="bool" Label="Certificate" Dense="true" Color="Color.Primary" Checked="true" />
-                            <MudCheckBox T="bool" Label="CRM" Dense="true" Color="Color.Primary" Checked="true" />
-                            <MudCheckBox T="bool" Label="Acceptable Range" Dense="true" Color="Color.Primary" Checked="true" />
-                        </div> *@
                         <MudCheckBox T="bool" Label="Scale >50% Only" Dense="true" Class="mb-2" />
                         
                         <MudGrid Spacing="1">
@@ -159,32 +154,6 @@
                         </MudGrid>
                     </MudPaper>
 
-                    @* <MudPaper Class="pa-3 custom-card" Style="background-color: #f9fff9;">
-                        <div class="section-header">RM Drift Correction</div>
-                        <MudGrid Spacing="1" Class="align-end">
-                            <MudItem xs="5"><MudTextField T="string" Label="Keyword" Value="@("RM")" Variant="Variant.Outlined" Dense="true" Margin="Margin.Dense" /></MudItem>
-                            <MudItem xs="3"><MudButton Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small">Check RM</MudButton></MudItem>
-                            <MudItem xs="4"><MudButton Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small">Reset to Original</MudButton></MudItem>
-                        </MudGrid>
-                        
-                        <div class="d-flex gap-2 mt-2">
-                            <MudCheckBox T="bool" Label="Per File RM Reference" Dense="true" Checked="true" />
-                            <MudCheckBox T="bool" Label="Global Optimize" Dense="true" />
-                        </div>
-                        <MudCheckBox T="bool" Label="Stepwise Changes" Dense="true" />
-
-                        <div class="d-flex align-center gap-2 mt-2">
-                            <MudNumericField T="double" Label="Manual Slope" Value="-0.00122325" Variant="Variant.Outlined" Dense="true" Margin="Margin.Dense" />
-                            <MudButton Variant="Variant.Filled" Class="dark-green-btn">Apply Slope</MudButton>
-                        </div>
-                        <MudText Typo="Typo.caption" Color="Color.Error" Class="fw-bold">Current Slope: -0.0012233</MudText>
-
-                        <MudGrid Spacing="1" Class="mt-2">
-                            <MudItem xs="4"><MudButton FullWidth="true" Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small">Auto Flat</MudButton></MudItem>
-                            <MudItem xs="4"><MudButton FullWidth="true" Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small">Auto Zero Slope</MudButton></MudItem>
-                            <MudItem xs="4"><MudButton FullWidth="true" Variant="Variant.Filled" Class="dark-green-btn" Size="Size.Small">Undo RM</MudButton></MudItem>
-                        </MudGrid>
-                    </MudPaper> *@
 
                     <MudPaper Class="pa-3 custom-card mb-3">
     <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight: bold; color: #1A3C34;">
@@ -301,14 +270,14 @@
                 <MudStack Spacing="2">
                     <MudPaper Class="pa-3 custom-card">
                         <MudText Typo="Typo.h6">Full Drift Plot — All Samples + All RMs</MudText>
-                    <div class="mt-2" style="height:360px;">
+                    <div class="mt-2" style="height:300px;">
                         <canvas id="fullDriftChart" style="width:100%;height:100%;"></canvas>
                     </div>
                     </MudPaper>
 
                     <MudPaper Class="pa-3 custom-card">
                        <MudText Typo="Typo.h6">Verification Plot — CRM_Check Standards</MudText>
-                    <div class="mt-2" style="height:200px;">
+                    <div class="mt-2" style="height:300px;">
                         <canvas id="verificationChart" style="width:100%;height:100%;"></canvas>
                     </div>
                     </MudPaper>
@@ -316,5 +285,5 @@
             </MudItem>
         </MudGrid>
     </MudContainer>
-</div>
+@* </div> *@
 

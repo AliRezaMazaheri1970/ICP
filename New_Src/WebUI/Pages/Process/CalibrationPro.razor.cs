@@ -334,7 +334,7 @@ namespace WebUI.Pages.Process
         {
             if (ProjectService.CurrentProjectId is not Guid projectId || string.IsNullOrWhiteSpace(_selectedElement)) return;
 
-            // Load fresh pivot data to get all solution labels per CRM (like Python)
+            // ۱. گرفتن داده‌های Pivot
             var request = new AdvancedPivotRequest(ProjectId: projectId, SelectedElements: new List<string> { _selectedElement }, Page: 1, PageSize: 5000);
             var pivotResult = await PivotService.GetAdvancedPivotTableAsync(request);
 
@@ -345,11 +345,13 @@ namespace WebUI.Pages.Process
             }
 
             var pivotRows = pivotResult.Data.Rows.ToList();
-            _logger.LogInformation($"[VerificationChart] Loaded {pivotRows.Count} pivot rows, element: {_selectedElement}");
 
-            // Extract all CRM solution labels and their values
-            var crmRows = pivotRows.Where(r => !string.IsNullOrEmpty(r.SolutionLabel) && r.SolutionLabel.Contains("CRM", StringComparison.OrdinalIgnoreCase)).ToList();
-            _logger.LogInformation($"[VerificationChart] Found {crmRows.Count} CRM rows");
+            // ۲. فیلتر کردن CRMها: فقط آن‌هایی که در لیست IncludedCrms تیک خورده‌اند رسم شوند (مشابه پایتون)
+            var crmRows = pivotRows.Where(r =>
+                !string.IsNullOrEmpty(r.SolutionLabel) &&
+                r.SolutionLabel.Contains("CRM", StringComparison.OrdinalIgnoreCase) &&
+                IncludedCrms.TryGetValue(r.SolutionLabel, out var isIncluded) && isIncluded
+            ).ToList();
 
             if (!crmRows.Any())
             {
@@ -357,36 +359,39 @@ namespace WebUI.Pages.Process
                 return;
             }
 
-            // Helper to extract numeric ID
-            string ExtractCrmId(string label) => System.Text.RegularExpressions.Regex.Match(label ?? "", @"(?i)(?:\bCRM\b|\bOREAS\b)?[\s-]*(\d+[a-zA-Z]?)").Groups[1].Value is string id && !string.IsNullOrEmpty(id) ? id : label ?? "";
+            // ۳. اصلاح Regex: حذف علامت سوال (؟) تا حتماً به دنبال کلمه CRM/OREAS/V بگردد و اشتباهاً تاریخ را نگیرد
+            string ExtractCrmId(string label)
+            {
+                var match = System.Text.RegularExpressions.Regex.Match(label ?? "", @"(?i)(?:CRM|OREAS|V)[\s-]*(\d+[a-zA-Z]?)");
+                return match.Success && !string.IsNullOrEmpty(match.Groups[1].Value) ? match.Groups[1].Value : label ?? "";
+            }
 
-            // Group by CRM ID preserving insertion order
+            // گروه‌بندی
             var crmIdToLabels = new Dictionary<string, List<string>>();
-            var crmIdOrder = new List<string>();
-
             foreach (var row in crmRows)
             {
                 string id = ExtractCrmId(row.SolutionLabel);
                 if (!crmIdToLabels.ContainsKey(id))
                 {
                     crmIdToLabels[id] = new List<string>();
-                    crmIdOrder.Add(id);
                 }
                 if (!crmIdToLabels[id].Contains(row.SolutionLabel))
                     crmIdToLabels[id].Add(row.SolutionLabel);
             }
 
-            _logger.LogInformation($"[VerificationChart] CRM IDs: {string.Join(", ", crmIdOrder.Select(id => $"{id}({crmIdToLabels[id].Count})"))}");
-
+            // ۴. مرتب‌سازی محور X (مانند unique_crm_ids = sorted(...) در پایتون)
+            var crmIdOrder = crmIdToLabels.Keys.OrderBy(k => k).ToList();
             var xLabels = crmIdOrder.Select(id => $"V {id}").ToArray();
+
             var certPoints = new List<object>();
             var samplePoints = new List<object>();
             var rangeData = new List<object>();
             var allY = new List<double>();
 
-            // Get certificate values from API (once)
+            // دریافت مقادیر Certificate
             var diffResult = await CrmService.CalculateDiffAsync(projectId, null, -10m, 10m);
             var crmDiffMap = new Dictionary<string, (double CertVal, double LowerBound, double UpperBound)>();
+
             if (diffResult.Succeeded && diffResult.Data != null)
             {
                 foreach (var crmDiff in diffResult.Data)
@@ -396,22 +401,19 @@ namespace WebUI.Pages.Process
                     if (elemDiff != null)
                     {
                         double certVal = Convert.ToDouble(elemDiff.CrmValue);
-                        double rangeVal = Math.Abs(certVal) * 0.1;
+                        // استفاده از متد داینامیک GetToleranceValue (دقیقاً معادل calculate_dynamic_range)
+                        double rangeVal = GetToleranceValue(certVal);
                         crmDiffMap[id] = (certVal, certVal - rangeVal, certVal + rangeVal);
                     }
                 }
             }
 
-            // For each CRM ID, for each solution label in that group, extract sample value and plot with certificate
             for (int xi = 0; xi < crmIdOrder.Count; xi++)
             {
                 string crmId = crmIdOrder[xi];
                 var labelList = crmIdToLabels[crmId];
 
-                // Get certificate values for this CRM once
-                double? certVal = null;
-                double? low = null;
-                double? up = null;
+                double? certVal = null, low = null, up = null;
                 if (crmDiffMap.TryGetValue(crmId, out var cert))
                 {
                     certVal = cert.CertVal;
@@ -419,39 +421,40 @@ namespace WebUI.Pages.Process
                     up = cert.UpperBound;
                 }
 
-                // For each solution label under this CRM ID, plot its sample value
                 foreach (var solLabel in labelList)
                 {
                     var row = crmRows.FirstOrDefault(r => r.SolutionLabel == solLabel);
                     if (row == null) continue;
 
-                    // Get sample value from pivot
                     double? sampleVal = null;
                     if (row.Values != null && row.Values.TryGetValue(_selectedElement, out var val) && val.HasValue)
                     {
                         try { sampleVal = Convert.ToDouble(val.Value); } catch { }
                     }
 
-                    // Add certificate point (same for all solution labels under this CRM ID)
+                    // رسم Certificate (نقطه سبز)
                     if (certVal.HasValue)
                     {
                         certPoints.Add(new { x = (double?)xi, y = (double?)certVal.Value });
                         allY.Add(certVal.Value);
                     }
 
-                    // Add sample point (one per solution label)
+                    // رسم Sample (نقطه آبی)
                     if (sampleVal.HasValue)
                     {
-                        samplePoints.Add(new { x = (double?)xi, y = (double?)sampleVal.Value });
-                        allY.Add(sampleVal.Value);
+                        // ۵. اعمال فرمول Blank و Scale روی نقطه برای رسم دقیق (اضافه شده)
+                        double correctedVal = (sampleVal.Value - _previewBlank) * _previewScale;
+
+                        samplePoints.Add(new { x = (double?)xi, y = (double?)correctedVal });
+                        allY.Add(correctedVal);
                     }
 
-                    // Track bounds for y-range
+                    // ثبت بازه‌ها برای تنظیم ارتفاع محور Y
                     if (low.HasValue) allY.Add(low.Value);
                     if (up.HasValue) allY.Add(up.Value);
                 }
 
-                // Add range lines once per CRM ID
+                // رسم خطوط بازه مجاز (قرمز)
                 if (low.HasValue && up.HasValue)
                 {
                     rangeData.Add(new { x = (double?)(xi - 0.2), y = (double?)low.Value });
@@ -466,13 +469,34 @@ namespace WebUI.Pages.Process
             double? yMin = allY.Any() ? allY.Min() : (double?)null;
             double? yMax = allY.Any() ? allY.Max() : (double?)null;
 
-            _logger.LogInformation($"[VerificationChart] Data: cert={certPoints.Count}, sample={samplePoints.Count}, range={rangeData.Count}, yMin={yMin}, yMax={yMax}");
-
             var chartConfig = new
             {
                 type = "scatter",
-                data = new { datasets = new object[] { new { label = "Certificate Value", data = certPoints, backgroundColor = "green", pointStyle = "circle", pointRadius = 6 }, new { label = "Sample Value", data = samplePoints, backgroundColor = "blue", pointStyle = "triangle", rotation = 180, pointRadius = 7 }, new { label = "Acceptable Range", data = rangeData, borderColor = "red", borderWidth = 2, showLine = true, pointRadius = 0, fill = false, spanGaps = false } } },
-                options = new { responsive = true, maintainAspectRatio = false, plugins = new { title = new { display = true, text = $"Verification Values for {_selectedElement}" }, zoom = new { zoom = new { wheel = new { enabled = true }, pinch = new { enabled = true }, mode = "xy" }, pan = new { enabled = true, mode = "xy" } }, legend = new { display = true } }, xLabels = xLabels, scales = (yMin.HasValue && yMax.HasValue) ? new { x = new { min = -0.5, max = (double?)(crmIdOrder.Count - 0.5) }, y = new { min = (double?)(yMin.Value - (yMax.Value - yMin.Value) * 0.1), max = (double?)(yMax.Value + (yMax.Value - yMin.Value) * 0.1) } } : null }
+                data = new
+                {
+                    datasets = new object[] {
+            new { label = "Certificate Value", data = certPoints, backgroundColor = "green", pointStyle = "circle", pointRadius = 6 },
+            new { label = "Sample Value", data = samplePoints, backgroundColor = "blue", pointStyle = "triangle", rotation = 180, pointRadius = 7 },
+            new { label = "Acceptable Range", data = rangeData, borderColor = "red", borderWidth = 2, showLine = true, pointRadius = 0, fill = false, spanGaps = false }
+        }
+                },
+                options = new
+                {
+                    responsive = true,
+                    maintainAspectRatio = false,
+                    plugins = new
+                    {
+                        title = new { display = true, text = $"Verification Values for {_selectedElement}" },
+                        zoom = new { zoom = new { wheel = new { enabled = true }, pinch = new { enabled = true }, mode = "xy" }, pan = new { enabled = true, mode = "xy" } },
+                        legend = new { display = true }
+                    },
+                    xLabels = xLabels,
+                    scales = (yMin.HasValue && yMax.HasValue) ? new
+                    {
+                        x = new { min = -0.5, max = (double?)(crmIdOrder.Count - 0.5) },
+                        y = new { min = (double?)(yMin.Value - (yMax.Value - yMin.Value) * 0.1), max = (double?)(yMax.Value + (yMax.Value - yMin.Value) * 0.1) }
+                    } : null
+                }
             };
 
             try { await JS.InvokeVoidAsync("destroyChart", "verificationChart"); await JS.InvokeVoidAsync("createChart", "verificationChart", chartConfig); }
