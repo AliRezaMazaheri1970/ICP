@@ -242,9 +242,11 @@
                     <MudPaper Class="pa-3 custom-card">
                         <div class="section-header">All Acquisition Data — Original + New Value</div>
                         <MudTable Items="@_selectedSegmentSamples"
-          Dense="true"
-          Bordered="true"
-          Height="250px">
+                             Dense="true"
+                             Hover="true"
+                             Bordered="true"
+                             FixedHeader="true"
+                             Height="350px">
 
     <HeaderContent>
         <MudTh>Solution Label</MudTh>

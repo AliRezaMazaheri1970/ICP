@@ -133,7 +133,13 @@ namespace WebUI.Pages.Process
         {
             if (string.IsNullOrWhiteSpace(_selectedElement)) return;
 
-            var request = new AdvancedPivotRequest(ProjectId: projectId, SelectedElements: new List<string> { _selectedElement }, Page: 1, PageSize: 5000);
+            var request = new AdvancedPivotRequest(
+        ProjectId: projectId,
+        SelectedElements: new List<string> { _selectedElement },
+        Page: 1,
+        PageSize: 5000,
+        MergeRepeats: false // <--- این پارامتر کلید حل مشکل شماست
+    );
             var pivotResult = await PivotService.GetAdvancedPivotTableAsync(request);
 
             if (!pivotResult.Succeeded || pivotResult.Data is null) return;
@@ -167,18 +173,31 @@ namespace WebUI.Pages.Process
                             !r.SolutionLabel.Trim().StartsWith("CRM", StringComparison.OrdinalIgnoreCase))
                 .OrderBy(r => r.OriginalIndex).ToList();
 
+            //_allSamplePoints = allRows
+            //    .Where(r => !string.IsNullOrEmpty(r.SolutionLabel) &&
+            //        !r.SolutionLabel.Trim().StartsWith("RM", StringComparison.OrdinalIgnoreCase) &&
+            //        !r.SolutionLabel.Trim().StartsWith("CRM", StringComparison.OrdinalIgnoreCase) &&
+            //        !r.SolutionLabel.Trim().StartsWith("Blank", StringComparison.OrdinalIgnoreCase))
+            //    .Select(r => {
+            //        double value = 0;
+            //        if (r.Values != null && r.Values.TryGetValue(_selectedElement, out var v) && v.HasValue)
+            //            value = Convert.ToDouble(v.Value);
+            //        return new SamplePoint { Label = r.SolutionLabel, Orig = value, OriginalIndex = r.OriginalIndex };
+            //    }).Where(s => s.Orig > 0).ToList();
 
+
+            // 💡 اصلاح حیاتی ۲: CRM و Blank نباید اینجا فیلتر شوند تا در شمارش (n) لحاظ گردند
             _allSamplePoints = allRows
                 .Where(r => !string.IsNullOrEmpty(r.SolutionLabel) &&
-                    !r.SolutionLabel.Trim().StartsWith("RM", StringComparison.OrdinalIgnoreCase) &&
-                    !r.SolutionLabel.Trim().StartsWith("CRM", StringComparison.OrdinalIgnoreCase) &&
-                    !r.SolutionLabel.Trim().StartsWith("Blank", StringComparison.OrdinalIgnoreCase))
+                            !r.SolutionLabel.Trim().StartsWith(_rmKeyword, StringComparison.OrdinalIgnoreCase)) // فقط کلمه RM حذف شود
                 .Select(r => {
                     double value = 0;
                     if (r.Values != null && r.Values.TryGetValue(_selectedElement, out var v) && v.HasValue)
                         value = Convert.ToDouble(v.Value);
                     return new SamplePoint { Label = r.SolutionLabel, Orig = value, OriginalIndex = r.OriginalIndex };
-                }).Where(s => s.Orig > 0).ToList();
+                })
+                .Where(s => s.Orig > 0)
+                .ToList();
 
             if (rmRows.Count == 0)
             {
@@ -270,18 +289,22 @@ namespace WebUI.Pages.Process
                 double prevRatio = prevRm.Orig != 0 ? prevRm.Curr / prevRm.Orig : 1.0;
                 double currentRatio = nextRm.Orig != 0 ? nextRm.Curr / nextRm.Orig : 1.0;
 
-                int n = segmentSamples.Count;
-                if (n > 0)
+                double xStart = prevRm.OriginalIndex;
+                double xEnd = nextRm.OriginalIndex;
+
+                if (segmentSamples.Count > 0 && (xEnd - xStart) != 0)
                 {
-                    double z = (currentRatio - prevRatio) / n;
-                    for (int j = 0; j < n; j++)
+                    // 💡 محاسبه نقاط نمودار با همان فرمول دقیق
+                    foreach (var sample in segmentSamples)
                     {
-                        double ratio = (z * (j + 1)) + prevRatio;
-                        double adjusted = segmentSamples[j].Orig - _previewBlank;
+                        double xSample = sample.OriginalIndex;
+                        double ratio = prevRatio + (currentRatio - prevRatio) * ((xSample - xStart) / (xEnd - xStart));
+
+                        double adjusted = sample.Orig - _previewBlank;
                         double scaled = adjusted * _previewScale;
                         double correctedY = scaled * ratio;
 
-                        correctedData.Add(new { x = (double?)segmentSamples[j].OriginalIndex, y = (double?)correctedY, label = segmentSamples[j].Label });
+                        correctedData.Add(new { x = (double?)xSample, y = (double?)correctedY, label = sample.Label });
                     }
                 }
             }
@@ -677,7 +700,6 @@ namespace WebUI.Pages.Process
         private RMElement? _selectedRmRow;
         private List<SamplePoint> _selectedSegmentSamples = new();
 
-        
         private void OnRmSelected(RMElement? selected)
         {
             if (selected == null)
@@ -687,60 +709,60 @@ namespace WebUI.Pages.Process
             }
 
             _selectedRmRow = selected;
+            var visible = VisibleRmPoints;
+            var index = visible.IndexOf(selected);
 
-            var allOrdered = Elements
-                .OrderBy(e => e.OriginalIndex)
-                .ToList();
-
-            var index = allOrdered.IndexOf(selected);
-
-            if (index < 0 || index >= allOrdered.Count - 1)
+            // 💡 اصلاح حیاتی ۱: مانند پایتون، وقتی روی سطری کلیک شد، بازه بین "نقطه قبلی" و "نقطه کلیک شده" را بیاور
+            if (index <= 0 || index >= visible.Count)
             {
                 _selectedSegmentSamples.Clear();
                 return;
             }
 
-            var currentRm = allOrdered[index];
-            var nextRm = allOrdered[index + 1];
+            var prevRm = visible[index - 1]; // نقطه شروع (قبلی)
+            var currentRm = visible[index];  // نقطه پایان (فعلی)
 
             _selectedSegmentSamples = _allSamplePoints
-                .Where(s => s.OriginalIndex > currentRm.OriginalIndex &&
-                            s.OriginalIndex < nextRm.OriginalIndex)
+                .Where(s => s.OriginalIndex > prevRm.OriginalIndex &&
+                            s.OriginalIndex < currentRm.OriginalIndex)
                 .OrderBy(s => s.OriginalIndex)
                 .ToList();
         }
+
         private double GetCorrectedValue(SamplePoint sample)
-        {
-            if (_selectedRmRow == null)
-                return sample.Orig;
+{
+    if (_selectedRmRow == null) return sample.Orig;
 
-            var visible = VisibleRmPoints;
-            var index = visible.IndexOf(_selectedRmRow);
+    var visible = VisibleRmPoints;
+    var index = visible.IndexOf(_selectedRmRow);
 
-            if (index < 0 || index >= visible.Count - 1)
-                return sample.Orig;
+    // همانطور که در OnRmSelected درست کردیم، بازه بین i-1 و i است
+    if (index <= 0 || index >= visible.Count) return sample.Orig;
 
-            var prevRm = visible[index];
-            var nextRm = visible[index + 1];
+    var prevRm = visible[index - 1];
+    var currentRm = visible[index];
 
-            double prevRatio = prevRm.Orig != 0 ? prevRm.Curr / prevRm.Orig : 1.0;
-            double nextRatio = nextRm.Orig != 0 ? nextRm.Curr / nextRm.Orig : 1.0;
+    double prevRatio = prevRm.Orig != 0 ? prevRm.Curr / prevRm.Orig : 1.0;
+    double currentRatio = currentRm.Orig != 0 ? currentRm.Curr / currentRm.Orig : 1.0;
 
-            var segmentSamples = _selectedSegmentSamples;
-            int n = segmentSamples.Count;
-            if (n == 0) return sample.Orig;
+    var segmentSamples = _selectedSegmentSamples;
+    int n = segmentSamples.Count;
+    if (n == 0) return sample.Orig;
 
-            int sampleIndex = segmentSamples.IndexOf(sample);
-            if (sampleIndex < 0) return sample.Orig;
+    int sampleIndex = segmentSamples.IndexOf(sample);
+    if (sampleIndex < 0) return sample.Orig;
 
-            double z = (nextRatio - prevRatio) / n;
-            double ratio = (z * (sampleIndex + 1)) + prevRatio;
+    // 💡 اصلاح حیاتی ۳: فرمول دقیق پایتون (calculate_corrected_values_with_ratios)
+    double z = (currentRatio - prevRatio) / n;
+    
+    // در پایتون آرایه از 1 شروع می‌شود (np.arange(1, n+1))
+    double ratio = (z * (sampleIndex + 1)) + prevRatio;
 
-            double adjusted = sample.Orig - _previewBlank;
-            double scaled = adjusted * _previewScale;
+    double adjusted = sample.Orig - _previewBlank;
+    double scaled = adjusted * _previewScale;
 
-            return scaled * ratio;
-        }
+    return scaled * ratio;
+}
 
         private List<RMElement> _visibleRmPoints = new();
 
